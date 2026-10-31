@@ -10,7 +10,7 @@ This guide walks you through setting up and configuring the FoundryVTT Model Con
 - **Node.js 18+** or **Bun** installed.
 - **FoundryVTT v11+ / v12+** running with an **active world** (not on the world selection/setup screen).
 - An MCP client (Claude Desktop, Claude Code, Oh My Pi, VS Code, Cursor).
-- **Google Chrome or Microsoft Edge installed**, for the automatic headless GM browser session (step 4) — most desktops already have one.
+- **A Chromium-based browser installed**, for the automatic headless GM browser session (step 4): Google Chrome or Microsoft Edge are detected automatically; any other Chromium browser (Brave, Vivaldi…) works through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`.
 
 ### 2. Set Up a Dedicated Foundry User
 In FoundryVTT:
@@ -41,7 +41,15 @@ With the module installed and `FOUNDRY_MODULE_BRIDGE_ENABLED=true` (off by defau
 
 The session is self-healing: a watchdog polls the bridge's own connectivity every 20s (independently of whether the Foundry login itself is still active) and force-reloads the tab if it stays disconnected for ~60s. This recovers the module's WebSocket even when the browser session never actually logs out — the module's own client-side reconnect logic gives up permanently after ~85 minutes of failed attempts, and a full page reload gives it a fresh start rather than requiring a server restart.
 
-This step needs nothing from you beyond Chrome/Edge being installed. To opt out and manage a GM browser tab yourself instead, set `FOUNDRY_HEADLESS_GM_ENABLED=false`.
+This step needs nothing from you beyond a browser being available. The server tries Google Chrome, then Microsoft Edge, then Playwright's own Chromium — the latter is not bundled and must be downloaded once with `npx playwright install chromium`. To use another Chromium-based browser (Brave, Vivaldi…), set `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` to its executable; in a JSON client configuration, double the Windows backslashes:
+
+```json
+"FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH": "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
+```
+
+The headless browser is launched with Chromium's local network access checks disabled, so the module can reach the bridge on `ws://localhost` even when Foundry is served from a public address (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#module-bridge-never-connects--websocket--failed)).
+
+To opt out and manage a GM browser tab yourself instead, set `FOUNDRY_HEADLESS_GM_ENABLED=false`.
 
 ---
 
@@ -60,7 +68,7 @@ Copy `.env.example` to `.env` in the server root and configure:
 | `FOUNDRY_HEADLESS_GM_ENABLED` | No | `true` | Auto-launches an invisible GM-tier browser session to host the module bridge |
 | `FOUNDRY_HEADLESS_GM_USERNAME` | No | `FOUNDRY_USERNAME` | Overrides which account the headless session logs in as |
 | `FOUNDRY_HEADLESS_GM_PASSWORD` | No | `FOUNDRY_PASSWORD` | Password for the headless session account, if overridden |
-| `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` | No | — | Explicit Chrome/Edge/Chromium binary path, skipping auto-detection |
+| `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` | No | — | Path to any Chromium-based browser binary (Chrome, Edge, Brave, Vivaldi…), skipping auto-detection |
 | `FOUNDRY_DATA_PATH` | No | — | Local filesystem path to Foundry `Data/` directory |
 | `FOUNDRY_API_KEY` | No | — | Optional REST API module key for server diagnostics |
 | `FOUNDRY_EVENT_BUFFER_SIZE` | No | `500` | In-memory event log ring buffer capacity |
@@ -140,7 +148,8 @@ Copy `.env.example` to `.env` in the server root and configure:
 
 - **Socket.IO Authentication Failed**: Double-check that the Foundry world is active, the username is exact (case-sensitive), and the password matches.
 - **Companion Bridge Not Connecting**: Check `get_health_status` — it reports both bridge connectivity and the headless session's own status line. Ensure the module is enabled in Foundry's module manager, and that `FOUNDRY_MODULE_BRIDGE_PORT` matches the port configured in the module's settings (default: 31415).
-- **Headless GM session: "No usable browser found"**: Install Google Chrome or Microsoft Edge, or set `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` to a browser binary.
+- **Headless GM session: "No usable browser found"**: Install Google Chrome or Microsoft Edge, set `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` to any Chromium-based browser binary (Brave, Vivaldi…), or download Playwright's Chromium with `npx playwright install chromium`.
+- **Bridge never connects, browser console shows `WebSocket connection to 'ws://localhost:31415/' failed`**: The browser is blocking the Foundry page (a public origin) from reaching `localhost` — Chromium's local network access protection, plus Brave's own localhost-access permission. The headless session disables these checks itself; for a GM tab you open by hand, allow the Foundry site in the browser's site settings (Chrome/Edge: **Local network access**; Brave: **Localhost access**). See [TROUBLESHOOTING.md](TROUBLESHOOTING.md#module-bridge-never-connects--websocket--failed).
 - **Headless GM session: "No user named ... is registered in this world's join list"**: The account named in `FOUNDRY_USERNAME`/`FOUNDRY_HEADLESS_GM_USERNAME` doesn't exist in this world, or the world is on the setup screen rather than active. Verify step 2 above and that Foundry shows the world as loaded.
 - **Bridge was connected earlier and stops working, with the headless session still showing "Logged in"**: The module's own WebSocket dropped independently of the Foundry login (rare, but possible). This self-heals automatically within ~60s (the watchdog force-reloads the tab) — if `get_health_status` still shows it disconnected after a couple of minutes, check the server logs for a reload failure and restart the MCP server process as a fallback.
 - **A human plays as Player but capture_scene/set_pause/upload_asset still report unavailable**: The companion module only connects for a GM/Assistant-GM `game.user.isGM` session — a Foundry-core restriction (canvas fog of war, `game.togglePause()`, `FilePicker.upload()` are all GM-gated), not something this server can bypass. The headless GM session exists precisely so a human can log in as a **Player** while `mcp-api` (or `FOUNDRY_HEADLESS_GM_USERNAME`) supplies that GM-tier session automatically in the background; check `get_health_status` if it still isn't connecting.

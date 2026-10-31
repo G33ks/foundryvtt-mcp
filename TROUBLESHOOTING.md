@@ -123,6 +123,20 @@ The server provides detailed diagnostics on startup. Look for:
 1. **Check formula**: Ensure dice notation is valid (e.g., "1d20+5", "3d6")
 2. **FoundryVTT version**: Ensure FoundryVTT version 11+ for best compatibility
 
+#### Module Bridge Never Connects / "WebSocket ... failed"
+**Symptoms**: `get_health_status` keeps reporting the module bridge as disconnected (canvas tools such as `capture_scene` say no module is connected), even though the server logs `Module bridge listening on ws://localhost:31415` and the GM session is logged in. The browser console of the GM tab shows `WebSocket connection to 'ws://localhost:31415/' failed`, with no further detail.
+
+**Cause**: The companion module runs inside the Foundry page, served from `FOUNDRY_URL`, and dials the bridge on `localhost`. When Foundry is reached through a public address, recent Chromium-based browsers treat this as a public site reaching into the local machine and block it: Chromium's Local Network Access (formerly Private Network Access) asks for a permission first, and Brave adds its own "localhost access" permission. Until that permission is granted the connection is refused silently.
+
+**Solutions**:
+1. **Automatic headless GM session**: Nothing to do — the server launches its headless browser with these checks disabled (a throwaway browser with a fresh profile that only loads `FOUNDRY_URL`). If it still fails, check that the bridge port matches the module setting and look for errors in the server logs.
+2. **GM tab opened by hand** (`FOUNDRY_HEADLESS_GM_ENABLED=false`): Grant the Foundry site access to the local machine — accept the prompt if the browser shows one, or open the site settings from the icon left of the address bar:
+   - **Chrome / Edge**: allow **Local network access**
+   - **Brave**: allow **Localhost access**
+
+   Then reload the Foundry tab.
+3. **Check the bridge itself**: If the server log has no `Module bridge listening` line, the port may already be in use or `FOUNDRY_MODULE_BRIDGE_ENABLED` is `false`.
+
 #### Diagnostics Tools Not Working
 **Symptoms**: Health monitoring and log tools fail
 **Solutions**:

@@ -76,7 +76,7 @@ The server employs a hybrid architecture to deliver real-time responsiveness and
 
 1. **Socket.IO Primary Connection**: Connects to FoundryVTT as an authenticated user (`mcp-api`). Automatically synchronizes and caches the world state, enabling instant lookups and high-frequency document mutations via the `modifyDocument` protocol.
 2. **Companion Module Bridge (`foundryvtt-mcp-bridge`)**: A lightweight Foundry module running in a browser that executes canvas-bound operations (PIXI canvas screenshot with grid overlay, native `Roll` chat card rendering, document schema introspection, and compendium item extraction). It only activates for a GM/Assistant-GM user — Foundry itself restricts pausing the game and uploading files to that tier, and a Player's canvas is fog-of-war-limited.
-3. **Automatic Headless GM Session**: The server drives its own invisible, background browser tab (via `playwright-core`, reusing whatever Chrome/Edge is already installed — no download required) that logs in as the same `mcp-api` account and hosts the module above. This means a human can play the game as a normal Player in their own visible client while the AI has full GM-tier canvas access through this separate, invisible session — no manual second browser tab required. A watchdog polls the bridge's own connectivity independently of the Foundry login state and force-reloads the tab to recover a dropped module WebSocket (the module's own reconnect logic gives up permanently after ~85 minutes) — self-healing without a server restart. Falls back gracefully (canvas-only tools report unavailable) if no browser is found; a manually-opened GM tab still works as before if preferred (set `FOUNDRY_HEADLESS_GM_ENABLED=false`).
+3. **Automatic Headless GM Session**: The server drives its own invisible, background browser tab (via `playwright-core`, reusing whatever Chrome/Edge is already installed, or any Chromium-based browser such as Brave or Vivaldi set through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`; without either it falls back to Playwright's own Chromium, which requires a one-time `npx playwright install chromium`) that logs in as the same `mcp-api` account and hosts the module above. This means a human can play the game as a normal Player in their own visible client while the AI has full GM-tier canvas access through this separate, invisible session — no manual second browser tab required. A watchdog polls the bridge's own connectivity independently of the Foundry login state and force-reloads the tab to recover a dropped module WebSocket (the module's own reconnect logic gives up permanently after ~85 minutes) — self-healing without a server restart. Falls back gracefully (canvas-only tools report unavailable) if no browser is found; a manually-opened GM tab still works as before if preferred (set `FOUNDRY_HEADLESS_GM_ENABLED=false`).
 4. **Optional REST API Module**: Provides server diagnostics, log retrieval, and health reporting when the local REST module is installed.
 
 ---
@@ -88,7 +88,7 @@ The server employs a hybrid architecture to deliver real-time responsiveness and
 - **Node.js 18+** or **Bun**
 - **FoundryVTT v11+ / v12+** running an active world
 - A dedicated Foundry user account with **Gamemaster** or **Assistant GM** role
-- **Google Chrome or Microsoft Edge installed** (for the automatic headless GM browser session — see below; most desktops already have one)
+- **A Chromium-based browser installed** (for the automatic headless GM browser session — see below): Google Chrome or Microsoft Edge are detected automatically; any other Chromium browser (Brave, Vivaldi…) works through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`
 
 ### 2. Configure Dedicated Foundry User
 
@@ -134,12 +134,24 @@ In FoundryVTT, go to **Manage Modules** and enable **FoundryVTT MCP Bridge**.
 | `FOUNDRY_HEADLESS_GM_ENABLED` | No | `true` | Auto-launches an invisible GM-tier browser session to host the module bridge — no manual second browser tab needed |
 | `FOUNDRY_HEADLESS_GM_USERNAME` | No | `FOUNDRY_USERNAME` | Overrides which account the headless session logs in as |
 | `FOUNDRY_HEADLESS_GM_PASSWORD` | No | `FOUNDRY_PASSWORD` | Password for the headless session account, if overridden |
-| `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` | No | — | Explicit Chrome/Edge/Chromium binary path, skipping auto-detection |
+| `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` | No | — | Path to any Chromium-based browser binary (Chrome, Edge, Brave, Vivaldi…), skipping auto-detection |
 | `FOUNDRY_DATA_PATH` | No | — | Local path to Foundry `Data/` for asset dimension discovery |
 | `FOUNDRY_API_KEY` | No | — | Optional REST API key for server diagnostics tools |
 | `FOUNDRY_EVENT_BUFFER_SIZE` | No | `500` | In-memory event log ring buffer capacity |
 | `FOUNDRY_EVENT_WAIT_MS` | No | `25000` | Default long-polling timeout for `watch_events` |
 | `LOG_LEVEL` | No | `info` | Logging verbosity (`debug`, `info`, `warn`, `error`) |
+
+#### Choosing the Headless GM Browser
+
+Without `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`, the server tries Google Chrome, then Microsoft Edge, then Playwright's own Chromium (only present after `npx playwright install chromium`). To use another Chromium-based browser such as Brave or Vivaldi, point the variable at its executable. In a JSON client configuration, Windows backslashes must be doubled:
+
+```json
+"env": {
+  "FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH": "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
+}
+```
+
+Forward slashes (`C:/Program Files/...`) also work and need no escaping. The headless browser is launched with Chromium's local network access checks disabled so the module can reach `ws://localhost` from the Foundry page — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#module-bridge-never-connects--websocket--failed).
 
 ### Claude Desktop Configuration
 
