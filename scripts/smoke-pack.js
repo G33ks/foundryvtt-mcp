@@ -31,7 +31,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -133,7 +133,10 @@ function validateFilesEntries() {
       fail(`package.json "files" entry "${entry}" — root dir does not exist: ${rootDir}`);
     }
     const re = globToRegExp(cleaned);
-    const matches = walk(rootDir).some((abs) => re.test(relative(repoRoot, abs)));
+    // Globs use '/'; relative() returns '\'-separated paths on Windows.
+    const matches = walk(rootDir).some((abs) =>
+      re.test(relative(repoRoot, abs).split(sep).join('/')),
+    );
     if (!matches) {
       fail(`package.json "files" entry "${entry}" matched zero files`);
     }
@@ -142,11 +145,21 @@ function validateFilesEntries() {
   console.log(`✅ All ${checked.length} "files" entries reference existing paths or globs`);
 }
 
+// npm is a .cmd shim on Windows, which Node only spawns through a shell —
+// quote the arguments so temp paths containing spaces survive it.
+const isWindows = process.platform === 'win32';
+function runNpm(args, options) {
+  return spawnSync(isWindows ? 'npm.cmd' : 'npm', isWindows ? args.map((a) => `"${a}"`) : args, {
+    ...options,
+    shell: isWindows,
+  });
+}
+
 // ── 2. Pack ───────────────────────────────────────────────────────────────
 function packTarball() {
   const tmp = mkdtempSync(join(tmpdir(), 'foundryvtt-mcp-pack-'));
   registerCleanup(tmp);
-  const result = spawnSync('npm', ['pack', '--pack-destination', tmp, '--json'], {
+  const result = runNpm(['pack', '--pack-destination', tmp, '--json'], {
     cwd: repoRoot,
     encoding: 'utf8',
   });
@@ -156,7 +169,11 @@ function packTarball() {
   let tarballName;
   try {
     const packInfo = JSON.parse(result.stdout);
-    tarballName = Array.isArray(packInfo) ? packInfo[0]?.filename : packInfo?.filename;
+    // Older npm prints an array of entries; newer npm keys them by package name.
+    const entry = Array.isArray(packInfo)
+      ? packInfo[0]
+      : (packInfo?.[pkgJson.name] ?? packInfo);
+    tarballName = entry?.filename;
   } catch (err) {
     fail(`failed to parse npm pack --json output: ${err.message}`, result.stdout);
   }
@@ -182,8 +199,7 @@ function installInConsumer(tarball) {
     `${JSON.stringify({ name: 'foundryvtt-mcp-pack-test', version: '0.0.0', private: true }, null, 2)}\n`,
   );
 
-  const install = spawnSync(
-    'npm',
+  const install = runNpm(
     ['install', '--no-audit', '--no-fund', '--ignore-scripts', '--loglevel=error', tarball],
     { cwd: consumer, encoding: 'utf8' },
   );
@@ -212,7 +228,8 @@ function runInstalledServer({ consumer, serverPath }) {
         FOUNDRY_PASSWORD: 'smoke',
         LOG_LEVEL: 'error',
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // Keep stdin open like a real MCP client: the server exits when stdin closes.
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
 
     let stderr = '';
