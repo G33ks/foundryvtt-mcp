@@ -37,7 +37,7 @@ cp -r foundry-module "~/.local/share/FoundryVTT/Data/modules/foundryvtt-mcp-brid
 In FoundryVTT, go to **Manage Modules** and check **FoundryVTT MCP Bridge**.
 
 ### 4. Automatic Headless GM Session (no manual browser tab needed)
-With the module installed and `FOUNDRY_MODULE_BRIDGE_ENABLED=true` (default), the server automatically launches its own invisible background browser tab, logs into Foundry as `mcp-api` (the same account from step 2), and hosts the companion module there. This gives the AI full GM-tier canvas access (screenshots, dice rolls, pausing, file uploads) while a **human can log into their own visible Foundry client as a normal Player** — no fog-of-war spoilers, no extra setup.
+With the module installed and `FOUNDRY_MODULE_BRIDGE_ENABLED=true` (off by default — set it explicitly), the server automatically launches its own invisible background browser tab, logs into Foundry as `mcp-api` (the same account from step 2), and hosts the companion module there. This gives the AI full GM-tier canvas access (screenshots, dice rolls, pausing, file uploads) while a **human can log into their own visible Foundry client as a normal Player** — no fog-of-war spoilers, no extra setup.
 
 The session is self-healing: a watchdog polls the bridge's own connectivity every 20s (independently of whether the Foundry login itself is still active) and force-reloads the tab if it stays disconnected for ~60s. This recovers the module's WebSocket even when the browser session never actually logs out — the module's own client-side reconnect logic gives up permanently after ~85 minutes of failed attempts, and a full page reload gives it a fresh start rather than requiring a server restart.
 
@@ -54,8 +54,8 @@ Copy `.env.example` to `.env` in the server root and configure:
 | `FOUNDRY_URL` | **Yes** | `http://localhost:30000` | FoundryVTT server URL |
 | `FOUNDRY_USERNAME` | **Yes** | — | Dedicated user account name |
 | `FOUNDRY_PASSWORD` | **Yes** | — | Dedicated user password |
-| `FOUNDRY_WRITE_ENABLED` | No | `true` | Enables game-state mutations (walls, lights, tokens, items) |
-| `FOUNDRY_MODULE_BRIDGE_ENABLED` | No | `true` | Enables WebSocket bridge for canvas screenshots & chat rolls |
+| `FOUNDRY_WRITE_ENABLED` | No | `false` | Enables game-state mutations (walls, lights, tokens, items) |
+| `FOUNDRY_MODULE_BRIDGE_ENABLED` | No | `false` | Enables WebSocket bridge for canvas screenshots & chat rolls |
 | `FOUNDRY_MODULE_BRIDGE_PORT` | No | `31415` | WebSocket port for the companion bridge |
 | `FOUNDRY_HEADLESS_GM_ENABLED` | No | `true` | Auto-launches an invisible GM-tier browser session to host the module bridge |
 | `FOUNDRY_HEADLESS_GM_USERNAME` | No | `FOUNDRY_USERNAME` | Overrides which account the headless session logs in as |

@@ -128,8 +128,8 @@ In FoundryVTT, go to **Manage Modules** and enable **FoundryVTT MCP Bridge**.
 | `FOUNDRY_URL` | **Yes** | `http://localhost:30000` | FoundryVTT server URL |
 | `FOUNDRY_USERNAME` | **Yes** | — | FoundryVTT user account name |
 | `FOUNDRY_PASSWORD` | **Yes** | — | FoundryVTT user account password |
-| `FOUNDRY_WRITE_ENABLED` | No | `true` | Enables game-state mutations (walls, actors, tokens, etc.) |
-| `FOUNDRY_MODULE_BRIDGE_ENABLED` | No | `true` | Enables WebSocket bridge for canvas screenshots & chat rolls |
+| `FOUNDRY_WRITE_ENABLED` | No | `false` | Enables game-state mutations (walls, actors, tokens, etc.) |
+| `FOUNDRY_MODULE_BRIDGE_ENABLED` | No | `false` | Enables WebSocket bridge for canvas screenshots & chat rolls |
 | `FOUNDRY_MODULE_BRIDGE_PORT` | No | `31415` | WebSocket port for the companion module bridge |
 | `FOUNDRY_HEADLESS_GM_ENABLED` | No | `true` | Auto-launches an invisible GM-tier browser session to host the module bridge — no manual second browser tab needed |
 | `FOUNDRY_HEADLESS_GM_USERNAME` | No | `FOUNDRY_USERNAME` | Overrides which account the headless session logs in as |
