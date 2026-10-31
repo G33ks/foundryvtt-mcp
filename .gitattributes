@@ -1,0 +1,3 @@
+# Keep LF in the working tree on every platform: Biome's formatter expects LF,
+# and core.autocrlf=true on Windows otherwise checks files out as CRLF.
+* text=auto eol=lf
