@@ -43,7 +43,7 @@ export interface CacheConfig {
  * Simple in-memory cache with TTL and LRU eviction
  */
 export class CacheService {
-  private cache = new Map<string, CacheEntry<any>>();
+  private cache = new Map<string, CacheEntry<unknown>>();
   private stats = {
     hits: 0,
     misses: 0,
@@ -103,7 +103,7 @@ export class CacheService {
 
     this.stats.hits++;
     logger.debug('Cache hit', { key, accessCount: entry.accessCount });
-    return entry.value;
+    return entry.value as T;
   }
 
   /**

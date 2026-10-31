@@ -629,7 +629,7 @@ export async function handleUploadAsset(
         mimeType = MIME_EXTENSIONS[ext] ?? 'application/octet-stream';
       }
     } else {
-      base64Payload = contentBase64!;
+      base64Payload = contentBase64 ?? '';
       const estimatedBytes = Math.ceil((base64Payload.length * 3) / 4);
       if (estimatedBytes > MAX_UPLOAD_BYTES) {
         throw new McpError(

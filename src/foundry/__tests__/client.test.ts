@@ -34,22 +34,24 @@ const { FoundryClient } = await import('../client.js');
 
 const mockAxios = vi.mocked(axios);
 
+const createMockAxiosInstance = () => ({
+  get: vi.fn(),
+  post: vi.fn(),
+  put: vi.fn(),
+  delete: vi.fn(),
+  request: vi.fn(),
+  interceptors: {
+    request: { use: vi.fn() },
+    response: { use: vi.fn() },
+  },
+});
+
 describe('FoundryClient', () => {
   let client: InstanceType<typeof FoundryClient>;
-  let mockAxiosInstance: any;
+  let mockAxiosInstance: ReturnType<typeof createMockAxiosInstance>;
 
   beforeEach(() => {
-    mockAxiosInstance = {
-      get: vi.fn(),
-      post: vi.fn(),
-      put: vi.fn(),
-      delete: vi.fn(),
-      request: vi.fn(),
-      interceptors: {
-        request: { use: vi.fn() },
-        response: { use: vi.fn() },
-      },
-    };
+    mockAxiosInstance = createMockAxiosInstance();
 
     vi.clearAllMocks();
     mockAxios.create = vi.fn().mockReturnValue(mockAxiosInstance);
@@ -536,12 +538,12 @@ describe('FoundryClient', () => {
       expect(page1.actors[0]?.name).toBe('Actor 1');
       expect(page1.nextCursor).not.toBeNull();
 
-      const page2 = await client.searchActors({ limit: 10, cursor: page1.nextCursor! });
+      const page2 = await client.searchActors({ limit: 10, cursor: page1.nextCursor ?? undefined });
       expect(page2.actors).toHaveLength(10);
       expect(page2.actors[0]?.name).toBe('Actor 11');
       expect(page2.nextCursor).not.toBeNull();
 
-      const page3 = await client.searchActors({ limit: 10, cursor: page2.nextCursor! });
+      const page3 = await client.searchActors({ limit: 10, cursor: page2.nextCursor ?? undefined });
       expect(page3.actors).toHaveLength(5);
       expect(page3.actors[0]?.name).toBe('Actor 21');
       expect(page3.nextCursor).toBeNull();

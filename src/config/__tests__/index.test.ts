@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest';
 
 // Mock process.env before importing the config
 const mockEnv = {
@@ -21,7 +21,7 @@ const mockEnv = {
 
 describe('Config', () => {
   let originalEnv: NodeJS.ProcessEnv;
-  let exitSpy: any;
+  let exitSpy: MockInstance<typeof process.exit>;
 
   beforeEach(async () => {
     originalEnv = process.env;

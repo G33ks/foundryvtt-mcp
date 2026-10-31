@@ -28,22 +28,24 @@ const { logger } = await import('../utils/logger.js');
 
 const mockAxios = vi.mocked(axios);
 
+const createMockAxiosInstance = () => ({
+  get: vi.fn(),
+  post: vi.fn(),
+  put: vi.fn(),
+  delete: vi.fn(),
+  request: vi.fn(),
+  interceptors: {
+    request: { use: vi.fn() },
+    response: { use: vi.fn() },
+  },
+});
+
 describe('Integration Tests', () => {
   let client: InstanceType<typeof FoundryClient>;
-  let mockAxiosInstance: any;
+  let mockAxiosInstance: ReturnType<typeof createMockAxiosInstance>;
 
   beforeEach(() => {
-    mockAxiosInstance = {
-      get: vi.fn(),
-      post: vi.fn(),
-      put: vi.fn(),
-      delete: vi.fn(),
-      request: vi.fn(),
-      interceptors: {
-        request: { use: vi.fn() },
-        response: { use: vi.fn() },
-      },
-    };
+    mockAxiosInstance = createMockAxiosInstance();
 
     vi.clearAllMocks();
     mockAxios.create = vi.fn().mockReturnValue(mockAxiosInstance);
