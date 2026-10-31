@@ -70,7 +70,8 @@ const childEnv = Object.fromEntries(
 const child = spawn('node', [serverPath], {
   cwd: workDir,
   env: childEnv,
-  stdio: ['ignore', 'pipe', 'pipe'],
+  // Keep stdin open like a real MCP client: the server exits when stdin closes.
+  stdio: ['pipe', 'pipe', 'pipe'],
 });
 
 let stderr = '';

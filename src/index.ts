@@ -332,8 +332,9 @@ async function main(): Promise<void> {
     shuttingDown = true;
     logger.info(`${reason}, shutting down gracefully...`);
     // Never let a hung cleanup step (e.g. the headless browser) keep the
-    // process alive: force the exit after a grace period.
-    setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();
+    // process alive: force the exit after a grace period, with a non-zero
+    // code so a hung shutdown is distinguishable from a clean one.
+    setTimeout(() => process.exit(1), SHUTDOWN_GRACE_MS).unref();
     await server.shutdown();
     process.exit(0);
   };
