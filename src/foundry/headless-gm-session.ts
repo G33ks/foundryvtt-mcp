@@ -208,25 +208,31 @@ export class HeadlessGmSession {
     try {
       const joinUrl = new URL('/join', this.options.foundryUrl).toString();
       await this.page.goto(joinUrl, { waitUntil: 'domcontentloaded' });
-      await this.page.waitForSelector('select[name="userid"]', {
+      // FoundryVTT v14 renamed the join form's user list from `userid` (v13)
+      // to `userId` (camelCase), so match either.
+      const userSelectSelector = 'select[name="userId"], select[name="userid"]';
+      await this.page.waitForSelector(userSelectSelector, {
         timeout: JOIN_SELECTOR_TIMEOUT_MS,
       });
 
-      const selected = await this.page.evaluate((username: string) => {
-        const select = document.querySelector<HTMLSelectElement>('select[name="userid"]');
-        if (!select) {
-          return false;
-        }
-        const option = Array.from(select.options).find(
-          (o) => o.text.trim().toLowerCase() === username.trim().toLowerCase(),
-        );
-        if (!option) {
-          return false;
-        }
-        select.value = option.value;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
-      }, this.options.username);
+      const selected = await this.page.evaluate(
+        ({ username, selector }: { username: string; selector: string }) => {
+          const select = document.querySelector<HTMLSelectElement>(selector);
+          if (!select) {
+            return false;
+          }
+          const option = Array.from(select.options).find(
+            (o) => o.text.trim().toLowerCase() === username.trim().toLowerCase(),
+          );
+          if (!option) {
+            return false;
+          }
+          select.value = option.value;
+          select.dispatchEvent(new Event('change', { bubbles: true }));
+          return true;
+        },
+        { username: this.options.username, selector: userSelectSelector },
+      );
 
       if (!selected) {
         throw new Error(
@@ -234,7 +240,13 @@ export class HeadlessGmSession {
         );
       }
 
-      const passwordInput = await this.page.$('input[type="password"]');
+      // FoundryVTT v14's join form has two password fields: the player
+      // `password` and the world's `adminPassword`. Target the player field by
+      // name and never touch `adminPassword`; fall back to the first password
+      // input only for forms without a named `password` field.
+      const passwordInput =
+        (await this.page.$('input[name="password"]')) ??
+        (await this.page.$('input[type="password"]'));
       if (passwordInput) {
         await passwordInput.fill(this.options.password);
       }

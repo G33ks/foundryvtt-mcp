@@ -290,6 +290,111 @@ describe('HeadlessGmSession', () => {
     expect(page.goto).toHaveBeenCalledTimes(1);
   });
 
+  describe('join form compatibility', () => {
+    /**
+     * Wires a fake `/join` form into a fake page: `waitForSelector`, `$` and
+     * `evaluate` resolve against named elements, and `evaluate` runs the real
+     * in-page callback against a stubbed `document`.
+     */
+    function withJoinForm(
+      page: FakePage,
+      form: { userSelectName: string; users: string[]; passwordFields: string[] },
+    ) {
+      const select = {
+        value: '',
+        options: form.users.map((name, i) => ({ text: name, value: `id-${i}` })),
+        dispatchEvent: vi.fn(),
+      };
+      const elements = new Map<string, unknown>([
+        [`select[name="${form.userSelectName}"]`, select],
+      ]);
+      const passwordInputs = new Map<string, ReturnType<typeof fakeElementHandle>>();
+      for (const name of form.passwordFields) {
+        const input = fakeElementHandle();
+        passwordInputs.set(name, input);
+        elements.set(`input[name="${name}"]`, input);
+      }
+      const firstPassword = passwordInputs.values().next().value;
+      if (firstPassword) {
+        elements.set('input[type="password"]', firstPassword);
+      }
+      const query = (selector: string) =>
+        selector
+          .split(',')
+          .map((s) => elements.get(s.trim()))
+          .find((el) => el !== undefined) ?? null;
+
+      page.waitForSelector.mockImplementation(async (selector: string) => {
+        if (!query(selector)) {
+          throw new Error(`Timeout waiting for ${selector}`);
+        }
+      });
+      page.$.mockImplementation(async (selector: string) => query(selector));
+      page.evaluate.mockImplementation(async (fn: (arg: unknown) => unknown, arg: unknown) => {
+        vi.stubGlobal('document', { querySelector: query });
+        try {
+          return fn(arg);
+        } finally {
+          vi.unstubAllGlobals();
+        }
+      });
+      return { select, passwordInputs };
+    }
+
+    async function loginWith(form: {
+      userSelectName: string;
+      users: string[];
+      passwordFields: string[];
+    }) {
+      const state = {
+        url: 'http://localhost:30000/join',
+        evaluateResult: true,
+        succeedOnClick: true,
+      };
+      const page = fakePage(state);
+      const dom = withJoinForm(page, form);
+      launchMock.mockResolvedValue(fakeBrowser(page));
+
+      const session = new HeadlessGmSession({
+        foundryUrl: 'http://localhost:30000',
+        username: 'mcp-api',
+        password: 'mcp',
+      });
+      await session.start();
+      await vi.advanceTimersByTimeAsync(0);
+      return { session, page, ...dom };
+    }
+
+    it('logs in through a v13 form (select[name="userid"])', async () => {
+      const { session, page, select, passwordInputs } = await loginWith({
+        userSelectName: 'userid',
+        users: ['Gamemaster', 'mcp-api', 'Player'],
+        passwordFields: ['password'],
+      });
+
+      expect(session.isActive()).toBe(true);
+      expect(select.value).toBe('id-1');
+      expect(passwordInputs.get('password')?.fill).toHaveBeenCalledWith('mcp');
+      expect(page.click).toHaveBeenCalledWith('button[name="join"]');
+      await session.stop();
+    });
+
+    it('logs in through a v14 form (userId) and never fills adminPassword', async () => {
+      const { session, page, select, passwordInputs } = await loginWith({
+        userSelectName: 'userId',
+        users: ['Gamemaster', 'mcp-api', 'Player'],
+        passwordFields: ['password', 'adminPassword'],
+      });
+
+      expect(session.isActive()).toBe(true);
+      expect(select.value).toBe('id-1');
+      expect(passwordInputs.get('password')?.fill).toHaveBeenCalledWith('mcp');
+      expect(passwordInputs.get('adminPassword')?.fill).not.toHaveBeenCalled();
+      expect(page.click).toHaveBeenCalledWith('button[name="join"]');
+      await session.stop();
+    });
+  });
+
   describe('bridge-connectivity watchdog', () => {
     async function loggedInSession(isBridgeConnected: () => boolean) {
       const state = {
