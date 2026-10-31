@@ -47,7 +47,8 @@ const child = spawn('node', [serverPath], {
     FOUNDRY_PASSWORD: 'smoke',
     LOG_LEVEL: 'error',
   },
-  stdio: ['ignore', 'pipe', 'pipe'],
+  // Keep stdin open like a real MCP client: the server exits when stdin closes.
+  stdio: ['pipe', 'pipe', 'pipe'],
 });
 
 let stderr = '';

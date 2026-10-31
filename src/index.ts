@@ -306,6 +306,9 @@ class FoundryMCPServer {
   }
 }
 
+/** Maximum time graceful shutdown may take before the process is force-exited. */
+const SHUTDOWN_GRACE_MS = 5000;
+
 /**
  * Main entry point - creates and starts the server
  */
@@ -319,17 +322,40 @@ async function main(): Promise<void> {
   // call to FoundryVTT.
   process.stderr.write('🎲 FoundryVTT MCP Server starting...\n');
 
-  // Handle graceful shutdown
-  process.on('SIGINT', async () => {
-    logger.info('Received SIGINT, shutting down gracefully...');
+  // Handle graceful shutdown. Several triggers can fire for the same exit
+  // (e.g. stdin closing, then SIGTERM), so shut down exactly once.
+  let shuttingDown = false;
+  const shutdownAndExit = async (reason: string): Promise<void> => {
+    if (shuttingDown) {
+      return;
+    }
+    shuttingDown = true;
+    logger.info(`${reason}, shutting down gracefully...`);
+    // Never let a hung cleanup step (e.g. the headless browser) keep the
+    // process alive: force the exit after a grace period.
+    setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();
     await server.shutdown();
     process.exit(0);
+  };
+
+  process.on('SIGINT', () => {
+    void shutdownAndExit('Received SIGINT');
   });
 
-  process.on('SIGTERM', async () => {
-    logger.info('Received SIGTERM, shutting down gracefully...');
-    await server.shutdown();
-    process.exit(0);
+  process.on('SIGTERM', () => {
+    void shutdownAndExit('Received SIGTERM');
+  });
+
+  // MCP stdio clients signal shutdown by closing the server's stdin. On
+  // Windows no SIGTERM follows when the client exits, so without this the
+  // process lingers (kept alive by the Socket.IO connection, the module
+  // bridge's WebSocket server and the headless browser), keeps the bridge
+  // port bound and leaves the next instance without a module bridge.
+  process.stdin.on('end', () => {
+    void shutdownAndExit('stdin closed by the MCP client');
+  });
+  process.stdin.on('close', () => {
+    void shutdownAndExit('stdin closed by the MCP client');
   });
 
   process.on('uncaughtException', (error) => {
