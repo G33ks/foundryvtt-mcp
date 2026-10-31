@@ -17,8 +17,9 @@
  * nobody is logged in as GM anywhere).
  *
  * This class removes that step: it drives a headless Chromium/Chrome/Edge tab
- * (via `playwright-core`, no bundled browser download required — it launches
- * whatever Chrome/Edge is already installed) through Foundry's own `/join`
+ * (via `playwright-core` — it launches whatever Chrome/Edge is already
+ * installed, any Chromium-based browser given by an explicit executable path,
+ * or Playwright's own Chromium if it was downloaded) through Foundry's own `/join`
  * login form using the same account {@link FoundryClient} already
  * authenticates as, and keeps it logged in for as long as the server runs,
  * re-logging in automatically if Foundry kicks it back to `/join` (a world
@@ -48,6 +49,35 @@ import { logger } from '../utils/logger.js';
 
 /** Chrome/Edge release channels tried in order when no explicit path is configured. */
 const BROWSER_CHANNELS: Array<string | undefined> = ['chrome', 'msedge', undefined];
+
+/**
+ * Chromium features that stop the companion module from reaching
+ * {@link ModuleBridge}. The page is served from `FOUNDRY_URL` (often a public
+ * origin) while the bridge listens on `ws://localhost`, and recent Chromium
+ * builds block public → local requests: Local Network Access (and its
+ * predecessor, Private Network Access) gates them behind a permission prompt,
+ * and Brave adds its own "localhost access" permission. A headless browser
+ * cannot show or accept a prompt, so the WebSocket just fails with no detail.
+ *
+ * `LocalNetworkAccessChecks` alone unblocks current builds (verified on
+ * Brave 156); the Private Network Access and Brave flags cover older Chromium
+ * releases and Brave variants. Unknown feature names are silently ignored, so
+ * listing them all is harmless on any given browser.
+ *
+ * Disabling these checks is acceptable here because this browser is
+ * throwaway: a fresh, empty profile per launch that only ever loads
+ * `FOUNDRY_URL`, never arbitrary sites — the user's own browser keeps its
+ * protections.
+ */
+export const HEADLESS_BROWSER_ARGS: readonly string[] = [
+  `--disable-features=${[
+    'LocalNetworkAccessChecks',
+    'BlockInsecurePrivateNetworkRequests',
+    'PrivateNetworkAccessSendPreflights',
+    'PrivateNetworkAccessRespectPreflightResults',
+    'BraveLocalhostAccessPermission',
+  ].join(',')}`,
+];
 
 const JOIN_SELECTOR_TIMEOUT_MS = 20000;
 const LOGIN_NAV_TIMEOUT_MS = 15000;
@@ -162,15 +192,20 @@ export class HeadlessGmSession {
   }
 
   private async launchBrowser(): Promise<Browser> {
+    const args = [...HEADLESS_BROWSER_ARGS];
     if (this.options.executablePath) {
-      return chromium.launch({ headless: true, executablePath: this.options.executablePath });
+      return chromium.launch({
+        headless: true,
+        executablePath: this.options.executablePath,
+        args,
+      });
     }
 
     const attempts: string[] = [];
     for (const channel of BROWSER_CHANNELS) {
       try {
         return await chromium.launch(
-          channel !== undefined ? { headless: true, channel } : { headless: true },
+          channel !== undefined ? { headless: true, channel, args } : { headless: true, args },
         );
       } catch (error) {
         attempts.push(

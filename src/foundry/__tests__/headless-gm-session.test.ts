@@ -4,7 +4,7 @@
 
 import type { Mock } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HeadlessGmSession } from '../headless-gm-session.js';
+import { HEADLESS_BROWSER_ARGS, HeadlessGmSession } from '../headless-gm-session.js';
 
 const launchMock = vi.fn();
 vi.mock('playwright-core', () => ({
@@ -113,7 +113,11 @@ describe('HeadlessGmSession', () => {
     });
     await session.start();
 
-    expect(launchMock).toHaveBeenCalledWith({ headless: true, channel: 'chrome' });
+    expect(launchMock).toHaveBeenCalledWith({
+      headless: true,
+      channel: 'chrome',
+      args: HEADLESS_BROWSER_ARGS,
+    });
     await session.stop();
   });
 
@@ -134,9 +138,46 @@ describe('HeadlessGmSession', () => {
     });
     await session.start();
 
-    expect(launchMock).toHaveBeenNthCalledWith(1, { headless: true, channel: 'chrome' });
-    expect(launchMock).toHaveBeenNthCalledWith(2, { headless: true, channel: 'msedge' });
+    expect(launchMock).toHaveBeenNthCalledWith(1, {
+      headless: true,
+      channel: 'chrome',
+      args: HEADLESS_BROWSER_ARGS,
+    });
+    expect(launchMock).toHaveBeenNthCalledWith(2, {
+      headless: true,
+      channel: 'msedge',
+      args: HEADLESS_BROWSER_ARGS,
+    });
     await session.stop();
+  });
+
+  it('disables the local network access checks on every launch path', async () => {
+    launchMock.mockRejectedValue(new Error('not installed'));
+
+    const autoDetected = new HeadlessGmSession({
+      foundryUrl: 'http://localhost:30000',
+      username: 'mcp-api',
+      password: 'mcp',
+    });
+    await expect(autoDetected.start()).rejects.toThrow();
+
+    const explicit = new HeadlessGmSession({
+      foundryUrl: 'http://localhost:30000',
+      username: 'mcp-api',
+      password: 'mcp',
+      executablePath: 'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+    });
+    await expect(explicit.start()).rejects.toThrow();
+
+    // chrome, msedge, bundled chromium, then the explicit executable path.
+    expect(launchMock).toHaveBeenCalledTimes(4);
+    for (const [options] of launchMock.mock.calls) {
+      expect(options.args).toContain(
+        '--disable-features=LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,' +
+          'PrivateNetworkAccessSendPreflights,PrivateNetworkAccessRespectPreflightResults,' +
+          'BraveLocalhostAccessPermission',
+      );
+    }
   });
 
   it('throws with a clear message when no browser can be launched at all', async () => {
@@ -174,6 +215,7 @@ describe('HeadlessGmSession', () => {
     expect(launchMock).toHaveBeenCalledWith({
       headless: true,
       executablePath: '/opt/chrome/chrome',
+      args: HEADLESS_BROWSER_ARGS,
     });
     await session.stop();
   });
