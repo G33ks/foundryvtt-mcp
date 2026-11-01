@@ -301,6 +301,34 @@ describe('HeadlessGmSession shared mode', () => {
     await session.stop();
   });
 
+  it('stops reading as logged in when the page reloads /game into "No Active Game"', async () => {
+    const { session, env, src } = await startShared('cookie-1');
+    expect(session.isActive()).toBe(true);
+
+    // FoundryVTT restarted without a world: the page's client reloads /game,
+    // which answers its "No Active Game" page — no redirect, no `game`.
+    env.state.ready = false;
+    env.redirectTo('/game');
+    expect(session.isActive()).toBe(false);
+    expect(session.sessionState()).toBe('reconnecting');
+    await settle();
+
+    expect(src.source.reauthenticate).toHaveBeenCalledTimes(1);
+    expect(session.sessionState()).toBe('reauthenticating');
+    await session.stop();
+  });
+
+  it('reads as logged in again after the page reloaded /game with a world', async () => {
+    const { session, env, src } = await startShared('cookie-1');
+
+    env.redirectTo('/game');
+    await settle();
+
+    expect(session.isActive()).toBe(true);
+    expect(src.source.reauthenticate).not.toHaveBeenCalled();
+    await session.stop();
+  });
+
   it('retries /game with the same cookie when FoundryVTT cannot be reached', async () => {
     const env = fakeEnvironment();
     launchMock.mockResolvedValue(env.browser);

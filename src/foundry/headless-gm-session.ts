@@ -295,6 +295,17 @@ export class HeadlessGmSession {
         return;
       }
       const path = new URL(frame.url()).pathname;
+      if (sessionSource && path === '/game' && !this.loadingGame) {
+        // The page reloaded /game by itself (its client after a server
+        // restart, the bridge watchdog). With no world, FoundryVTT serves
+        // its "No Active Game" page there instead of redirecting: only
+        // `game.ready` tells.
+        this.active = false;
+        this.sharedState = 'reconnecting';
+        this.lastError = 'the page reloaded; waiting for the game';
+        this.enqueuePageTask(() => this.confirmGameReady());
+        return;
+      }
       if (!LOGGED_OUT_PATHS[path]) {
         return;
       }
@@ -492,34 +503,69 @@ export class HeadlessGmSession {
         this.onSessionRefused(`FoundryVTT redirected the page to ${path}`);
         return;
       }
-      const ready = await this.page
-        .waitForFunction(
-          () => (globalThis as { game?: { ready?: boolean } }).game?.ready === true,
-          null,
-          { timeout: GAME_READY_TIMEOUT_MS },
-        )
-        .then(
-          () => true,
-          () => false,
-        );
-      if (this.stopped) {
-        return;
-      }
-      if (!ready) {
-        this.onSessionRefused('the game never became ready (no active world?)');
-        return;
-      }
-      this.active = true;
-      this.sharedState = 'logged-in';
-      this.lastError = null;
-      this.retryDelayMs = BASE_RETRY_MS;
-      logger.info(`Headless GM session logged in — ${this.modeText()}`);
+      await this.awaitGameReady(true);
     } catch (error) {
       // The page could not load at all (network down, server restarting):
       // nothing says the cookie is bad, so keep it and try again.
       this.retryLoadGame(firstLine(errorText(error)));
     } finally {
       this.loadingGame = false;
+    }
+  }
+
+  /**
+   * Shared mode: after the page reloaded `/game` on its own, waits for
+   * the game again. Skipped when a load of ours started meanwhile.
+   */
+  private async confirmGameReady(): Promise<void> {
+    if (this.stopped || !this.page || this.active || this.loadingGame) {
+      return;
+    }
+    if (new URL(this.page.url()).pathname !== '/game') {
+      return;
+    }
+    this.loadingGame = true;
+    try {
+      await this.awaitGameReady(false);
+    } finally {
+      this.loadingGame = false;
+    }
+  }
+
+  /**
+   * Shared mode: `game.ready` within the timeout, or a request for a new session.
+   *
+   * @param announce - log the login even when the page already counted as
+   *   logged in (a load with a new cookie), not only after a loss
+   */
+  private async awaitGameReady(announce: boolean): Promise<void> {
+    if (!this.page) {
+      return;
+    }
+    const ready = await this.page
+      .waitForFunction(
+        () => (globalThis as { game?: { ready?: boolean } }).game?.ready === true,
+        null,
+        { timeout: GAME_READY_TIMEOUT_MS },
+      )
+      .then(
+        () => true,
+        () => false,
+      );
+    if (this.stopped) {
+      return;
+    }
+    if (!ready) {
+      this.onSessionRefused('the game never became ready (no active world?)');
+      return;
+    }
+    const wasLoggedIn = this.sharedState === 'logged-in';
+    this.active = true;
+    this.sharedState = 'logged-in';
+    this.lastError = null;
+    this.retryDelayMs = BASE_RETRY_MS;
+    if (announce || !wasLoggedIn) {
+      logger.info(`Headless GM session logged in — ${this.modeText()}`);
     }
   }
 
