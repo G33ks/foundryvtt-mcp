@@ -11,6 +11,7 @@
 import type { z } from 'zod';
 import type { FoundryClient } from '../foundry/client.js';
 import { logger } from '../utils/logger.js';
+import { RefusedError } from '../utils/refusal.js';
 import type { LogPatternSearchParams, LogSearchParams } from './types.js';
 import {
   ErrorDiagnosisSchema,
@@ -25,6 +26,29 @@ type LogResponse = z.infer<typeof LogResponseSchema>;
 type LogSearchResponse = z.infer<typeof LogSearchResponseSchema>;
 type SystemHealth = z.infer<typeof SystemHealthSchema>;
 type ErrorDiagnosis = z.infer<typeof ErrorDiagnosisSchema>;
+
+/** HTTP status of an axios error, if it carries a response. */
+function httpStatus(error: unknown): number | undefined {
+  if (typeof error !== 'object' || error === null || !('response' in error)) {
+    return undefined;
+  }
+  const { response } = error;
+  return typeof response === 'object' &&
+    response !== null &&
+    'status' in response &&
+    typeof response.status === 'number'
+    ? response.status
+    : undefined;
+}
+
+/**
+ * System health comes from the REST API module only. Without `FOUNDRY_API_KEY`
+ * (or with a module that lacks the endpoint) asking for it is not a failure:
+ * an expected refusal, logged as one warning line at most.
+ */
+export class RestApiRequiredError extends RefusedError {
+  override name = 'RestApiRequiredError';
+}
 
 /**
  * Client for accessing FoundryVTT diagnostic and logging information
@@ -53,6 +77,9 @@ export class DiagnosticsClient {
    *
    * @param foundryClient - The FoundryClient instance to use for API calls
    */
+  /** The health endpoint answered 404 once already: warned, not again. */
+  private healthEndpointMissingWarned = false;
+
   constructor(private foundryClient: FoundryClient) {}
 
   /**
@@ -202,6 +229,11 @@ export class DiagnosticsClient {
    * ```
    */
   async getSystemHealth(): Promise<SystemHealth> {
+    if (!this.foundryClient.hasRestApi()) {
+      throw new RestApiRequiredError(
+        'System health requires the REST API module (FOUNDRY_API_KEY is not set)',
+      );
+    }
     try {
       logger.debug('DiagnosticsClient | Getting system health');
 
@@ -216,6 +248,17 @@ export class DiagnosticsClient {
 
       return parsed;
     } catch (error) {
+      if (httpStatus(error) === 404) {
+        if (!this.healthEndpointMissingWarned) {
+          this.healthEndpointMissingWarned = true;
+          logger.warn(
+            'DiagnosticsClient | The REST API module does not provide /api/diagnostics/health (HTTP 404); system health is unavailable',
+          );
+        }
+        throw new RestApiRequiredError(
+          'System health is unavailable: the REST API module does not provide /api/diagnostics/health (HTTP 404)',
+        );
+      }
       logger.error('DiagnosticsClient | Failed to get system health:', error);
       throw new Error(
         `Failed to retrieve system health: ${error instanceof Error ? error.message : 'Unknown error'}`,

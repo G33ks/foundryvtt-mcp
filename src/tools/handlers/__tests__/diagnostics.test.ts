@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import type { DiagnosticsClient } from '../../../diagnostics/client.js';
+import { type DiagnosticsClient, RestApiRequiredError } from '../../../diagnostics/client.js';
 import type { LogEntry, SystemHealth } from '../../../diagnostics/types.js';
 import { SystemHealthSchema } from '../../../diagnostics/types.js';
 import type { FoundryClient } from '../../../foundry/client.js';
@@ -394,6 +394,24 @@ describe('handleGetHealthStatus', () => {
     expect(text).toContain('❌ Disconnected');
     expect(text).toContain('**Title:** Test World');
     expect(text).toContain('ℹ️ Not available');
+  });
+
+  it('says system health needs the REST API module when no key is set', async () => {
+    const noKey = {
+      getSystemHealth: vi
+        .fn()
+        .mockRejectedValue(
+          new RestApiRequiredError(
+            'System health requires the REST API module (FOUNDRY_API_KEY is not set)',
+          ),
+        ),
+    } as unknown as DiagnosticsClient;
+
+    const text = getText(await handleGetHealthStatus({}, worldClient(true), noKey));
+
+    expect(text).toContain(
+      'ℹ️ System health requires the REST API module (FOUNDRY_API_KEY is not set)',
+    );
   });
 
   it('degrades gracefully when world info is unavailable', async () => {

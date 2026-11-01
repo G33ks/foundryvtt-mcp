@@ -1146,6 +1146,11 @@ export class FoundryClient {
     logger.info('FoundryVTT client disconnected');
   }
 
+  /** True when `FOUNDRY_API_KEY` is set: the REST API module backs diagnostics. */
+  hasRestApi(): boolean {
+    return Boolean(this.config.apiKey);
+  }
+
   /**
    * Reports whether the client currently has a live link to FoundryVTT (#217).
    *

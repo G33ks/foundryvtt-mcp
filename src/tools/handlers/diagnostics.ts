@@ -5,7 +5,7 @@
  */
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import type { DiagnosticsClient } from '../../diagnostics/client.js';
+import { type DiagnosticsClient, RestApiRequiredError } from '../../diagnostics/client.js';
 import type { LogEntry } from '../../diagnostics/types.js';
 import { LogEntrySchema } from '../../diagnostics/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
@@ -395,9 +395,15 @@ export async function handleGetHealthStatus(
   runtime: HealthRuntime = {},
 ) {
   return withToolError('get health status', async () => {
+    let systemHealthUnavailable = 'ℹ️ Not available';
     const [worldInfo, systemHealth] = await Promise.all([
       foundryClient.getWorldInfo().catch(() => null),
-      diagnosticsClient.getSystemHealth().catch(() => null),
+      diagnosticsClient.getSystemHealth().catch((error: unknown) => {
+        if (error instanceof RestApiRequiredError) {
+          systemHealthUnavailable = `ℹ️ ${error.message}`;
+        }
+        return null;
+      }),
     ]);
 
     const worldLines = worldInfo
@@ -411,7 +417,7 @@ export async function handleGetHealthStatus(
       worldLines.unshift(STALE_WORLD_DATA_NOTICE);
     }
 
-    let healthSection = 'ℹ️ Not available';
+    let healthSection = systemHealthUnavailable;
     if (systemHealth) {
       const healthLines = [
         `- **Status:** ${systemHealth.status}`,

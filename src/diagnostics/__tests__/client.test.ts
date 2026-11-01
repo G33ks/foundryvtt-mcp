@@ -10,7 +10,8 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FoundryClient } from '../../foundry/client.js';
-import { DiagnosticsClient } from '../client.js';
+import { isRefusal } from '../../utils/refusal.js';
+import { DiagnosticsClient, RestApiRequiredError } from '../client.js';
 import type { ErrorDiagnosis, LogEntry, LogPatternSearchParams, SystemHealth } from '../types.js';
 
 // Mock the FoundryClient
@@ -18,6 +19,7 @@ vi.mock('../../foundry/client.js');
 vi.mock('../../utils/logger.js', () => ({
   logger: {
     debug: vi.fn(),
+    warn: vi.fn(),
     error: vi.fn(),
   },
 }));
@@ -30,6 +32,7 @@ describe('DiagnosticsClient', () => {
     // Create mocked FoundryClient
     mockFoundryClient = {
       get: vi.fn(),
+      hasRestApi: vi.fn(() => true),
     } as unknown as vi.Mocked<FoundryClient>;
 
     diagnosticsClient = new DiagnosticsClient(mockFoundryClient);
@@ -212,6 +215,41 @@ describe('DiagnosticsClient', () => {
       await expect(diagnosticsClient.getSystemHealth()).rejects.toThrow(
         'Failed to retrieve system health: Server Error',
       );
+    });
+
+    it('without FOUNDRY_API_KEY: refuses without any request or log line', async () => {
+      const { logger } = await import('../../utils/logger.js');
+      vi.mocked(logger.error).mockClear();
+      vi.mocked(logger.warn).mockClear();
+      mockFoundryClient.hasRestApi.mockReturnValue(false);
+
+      const error = await diagnosticsClient.getSystemHealth().catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(RestApiRequiredError);
+      expect(isRefusal(error)).toBe(true);
+      expect(String(error)).toContain('FOUNDRY_API_KEY');
+      expect(mockFoundryClient.get).not.toHaveBeenCalled();
+      expect(logger.error).not.toHaveBeenCalled();
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+
+    it('with a key but no health endpoint (404): one warning, no error log, a refusal', async () => {
+      const { logger } = await import('../../utils/logger.js');
+      vi.mocked(logger.error).mockClear();
+      vi.mocked(logger.warn).mockClear();
+      const notFound = Object.assign(new Error('Request failed with status code 404'), {
+        isAxiosError: true,
+        response: { status: 404 },
+      });
+      mockFoundryClient.get.mockRejectedValue(notFound);
+
+      for (let i = 0; i < 3; i++) {
+        const error = await diagnosticsClient.getSystemHealth().catch((e: unknown) => e);
+        expect(isRefusal(error)).toBe(true);
+      }
+
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.error).not.toHaveBeenCalled();
     });
   });
 
