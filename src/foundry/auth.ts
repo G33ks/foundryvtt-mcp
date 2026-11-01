@@ -12,6 +12,7 @@ import axios from 'axios';
 import type { ManagerOptions, SocketOptions } from 'socket.io-client';
 import { io } from 'socket.io-client';
 import { logger } from '../utils/logger.js';
+import { RefusedError } from '../utils/refusal.js';
 
 /**
  * Socket.IO connection options carrying a FoundryVTT session.
@@ -35,9 +36,38 @@ export function sessionSocketOptions(session: string): Partial<ManagerOptions & 
 }
 
 /**
- * Extracts the session cookie value from a GET /join response.
+ * No world is launched: FoundryVTT sits on its Setup screen. Expected while
+ * the GM has not launched one (e.g. after a server restart), so a refusal —
+ * one warning line, no stack — and the next tool call retries.
  */
-async function getSessionCookie(baseUrl: string): Promise<string> {
+export class NoActiveWorldError extends RefusedError {
+  override name = 'NoActiveWorldError';
+
+  constructor() {
+    super('No active world on FoundryVTT: launch it from the Setup screen.');
+  }
+}
+
+/**
+ * FoundryVTT v14's answer to GET and POST /join with no active world: its
+ * "No Active Game" error page, HTTP 200 (dist/server/views/view.mjs `_noWorld`).
+ * A hint only — English text that may change: the decision is
+ * {@link fetchJoinUsers} returning no user list.
+ */
+function isNoWorldPage(data: unknown): boolean {
+  return (
+    typeof data === 'string' &&
+    /There is currently no active game session|<title>[^<]*No Active Game/i.test(data)
+  );
+}
+
+/**
+ * Extracts the session cookie value from a GET /join response, and whether
+ * the response looked like the "No Active Game" page.
+ */
+async function getSessionCookie(
+  baseUrl: string,
+): Promise<{ session: string; noWorldPage: boolean }> {
   const res = await axios.get(`${baseUrl}/join`, {
     // Accept 200 (join page) and 302 (redirect after cookie set)
     validateStatus: (status) => status === 200 || status === 302,
@@ -56,25 +86,22 @@ async function getSessionCookie(baseUrl: string): Promise<string> {
   }
 
   logger.debug('Session cookie obtained');
-  return match[1];
+  return { session: match[1], noWorldPage: isNoWorldPage(res.data) };
+}
+
+interface JoinUser {
+  _id: string;
+  name: string;
 }
 
 /**
- * Resolves a user identifier to a FoundryVTT document _id.
+ * Asks FoundryVTT for its join data over Socket.IO (`getJoinData`).
  *
- * If the input is already a 16-character alphanumeric string (document _id format),
- * returns it directly. Otherwise, connects via Socket.IO and emits getJoinData
- * to look up the _id by display name.
+ * @returns the world's users, or `null` when the answer carries no user
+ *   list — FoundryVTT answers `{}` when no world is active (join.mjs
+ *   `handleSocket`), which is what decides {@link NoActiveWorldError}
  */
-async function resolveUserId(baseUrl: string, user: string, session: string): Promise<string> {
-  // FoundryVTT document IDs are 16-character alphanumeric strings
-  if (/^[a-zA-Z0-9]{16}$/.test(user)) {
-    logger.debug('User identifier is already a document _id', { userId: user });
-    return user;
-  }
-
-  logger.debug('Resolving display name to document _id', { displayName: user });
-
+function fetchJoinUsers(baseUrl: string, session: string): Promise<JoinUser[] | null> {
   return new Promise((resolve, reject) => {
     const socket = io(baseUrl, sessionSocketOptions(session));
 
@@ -90,24 +117,11 @@ async function resolveUserId(baseUrl: string, user: string, session: string): Pr
     }, 10000);
 
     const onSession = () => {
-      socket.emit('getJoinData', (data: { users?: Array<{ _id: string; name: string }> }) => {
+      socket.emit('getJoinData', (data: { users?: JoinUser[] }) => {
         clearTimeout(timeout);
         cleanup();
         socket.disconnect();
-
-        if (!data?.users || !Array.isArray(data.users)) {
-          return reject(new Error('getJoinData returned no users'));
-        }
-
-        const found = data.users.find((u) => u.name.toLowerCase() === user.toLowerCase());
-        if (!found) {
-          const available = data.users.map((u) => u.name).join(', ');
-          logger.debug('User not found in FoundryVTT user list', { available });
-          return reject(new Error(`User "${user}" not found`));
-        }
-
-        logger.debug('Resolved user document _id', { displayName: user, _id: found._id });
-        resolve(found._id);
+        resolve(Array.isArray(data?.users) ? data.users : null);
       });
     };
 
@@ -121,6 +135,51 @@ async function resolveUserId(baseUrl: string, user: string, session: string): Pr
     socket.on('session', onSession);
     socket.on('connect_error', onConnectError);
   });
+}
+
+/**
+ * A /join response looked like the "No Active Game" page: confirm with
+ * `getJoinData` before saying so.
+ *
+ * @throws {NoActiveWorldError} getJoinData returned no user list
+ */
+async function confirmNoActiveWorld(baseUrl: string, session: string): Promise<void> {
+  if ((await fetchJoinUsers(baseUrl, session)) === null) {
+    throw new NoActiveWorldError();
+  }
+}
+
+/**
+ * Resolves a user identifier to a FoundryVTT document _id.
+ *
+ * If the input is already a 16-character alphanumeric string (document _id format),
+ * returns it directly. Otherwise, connects via Socket.IO and emits getJoinData
+ * to look up the _id by display name.
+ *
+ * @throws {NoActiveWorldError} getJoinData returned no user list
+ */
+async function resolveUserId(baseUrl: string, user: string, session: string): Promise<string> {
+  // FoundryVTT document IDs are 16-character alphanumeric strings
+  if (/^[a-zA-Z0-9]{16}$/.test(user)) {
+    logger.debug('User identifier is already a document _id', { userId: user });
+    return user;
+  }
+
+  logger.debug('Resolving display name to document _id', { displayName: user });
+
+  const users = await fetchJoinUsers(baseUrl, session);
+  if (users === null) {
+    throw new NoActiveWorldError();
+  }
+  const found = users.find((u) => u.name.toLowerCase() === user.toLowerCase());
+  if (!found) {
+    const available = users.map((u) => u.name).join(', ');
+    logger.debug('User not found in FoundryVTT user list', { available });
+    throw new Error(`User "${user}" not found`);
+  }
+
+  logger.debug('Resolved user document _id', { displayName: user, _id: found._id });
+  return found._id;
 }
 
 /**
@@ -153,7 +212,12 @@ export async function authenticateFoundry(
   }
 
   // Step 1: Get session cookie
-  const session = await getSessionCookie(baseUrl);
+  const { session, noWorldPage } = await getSessionCookie(baseUrl);
+  // The getJoinData lookup below decides on its own; a FOUNDRY_USER_ID skips
+  // it, so confirm a "No Active Game" page with it here.
+  if (noWorldPage && /^[a-zA-Z0-9]{16}$/.test(user)) {
+    await confirmNoActiveWorld(baseUrl, session);
+  }
 
   // Step 2: Resolve user to document _id
   const userId = await resolveUserId(baseUrl, user, session);
@@ -183,6 +247,9 @@ export async function authenticateFoundry(
     },
   );
 
+  if (isNoWorldPage(joinRes.data)) {
+    await confirmNoActiveWorld(baseUrl, session);
+  }
   if (joinRes.data?.status !== 'success' && joinRes.data?.redirect !== '/game') {
     // FoundryVTT v13+ answers a rejected /join with a plain-text i18n key
     // (e.g. "JOIN.ErrorInvalidPassword") rather than a JSON error object.

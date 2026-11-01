@@ -14,6 +14,7 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { getConfig } from '../config/index.js';
 import type { CoreStatus, FoundryCore } from '../core.js';
 import { logger } from '../utils/logger.js';
+import { isRefusal } from '../utils/refusal.js';
 import { compareBuilds } from './build-order.js';
 import { configFingerprint } from './config-hash.js';
 import { IpcServer, type MismatchDecision } from './ipc-server.js';
@@ -191,7 +192,15 @@ export class SharedProcess {
       await this.core.start();
     })().catch((error: unknown) => {
       this.startupError = error;
-      logger.error('Shared process could not connect to FoundryVTT; the next call retries', error);
+      if (isRefusal(error)) {
+        // Expected (no world launched yet): the core already logged one line.
+        logger.info('Shared process waits for FoundryVTT; the next call retries');
+      } else {
+        logger.error(
+          'Shared process could not connect to FoundryVTT; the next call retries',
+          error,
+        );
+      }
     });
   }
 
@@ -255,8 +264,9 @@ export class SharedProcess {
     if (this.startupError) {
       throw new McpError(
         ErrorCode.InternalError,
-        `The shared process could not connect to FoundryVTT: ${describe(
-          this.startupError,
+        `The shared process could not connect to FoundryVTT: ${describe(this.startupError).replace(
+          /\.$/,
+          '',
         )}. The next call retries. Log: ${this.options.paths.daemonLog}`,
       );
     }

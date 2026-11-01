@@ -227,7 +227,12 @@ export class FoundryCore {
         }
       }
     } catch (error) {
-      logger.error('Failed to connect to FoundryVTT:', error);
+      if (isRefusal(error)) {
+        // Expected (e.g. no world launched yet): one line, no stack.
+        logger.warn(`Could not connect to FoundryVTT: ${(error as Error).message}`);
+      } else {
+        logger.error('Failed to connect to FoundryVTT:', error);
+      }
       throw error;
     }
   }

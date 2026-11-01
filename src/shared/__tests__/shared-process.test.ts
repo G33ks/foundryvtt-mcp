@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CoreStatus } from '../../core.js';
+import { RefusedError } from '../../utils/refusal.js';
 import { type SharedCore, SharedProcess, type SharedProcessOptions } from '../daemon.js';
 import { DaemonLink } from '../daemon-link.js';
 import { IpcConnection } from '../ipc-client.js';
@@ -189,6 +190,38 @@ describe('SharedProcess', () => {
       content: [{ text: 'called y' }],
     });
     expect(createCore).toHaveBeenCalledTimes(3);
+  });
+
+  it('with no world launched: says so in calls and status, then works once it is launched', async () => {
+    const paths = makePaths();
+    const noWorld = new RefusedError(
+      'No active world on FoundryVTT: launch it from the Setup screen.',
+    );
+    const start = vi
+      .fn<() => Promise<void>>()
+      .mockRejectedValueOnce(noWorld)
+      .mockRejectedValueOnce(noWorld)
+      .mockResolvedValue(undefined);
+    const { shared } = makeProcess(paths, { createCore: async () => fakeCore({ start }) });
+    await shared.start();
+
+    const link = makeLink(paths, () => {});
+    const error = await link.call('tool', 'x').catch((e: unknown) => e);
+    expect(String(error)).toContain(
+      'could not connect to FoundryVTT: No active world on FoundryVTT: launch it from the Setup screen. The next call retries',
+    );
+
+    const control = await IpcConnection.connect(paths.endpoint, hello({ role: 'control' }));
+    const status = DaemonStatusSchema.parse(await control.request('status'));
+    control.close();
+    expect(status.startupError).toBe(
+      'No active world on FoundryVTT: launch it from the Setup screen.',
+    );
+
+    // The GM launches the world: the next call connects.
+    await expect(link.call('tool', 'y')).resolves.toMatchObject({
+      content: [{ text: 'called y' }],
+    });
   });
 
   it('a second process on the same endpoint stops without building a core', async () => {

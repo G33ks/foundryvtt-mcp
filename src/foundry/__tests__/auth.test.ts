@@ -27,8 +27,11 @@ vi.mock('../../utils/logger.js', () => ({
   },
 }));
 
-const { authenticateFoundry, sessionSocketOptions } = await import('../auth.js');
+const { authenticateFoundry, NoActiveWorldError, sessionSocketOptions } = await import(
+  '../auth.js'
+);
 const { logger } = await import('../../utils/logger.js');
+const { isRefusal } = await import('../../utils/refusal.js');
 
 const mockAxios = vi.mocked(axios);
 const mockIo = vi.mocked(io);
@@ -370,5 +373,117 @@ describe('authenticateFoundry — rejected /join is reported, not thrown raw (#2
     await expect(
       authenticateFoundry('http://localhost:30000', 'abc123DEF456ghij', 'pw'),
     ).rejects.toThrow('FoundryVTT authentication failed (HTTP 200): You may not join this world');
+  });
+});
+
+describe('authenticateFoundry — no active world (Setup screen)', () => {
+  /**
+   * With no world launched, FoundryVTT v14 answers `getJoinData` with `{}`
+   * (dist/server/views/join.mjs) — that decides. GET and POST /join answer
+   * its "No Active Game" page (HTTP 200, HTML): English text, a hint only.
+   */
+  const NO_WORLD_PAGE =
+    '<!DOCTYPE html><html><head><title>No Active Game</title></head><body>' +
+    '<p>There is currently no active game session. Please wait for the host to configure ' +
+    'the world and then refresh this page.</p></body></html>';
+
+  /** A socket whose getJoinData answers `joinData`. */
+  function joinDataSocket(joinData: unknown) {
+    const emit = vi.fn((event: string, cb?: (data: unknown) => void) => {
+      if (event === 'getJoinData' && cb) {
+        cb(joinData);
+      }
+    });
+    const socket = {
+      on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+        if (event === 'session') {
+          queueMicrotask(() => handler());
+        }
+        return socket;
+      }),
+      off: vi.fn(),
+      emit,
+      disconnect: vi.fn(),
+    } as unknown as Socket;
+    mockIo.mockReturnValue(socket);
+    return emit;
+  }
+
+  function mockGetJoin(data: unknown) {
+    mockAxios.get = vi.fn().mockResolvedValue({
+      status: 200,
+      headers: { 'set-cookie': ['session=s; Path=/'] },
+      data,
+    });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('decides on an empty getJoinData answer, whatever the page says', async () => {
+    mockGetJoin('<html>a join page in another language</html>');
+    joinDataSocket({});
+
+    const error = await authenticateFoundry('http://localhost:30000', 'Gamemaster', 'pw').catch(
+      (e: unknown) => e,
+    );
+
+    expect(error).toBeInstanceOf(NoActiveWorldError);
+    expect(String(error)).toContain(
+      'No active world on FoundryVTT: launch it from the Setup screen',
+    );
+    expect(isRefusal(error)).toBe(true);
+  });
+
+  it('does not conclude from the "No Active Game" page alone', async () => {
+    mockGetJoin(NO_WORLD_PAGE);
+    joinDataSocket({ users: [{ _id: 'abc123DEF456ghij', name: 'Gamemaster' }] });
+    mockJoinPostSuccess();
+
+    await expect(
+      authenticateFoundry('http://localhost:30000', 'Gamemaster', 'pw'),
+    ).resolves.toEqual({ session: 's', userId: 'abc123DEF456ghij' });
+  });
+
+  it('FOUNDRY_USER_ID path: confirms a "No Active Game" page with getJoinData', async () => {
+    mockGetJoin(NO_WORLD_PAGE);
+    const emit = joinDataSocket({});
+    mockAxios.post = vi.fn();
+
+    await expect(
+      authenticateFoundry('http://localhost:30000', 'abc123DEF456ghij', 'pw'),
+    ).rejects.toBeInstanceOf(NoActiveWorldError);
+    expect(emit).toHaveBeenCalledWith('getJoinData', expect.any(Function));
+    expect(mockAxios.post).not.toHaveBeenCalled();
+  });
+
+  it('FOUNDRY_USER_ID path: a POST /join page refuted by getJoinData stays an auth failure', async () => {
+    mockJoinCookieResponse();
+    joinDataSocket({ users: [{ _id: 'abc123DEF456ghij', name: 'Gamemaster' }] });
+    mockAxios.post = vi.fn().mockResolvedValue({ status: 200, data: NO_WORLD_PAGE });
+
+    const error = await authenticateFoundry(
+      'http://localhost:30000',
+      'abc123DEF456ghij',
+      'pw',
+    ).catch((e: unknown) => e);
+
+    expect(error).not.toBeInstanceOf(NoActiveWorldError);
+    expect(String(error)).toMatch(/FoundryVTT authentication failed/);
+  });
+
+  it('FOUNDRY_USER_ID path: a POST /join page confirmed by getJoinData means no world', async () => {
+    mockJoinCookieResponse();
+    joinDataSocket({});
+    mockAxios.post = vi.fn().mockResolvedValue({ status: 200, data: NO_WORLD_PAGE });
+
+    await expect(
+      authenticateFoundry('http://localhost:30000', 'abc123DEF456ghij', 'pw'),
+    ).rejects.toBeInstanceOf(NoActiveWorldError);
   });
 });
