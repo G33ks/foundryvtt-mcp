@@ -36,8 +36,9 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  * logger.debug('Detailed debug info', { data: someObject });
  * ```
  */
-class Logger {
-  private logLevel: LogLevel;
+export class Logger {
+  private logLevel: LogLevel | (() => LogLevel);
+  private sinks: Array<(line: string) => void> = [];
   private levels: Record<LogLevel, number> = {
     debug: 0,
     info: 1,
@@ -48,10 +49,33 @@ class Logger {
   /**
    * Creates a new Logger instance
    *
-   * @param logLevel - Minimum log level to display (default: 'info')
+   * @param logLevel - Minimum log level to display (default: 'info'), or a
+   *   function resolving it on first use
    */
-  constructor(logLevel: LogLevel = 'info') {
+  constructor(logLevel: LogLevel | (() => LogLevel) = 'info') {
     this.logLevel = logLevel;
+  }
+
+  /**
+   * Also writes every emitted line to `sink` (e.g. a log file). The shared
+   * process runs detached with no stderr, so its sink is the only output.
+   */
+  addSink(sink: (line: string) => void): void {
+    this.sinks.push(sink);
+  }
+
+  private emit(write: (line: string) => void, line: string): void {
+    write(line);
+    for (const sink of this.sinks) {
+      sink(line);
+    }
+  }
+
+  private level(): LogLevel {
+    if (typeof this.logLevel === 'function') {
+      this.logLevel = this.logLevel();
+    }
+    return this.logLevel;
   }
 
   /**
@@ -62,7 +86,7 @@ class Logger {
    * @returns True if the message should be logged, false otherwise
    */
   private shouldLog(level: LogLevel): boolean {
-    return this.levels[level] >= this.levels[this.logLevel];
+    return this.levels[level] >= this.levels[this.level()];
   }
 
   /**
@@ -98,7 +122,7 @@ class Logger {
    */
   debug(message: string, meta?: unknown): void {
     if (this.shouldLog('debug')) {
-      console.error(this.formatMessage('debug', message, meta));
+      this.emit(console.error, this.formatMessage('debug', message, meta));
     }
   }
 
@@ -120,7 +144,7 @@ class Logger {
    */
   info(message: string, meta?: unknown): void {
     if (this.shouldLog('info')) {
-      console.error(this.formatMessage('info', message, meta));
+      this.emit(console.error, this.formatMessage('info', message, meta));
     }
   }
 
@@ -139,7 +163,7 @@ class Logger {
    */
   warn(message: string, meta?: unknown): void {
     if (this.shouldLog('warn')) {
-      console.warn(this.formatMessage('warn', message, meta));
+      this.emit(console.warn, this.formatMessage('warn', message, meta));
     }
   }
 
@@ -161,7 +185,7 @@ class Logger {
     if (this.shouldLog('error')) {
       const errorDetails =
         error instanceof Error ? { message: error.message, stack: error.stack } : error;
-      console.error(this.formatMessage('error', message, errorDetails));
+      this.emit(console.error, this.formatMessage('error', message, errorDetails));
     }
   }
 }
@@ -180,4 +204,6 @@ class Logger {
  * logger.error('Something went wrong', error);
  * ```
  */
-export const logger = new Logger(config.logLevel);
+// The level is resolved on first use, not at import: importing the logger must
+// not validate the whole configuration (`status`/`stop` run without one).
+export const logger = new Logger(() => config.logLevel);
