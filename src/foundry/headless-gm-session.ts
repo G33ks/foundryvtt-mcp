@@ -43,7 +43,7 @@
  * connected" until this resolves itself or the operator fixes the cause.
  */
 
-import type { Browser, Page } from 'playwright-core';
+import type { Browser, Frame, Page } from 'playwright-core';
 import { chromium } from 'playwright-core';
 import { logger } from '../utils/logger.js';
 
@@ -79,6 +79,29 @@ export const HEADLESS_BROWSER_ARGS: readonly string[] = [
   ].join(',')}`,
 ];
 
+/** Page binding behind `window.foundryMcpBridge`; see {@link BRIDGE_INIT_SCRIPT}. */
+const BRIDGE_BINDING = '__foundryMcpBridgeCall';
+
+/**
+ * Defines `window.foundryMcpBridge`, which the companion module looks for
+ * before dialling the bridge, on top of {@link BRIDGE_BINDING}. Runs before
+ * any page script on every navigation (join form, /game, reloads); the
+ * binding is looked up at call time, so the order in which Playwright
+ * installs the two never matters.
+ */
+const BRIDGE_INIT_SCRIPT = `(() => {
+  const call = (method, arg) => globalThis.${BRIDGE_BINDING}(method, arg);
+  Object.defineProperty(globalThis, 'foundryMcpBridge', {
+    value: Object.freeze({
+      getInfo: () => call('getInfo'),
+      prove: (serverNonce) => call('prove', serverNonce),
+    }),
+    configurable: false,
+    enumerable: false,
+    writable: false,
+  });
+})();`;
+
 const JOIN_SELECTOR_TIMEOUT_MS = 20000;
 const LOGIN_NAV_TIMEOUT_MS = 15000;
 const BASE_RETRY_MS = 5000;
@@ -88,6 +111,17 @@ const MAX_RETRY_MS = 120000;
 const WATCHDOG_INTERVAL_MS = 20000;
 /** Consecutive down polls (≈60s) tolerated before forcing a page reload. */
 const WATCHDOG_GRACE_TICKS = 3;
+
+/**
+ * Answers the companion module's `window.foundryMcpBridge` calls in the
+ * headless page. Implemented by `ModuleBridge`, which keeps the handshake
+ * secret to itself: only nonces and proofs ever reach the page.
+ */
+export interface BridgeCredentials {
+  info(): { protocol: number; port: number };
+  /** @throws on an invalid server nonce */
+  prove(serverNonce: unknown): { nonce: string; clientProof: string; serverProof: string };
+}
 
 export interface HeadlessGmSessionOptions {
   foundryUrl: string;
@@ -102,6 +136,21 @@ export interface HeadlessGmSessionOptions {
    * disable the watchdog (e.g. in tests that don't care about it).
    */
   isBridgeConnected?: () => boolean;
+  /**
+   * Exposed to the page as `window.foundryMcpBridge`; without it the module
+   * finds no credentials and stays disconnected.
+   */
+  bridgeCredentials?: BridgeCredentials;
+}
+
+/** The origin of `url`, or `null` when it has none (`about:blank`, a malformed URL). */
+function frameOrigin(url: string): string | null {
+  try {
+    const origin = new URL(url).origin;
+    return origin === 'null' ? null : origin;
+  } catch {
+    return null;
+  }
 }
 
 /** URL pathnames Foundry serves when nobody is logged in for this session. */
@@ -146,6 +195,10 @@ export class HeadlessGmSession {
     this.stopped = false;
     this.browser = await this.launchBrowser();
     this.page = await this.browser.newPage();
+    if (this.options.bridgeCredentials) {
+      // Before the first navigation, so the module finds it on its first `ready`.
+      await this.exposeBridgeCredentials(this.page, this.options.bridgeCredentials);
+    }
     this.page.on('framenavigated', (frame) => {
       if (frame !== this.page?.mainFrame()) {
         return;
@@ -191,6 +244,36 @@ export class HeadlessGmSession {
     return this.lastError ? `⏳ Not connected yet — ${this.lastError}` : '⏳ Logging in…';
   }
 
+  /**
+   * Gives the page `window.foundryMcpBridge`. The binding and the init
+   * script are page-wide and survive navigations and reloads, so this runs
+   * once per page. Only frames served from `FOUNDRY_URL`'s origin get an
+   * answer: an embedded third-party iframe sees the object, but its calls
+   * are refused.
+   */
+  private async exposeBridgeCredentials(page: Page, credentials: BridgeCredentials): Promise<void> {
+    const foundryOrigin = new URL(this.options.foundryUrl).origin;
+    await page.exposeBinding(
+      BRIDGE_BINDING,
+      (source: { frame: Frame }, method: unknown, arg: unknown) => {
+        if (frameOrigin(source.frame.url()) !== foundryOrigin) {
+          logger.warn('Headless GM session refused a foundryMcpBridge call from another origin', {
+            url: source.frame.url(),
+          });
+          throw new Error('foundryMcpBridge is only available to the Foundry page');
+        }
+        if (method === 'getInfo') {
+          return credentials.info();
+        }
+        if (method === 'prove') {
+          return credentials.prove(arg);
+        }
+        throw new Error('Unknown foundryMcpBridge call');
+      },
+    );
+    await page.addInitScript({ content: BRIDGE_INIT_SCRIPT });
+  }
+
   private async launchBrowser(): Promise<Browser> {
     const args = [...HEADLESS_BROWSER_ARGS];
     if (this.options.executablePath) {
@@ -216,7 +299,7 @@ export class HeadlessGmSession {
     throw new Error(
       `No usable browser found for the headless GM session (tried chrome, msedge, bundled chromium). ` +
         `Install Google Chrome or Microsoft Edge, set FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH to a browser ` +
-        `binary, or set FOUNDRY_HEADLESS_GM_ENABLED=false to fall back to a manually-opened GM browser tab. ` +
+        `binary. Without this session the companion module cannot connect to the bridge. ` +
         `Attempts: ${attempts.join('; ')}`,
     );
   }

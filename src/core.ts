@@ -94,11 +94,17 @@ export class FoundryCore {
     const headlessUsername = config.headlessGm.username ?? config.foundry.username;
     const headlessPassword = config.headlessGm.password ?? config.foundry.password;
     if (this.moduleBridge && config.headlessGm.enabled && headlessUsername && headlessPassword) {
+      const bridge = this.moduleBridge;
       this.headlessGmSession = new HeadlessGmSession({
         foundryUrl: config.foundry.url,
         username: headlessUsername,
         password: headlessPassword,
         isBridgeConnected: () => this.moduleBridge?.isConnected() ?? false,
+        // The module authenticates through the page; the secret stays in the bridge.
+        bridgeCredentials: {
+          info: () => bridge.info(),
+          prove: (serverNonce) => bridge.prove(serverNonce),
+        },
         ...(config.headlessGm.executablePath
           ? { executablePath: config.headlessGm.executablePath }
           : {}),
@@ -107,7 +113,11 @@ export class FoundryCore {
       this.headlessGmSession = null;
       if (this.moduleBridge && config.headlessGm.enabled) {
         logger.warn(
-          'Headless GM session disabled — no username/password to log a browser in with (set FOUNDRY_USERNAME/FOUNDRY_PASSWORD or FOUNDRY_HEADLESS_GM_USERNAME/FOUNDRY_HEADLESS_GM_PASSWORD, or open a GM browser tab manually).',
+          'Headless GM session disabled — no username/password to log a browser in with (set FOUNDRY_USERNAME/FOUNDRY_PASSWORD or FOUNDRY_HEADLESS_GM_USERNAME/FOUNDRY_HEADLESS_GM_PASSWORD). The companion module only connects from that session, so canvas-only tools will be unavailable.',
+        );
+      } else if (this.moduleBridge) {
+        logger.warn(
+          'Module bridge enabled but FOUNDRY_HEADLESS_GM_ENABLED=false: the companion module only connects from the headless GM session (a manually opened GM tab is no longer supported), so canvas-only tools will be unavailable.',
         );
       }
     }
@@ -160,7 +170,7 @@ export class FoundryCore {
           await this.headlessGmSession.start();
         } catch (error) {
           logger.error(
-            'Headless GM session failed to launch — open a GM/Assistant-GM browser tab manually for canvas-only tools to work:',
+            'Headless GM session failed to launch — the companion module cannot connect, so canvas-only tools will be unavailable:',
             error,
           );
           this.headlessGmSession = null;

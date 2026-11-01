@@ -24,6 +24,8 @@ interface FakePage {
   url: Mock;
   reload: Mock;
   close: Mock;
+  exposeBinding: Mock;
+  addInitScript: Mock;
   /** Test helper: fires the captured `framenavigated` listener. */
   emitFrameNavigated: (url: string) => void;
 }
@@ -72,6 +74,8 @@ function fakePage(state: {
     url: vi.fn(() => state.url),
     reload: vi.fn().mockResolvedValue(undefined),
     close: vi.fn().mockResolvedValue(undefined),
+    exposeBinding: vi.fn().mockResolvedValue(undefined),
+    addInitScript: vi.fn().mockResolvedValue(undefined),
     emitFrameNavigated(url: string) {
       mainFrame.url = () => url;
       framenavigatedHandler?.(mainFrame);
@@ -530,6 +534,114 @@ describe('HeadlessGmSession', () => {
       await session.stop();
       await vi.advanceTimersByTimeAsync(120000);
       expect(page.reload).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('window.foundryMcpBridge', () => {
+    const credentials = {
+      info: vi.fn(() => ({ protocol: 1, port: 31415 })),
+      prove: vi.fn((serverNonce: unknown) => {
+        if (serverNonce !== 'Ns') {
+          throw new Error('Invalid server nonce');
+        }
+        return { nonce: 'Nc', clientProof: 'Pc', serverProof: 'Ps' };
+      }),
+    };
+
+    async function startWithCredentials() {
+      const page = fakePage({
+        url: 'http://localhost:30000/join',
+        evaluateResult: true,
+        succeedOnClick: true,
+      });
+      launchMock.mockResolvedValue(fakeBrowser(page));
+      const session = new HeadlessGmSession({
+        foundryUrl: 'http://localhost:30000/',
+        username: 'mcp-api',
+        password: 'mcp',
+        bridgeCredentials: credentials,
+      });
+      await session.start();
+      const [name, binding] = page.exposeBinding.mock.calls[0] as [
+        string,
+        (source: { frame: { url(): string } }, method: unknown, arg?: unknown) => unknown,
+      ];
+      const call = (frameUrl: string, method: unknown, arg?: unknown) =>
+        binding({ frame: { url: () => frameUrl } }, method, arg);
+      return { session, page, name, call };
+    }
+
+    it('is exposed before the first navigation, through a binding and an init script', async () => {
+      const { session, page, name } = await startWithCredentials();
+      expect(page.addInitScript).toHaveBeenCalledTimes(1);
+      const script = String(page.addInitScript.mock.calls[0]?.[0]?.content);
+      expect(script).toContain('foundryMcpBridge');
+      expect(script).toContain(name);
+      expect(page.exposeBinding.mock.invocationCallOrder[0]).toBeLessThan(
+        page.goto.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
+      expect(page.addInitScript.mock.invocationCallOrder[0]).toBeLessThan(
+        page.goto.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
+      );
+      await session.stop();
+    });
+
+    it('is installed once, not again on re-login or reload', async () => {
+      const { session, page } = await startWithCredentials();
+      await vi.advanceTimersByTimeAsync(0);
+      page.emitFrameNavigated('http://localhost:30000/join');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(page.goto).toHaveBeenCalledTimes(2);
+      expect(page.exposeBinding).toHaveBeenCalledTimes(1);
+      expect(page.addInitScript).toHaveBeenCalledTimes(1);
+      await session.stop();
+    });
+
+    it('answers getInfo and prove for frames of the Foundry origin', async () => {
+      const { session, call } = await startWithCredentials();
+      expect(call('http://localhost:30000/game', 'getInfo')).toEqual({ protocol: 1, port: 31415 });
+      expect(call('http://localhost:30000/game', 'prove', 'Ns')).toEqual({
+        nonce: 'Nc',
+        clientProof: 'Pc',
+        serverProof: 'Ps',
+      });
+      expect(() => call('http://localhost:30000/game', 'prove', 'bad')).toThrow(
+        'Invalid server nonce',
+      );
+      await session.stop();
+    });
+
+    it('refuses other origins and unknown calls', async () => {
+      const { session, call } = await startWithCredentials();
+      credentials.prove.mockClear();
+      expect(() => call('https://www.youtube.com/embed/x', 'prove', 'Ns')).toThrow(
+        /only available to the Foundry page/,
+      );
+      expect(() => call('about:blank', 'getInfo')).toThrow(/only available/);
+      expect(() => call('http://localhost:30001/game', 'getInfo')).toThrow(/only available/);
+      expect(credentials.prove).not.toHaveBeenCalled();
+      expect(() => call('http://localhost:30000/game', 'secret')).toThrow(
+        'Unknown foundryMcpBridge call',
+      );
+      await session.stop();
+    });
+
+    it('is not exposed without bridge credentials', async () => {
+      const page = fakePage({
+        url: 'http://localhost:30000/join',
+        evaluateResult: true,
+        succeedOnClick: true,
+      });
+      launchMock.mockResolvedValue(fakeBrowser(page));
+      const session = new HeadlessGmSession({
+        foundryUrl: 'http://localhost:30000',
+        username: 'mcp-api',
+        password: 'mcp',
+      });
+      await session.start();
+      expect(page.exposeBinding).not.toHaveBeenCalled();
+      expect(page.addInitScript).not.toHaveBeenCalled();
+      await session.stop();
     });
   });
 });
