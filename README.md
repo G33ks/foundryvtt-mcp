@@ -3,8 +3,8 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue.svg)](https://www.typescriptlang.org/)
-[![Vitest](https://img.shields.io/badge/Tests-733%20passing-brightgreen.svg)](https://vitest.dev/)
-[![Tools](https://img.shields.io/badge/MCP%20Tools-111-purple.svg)](https://modelcontextprotocol.io/)
+[![Vitest](https://img.shields.io/badge/Tests-886%20passing-brightgreen.svg)](https://vitest.dev/)
+[![Tools](https://img.shields.io/badge/MCP%20Tools-114-purple.svg)](https://modelcontextprotocol.io/)
 
 A comprehensive, production-grade [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for **Foundry Virtual Tabletop (FoundryVTT)**.
 
@@ -12,7 +12,39 @@ This server empowers AI assistants (Claude Desktop, Claude Code, Oh My Pi, VS Co
 
 ---
 
-## 🌟 Key Highlights & Capabilities (111 Tools)
+## 🧭 How it works
+
+```mermaid
+flowchart LR
+  subgraph PC["Your computer"]
+    C1["AI client<br/>(Claude Desktop, Claude Code…)"] -->|"MCP (stdio)"| R1["Relay"]
+    C2["Another AI client"] -->|"MCP (stdio)"| R2["Relay"]
+    R1 & R2 -->|"named pipe /<br/>Unix socket"| D["Shared process"]
+    D -->|"launches"| B["Invisible GM browser<br/>+ companion module"]
+    D <-->|"bridge WebSocket<br/>(loopback, authenticated)"| B
+  end
+  subgraph S["Foundry server (local or remote)"]
+    F["FoundryVTT world"]
+  end
+  D -->|"Socket.IO:<br/>read & write documents"| F
+  B -->|"loads the game page<br/>as a GM user"| F
+  D -.->|"HTTP (optional):<br/>REST API module"| F
+```
+
+Your AI assistant starts a small relay program for this server. Every relay, from one assistant or several, hands its requests to the same background process, which keeps a single connection to Foundry open. That process reads and changes the world through Foundry's normal connection, the one any player's browser uses. Some things only a real Foundry page can do: capturing the canvas, rolling dice with Foundry's own engine, reading compendium documents, uploading files, pausing the game. For those, the background process runs an invisible browser, logged in as a GM, where the companion module runs. The module talks only to that process, and only after each has proven its identity to the other.
+
+**Technical details:**
+
+- **Live world cache**: on connect, the server loads the world over Socket.IO and keeps it in memory; every `modifyDocument` broadcast — from the AI's own writes or from any user in Foundry — updates it, so reads are instant and stay current. `refresh_world_data` forces a full reload.
+- **Socket.IO connection**: authenticates as `FOUNDRY_USERNAME` (Gamemaster or Assistant GM role) and performs every write over Foundry's core `modifyDocument` protocol — only when `FOUNDRY_WRITE_ENABLED=true`.
+- **Invisible GM session**: started when `FOUNDRY_MODULE_BRIDGE_ENABLED=true`. The shared process drives a background browser through `playwright-core`: Chrome, then Edge, then Playwright's own Chromium (`npx playwright install chromium`), or any Chromium-based browser set in `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`. It logs in as `FOUNDRY_HEADLESS_GM_USERNAME` / `FOUNDRY_HEADLESS_GM_PASSWORD`; each one falls back to `FOUNDRY_USERNAME` / `FOUNDRY_PASSWORD` when unset. A separate GM or Assistant GM account is recommended — and required on Foundry v14, where logging the same account in again ejects its previous session. A watchdog reloads the page if the module stays disconnected for about a minute. A human can meanwhile play as a normal **Player** in their own browser.
+- **Companion module** (`foundryvtt-mcp-bridge`, 0.5.0 or later): runs only in that GM session and serves the bridge tools — `capture_scene` (canvas screenshot with a grid overlay), `roll_and_post` (native `Roll` chat cards), `get_document_schema`, `search_compendium_content` and compendium imports, `upload_asset` (FilePicker), `set_pause`, `ping_canvas`, `set_target` / `get_targets`. Without it these tools report unavailable; everything else keeps working. The bridge listens on loopback only and authenticates the module — see [Module Bridge Security](#module-bridge-security).
+- **Optional REST API module**: with `FOUNDRY_API_KEY` set, the server also queries the Foundry Local REST API module over HTTP for the diagnostics tools (`get_health_status`, `get_system_health`, `get_recent_logs`, `search_logs`, `diagnose_errors`); Socket.IO stays the main connection.
+- **Shared process** (default): MCP clients may start several server instances — Claude Desktop starts several at launch — so each instance is only a lightweight relay, and the FoundryVTT connection, the bridge and the GM session live once, in a background process every relay shares. See [Shared Process Mode](#shared-process-mode); `FOUNDRY_MCP_SHARED=false` runs everything in one process instead.
+
+---
+
+## 🌟 Key Highlights & Capabilities (114 Tools)
 
 - 👁️ **Real-Time Event Stream & Activity Log (`watch_events`)**: Zero-polling event awareness via Socket.IO `modifyDocument` and companion bridge pushes. An AI DM agent can long-poll on a cursor-addressed stream (`cursor`, `waitMs`, `excludeSelf`, `types`, `sceneId`) to react instantly when players chat, move tokens, advance combat, toggle doors, or select targets.
 - 🎲 **Game Mechanics & Interactive Chat**: Roll dice with standard or complex drop/keep notation (`4d6kh3`, `1d20r1`). Roll and post interactive, clickable chat cards directly to the Foundry chat log via the companion bridge (`roll_and_post`).
@@ -45,41 +77,6 @@ This server empowers AI assistants (Claude Desktop, Claude Code, Oh My Pi, VS Co
   - **Asset Uploads**: upload images, tokens, and audio directly into Foundry's `Data/` storage via native FilePicker or local filesystem (`upload_asset`).
 - 🌫️ **Scene, Weather & Exploration Management**: Switch active scenes, adjust darkness levels, toggle global illumination, set environmental weather effects (`set_scene_weather`), and reset Fog of War exploration (`reset_fog`).
 - 🔍 **Rules & Compendium Search**: Search world documents, compendium packs, and rule text with contextual snippets (`search_compendium_content`, `lookup_rule`).
----
-
-## 🏗️ Architecture
-
-The server employs a hybrid architecture to deliver real-time responsiveness and deep game-engine integration:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    AI Assistant / MCP Client                │
-│             (Claude Desktop, Oh My Pi, VS Code)             │
-└──────────────────────────────┬──────────────────────────────┘
-                               │ MCP (stdio)
-┌──────────────────────────────▼──────────────────────────────┐
-│                    FoundryVTT MCP Server                    │
-├──────────────────────────┬───────────────────┬──────────────┤
-│  In-Memory World Cache   │  A* Pathfinding   │  Headless GM  │
-│  (Live Socket.IO Sync)   │  Dice Notation    │  Browser Sess.│
-└──────────────┬───────────┴─────────┬─────────┴──────┬───────┘
-               │ Socket.IO (30000)   │ WS (31415)      │ auto-login
-               │ (modifyDocument)    │ (Bridge)        │ (Chrome/Edge)
-┌──────────────▼──────────────────────────────▼────────▼───────┐
-│                    FoundryVTT Game Engine                    │
-│  ┌────────────────────────┐    ┌─────────────────────────┐   │
-│  │   Active World & Data  │    │  Companion Module        │  │
-│  │   (Actors, Scenes, …)  │    │  (foundryvtt-mcp-bridge) │  │
-│  └────────────────────────┘    └─────────────────────────┘   │
-└────────────────────────────────────────────────────────────┘
-```
-
-1. **Socket.IO Primary Connection**: Connects to FoundryVTT as an authenticated user (`mcp-api`). Automatically synchronizes and caches the world state, enabling instant lookups and high-frequency document mutations via the `modifyDocument` protocol.
-2. **Companion Module Bridge (`foundryvtt-mcp-bridge`)**: A lightweight Foundry module running in a browser that executes canvas-bound operations (PIXI canvas screenshot with grid overlay, native `Roll` chat card rendering, document schema introspection, and compendium item extraction). It only activates for a GM/Assistant-GM user — Foundry itself restricts pausing the game and uploading files to that tier, and a Player's canvas is fog-of-war-limited.
-3. **Automatic Headless GM Session**: The server drives its own invisible, background browser tab (via `playwright-core`, reusing whatever Chrome/Edge is already installed, or any Chromium-based browser such as Brave or Vivaldi set through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`; without either it falls back to Playwright's own Chromium, which requires a one-time `npx playwright install chromium`) that logs in as the same `mcp-api` account and hosts the module above. This means a human can play the game as a normal Player in their own visible client while the AI has full GM-tier canvas access through this separate, invisible session — no manual second browser tab required. A watchdog polls the bridge's own connectivity independently of the Foundry login state and force-reloads the tab to recover a dropped module WebSocket (the module's own reconnect logic gives up permanently after ~85 minutes) — self-healing without a server restart. Falls back gracefully (canvas-only tools report unavailable) if no browser is found. The companion module only connects from this session — see [Module Bridge Security](#module-bridge-security); a manually opened GM tab is no longer supported.
-4. **Optional REST API Module**: Provides server diagnostics, log retrieval, and health reporting when the local REST module is installed.
-5. **Shared Process (default)**: MCP clients start and stop server instances freely — Claude Desktop starts several at launch and restarts its connector when tools run in parallel. Each instance is therefore only a lightweight relay; the Socket.IO connection, the module bridge and the headless GM session live in one background process that every relay shares and that survives relay restarts. See [Shared Process Mode](#shared-process-mode).
-
 ---
 
 ## 🚀 Quick Start
@@ -238,7 +235,7 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
 
 ---
 
-## 🛠️ Tool Catalog (111 Tools)
+## 🛠️ Tool Catalog (114 Tools)
 
 ### 1. Real-Time Event Awareness
 - `watch_events` — long-poll a cursor-addressed activity log (`cursor`, `waitMs`, `limit`, `kinds`, `types`, `actions`, `sceneId`, `excludeSelf`) capturing document broadcasts and canvas activity without polling.
@@ -330,7 +327,7 @@ npm install
 # Compile TypeScript
 npm run build
 
-# Run complete unit test suite (733 tests)
+# Run complete unit test suite (886 tests)
 npm test
 
 # Run linter and formatting checks
