@@ -23,6 +23,7 @@ import { defaultStateDir } from './shared/paths.js';
 import { routeResourceRequest, routeToolRequest } from './tools/index.js';
 import { isWriteTool } from './tools/write-tools.js';
 import { DiagnosticSystem } from './utils/diagnostics.js';
+import { redactToolArgs } from './utils/log-args.js';
 import { logger } from './utils/logger.js';
 import { SerialQueue } from './utils/serial-queue.js';
 
@@ -241,7 +242,7 @@ export class FoundryCore {
   }
 
   private async executeTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
-    logger.info('Executing tool', { name, args });
+    logger.info('Executing tool', { name, args: redactToolArgs(args) });
 
     try {
       return (await routeToolRequest(

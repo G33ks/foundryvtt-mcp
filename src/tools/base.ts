@@ -10,6 +10,7 @@ import Ajv from 'ajv';
 import type { DiagnosticsClient } from '../diagnostics/client.js';
 import type { FoundryClient } from '../foundry/client.js';
 import type { DiagnosticSystem } from '../utils/diagnostics.js';
+import { redactToolArgs } from '../utils/log-args.js';
 import { logger } from '../utils/logger.js';
 
 /**
@@ -77,7 +78,7 @@ export abstract class BaseTool implements Tool {
    * Execute the tool with automatic validation
    */
   async execute(args: Record<string, unknown>, context: ToolContext): Promise<ToolResult> {
-    logger.debug(`Executing tool: ${this.name}`, { args });
+    logger.debug(`Executing tool: ${this.name}`, { args: redactToolArgs(args) });
 
     // Validate input arguments against schema
     this.validateArgs(args);
