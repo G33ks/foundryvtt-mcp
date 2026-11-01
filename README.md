@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue.svg)](https://www.typescriptlang.org/)
-[![Vitest](https://img.shields.io/badge/Tests-959%20passing-brightgreen.svg)](https://vitest.dev/)
+[![Vitest](https://img.shields.io/badge/Tests-1062%20passing-brightgreen.svg)](https://vitest.dev/)
 [![Tools](https://img.shields.io/badge/MCP%20Tools-114-purple.svg)](https://modelcontextprotocol.io/)
 
 A comprehensive, production-grade [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for **Foundry Virtual Tabletop (FoundryVTT)**.
@@ -31,13 +31,13 @@ flowchart LR
   D -.->|"HTTP (optional):<br/>REST API module"| F
 ```
 
-Your AI assistant starts a small relay program for this server. Every relay, from one assistant or several, hands its requests to the same background process, which keeps a single connection to Foundry open. That process reads and changes the world through Foundry's normal connection, the one any player's browser uses. Some things only a real Foundry page can do: capturing the canvas, rolling dice with Foundry's own engine, reading compendium documents, uploading files, pausing the game. For those, the background process runs an invisible browser, logged in as a GM, where the companion module runs. The module talks only to that process, and only after each has proven its identity to the other.
+Your AI assistant starts a small relay program for this server. Every relay, from one assistant or several, hands its requests to the same background process, which keeps a single connection to Foundry open. That process reads and changes the world through Foundry's normal connection, the one any player's browser uses. Some things only a real Foundry page can do: capturing the canvas, rolling dice with Foundry's own engine, reading compendium documents, uploading files, pausing the game. For those, the background process runs an invisible browser, sharing its own Foundry session, where the companion module runs. The module talks only to that process, and only after each has proven its identity to the other.
 
 **Technical details:**
 
 - **Live world cache**: on connect, the server loads the world over Socket.IO and keeps it in memory; every `modifyDocument` broadcast — from the AI's own writes or from any user in Foundry — updates it, so reads are instant and stay current. `refresh_world_data` forces a full reload.
-- **Socket.IO connection**: authenticates as `FOUNDRY_USERNAME` (Gamemaster or Assistant GM role) and performs every write over Foundry's core `modifyDocument` protocol — only when `FOUNDRY_WRITE_ENABLED=true`.
-- **Invisible GM session**: started when `FOUNDRY_MODULE_BRIDGE_ENABLED=true`. The shared process drives a background browser through `playwright-core`: Chrome, then Edge, then Playwright's own Chromium (`npx playwright install chromium`), or any Chromium-based browser set in `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`. It logs in as `FOUNDRY_HEADLESS_GM_USERNAME` / `FOUNDRY_HEADLESS_GM_PASSWORD`; each one falls back to `FOUNDRY_USERNAME` / `FOUNDRY_PASSWORD` when unset. A separate GM or Assistant GM account is recommended — and required on Foundry v14, where logging the same account in again ejects its previous session. A watchdog reloads the page if the module stays disconnected for about a minute. A human can meanwhile play as a normal **Player** in their own browser.
+- **Socket.IO connection**: authenticates as `FOUNDRY_USERNAME` (Assistant GM role recommended) and performs every write over Foundry's core `modifyDocument` protocol — only when `FOUNDRY_WRITE_ENABLED=true`. It is the only side that logs in: when Foundry forgets its session (server restart, world shut down) it logs in again by itself, retrying every 5 s at first and at most every 2 min, and tool calls made meanwhile wait up to 15 s before being refused with the reason.
+- **Invisible GM session**: started when `FOUNDRY_MODULE_BRIDGE_ENABLED=true`. The shared process drives a background browser through `playwright-core`: Chrome, then Edge, then Playwright's own Chromium (`npx playwright install chromium`), or any Chromium-based browser set in `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`. The page shares the Socket.IO connection's session — one account, one login — and never fills the `/join` form: Foundry keeps several connections per session, so neither ejects the other. The page stays on `/game` (a navigation elsewhere, such as **Log Out**, is blocked and the page reloads `/game`, because leaving would log the shared session out). A watchdog reloads the page if the module stays disconnected for about a minute. Advanced: `FOUNDRY_HEADLESS_GM_USERNAME` / `FOUNDRY_HEADLESS_GM_PASSWORD` naming another account give the page its own login instead. A human can meanwhile play as a normal **Player** in their own browser.
 - **Companion module** (`foundryvtt-mcp-bridge`, 0.5.0 or later): runs only in that GM session and serves the bridge tools — `capture_scene` (canvas screenshot with a grid overlay), `roll_and_post` (native `Roll` chat cards), `get_document_schema`, `search_compendium_content` and compendium imports, `upload_asset` (FilePicker), `set_pause`, `ping_canvas`, `set_target` / `get_targets`. Without it these tools report unavailable; everything else keeps working. The bridge listens on loopback only and authenticates the module — see [Module Bridge Security](#module-bridge-security).
 - **Optional REST API module**: with `FOUNDRY_API_KEY` set, the server also connects to the Foundry Local REST API module over HTTP. It backs the diagnostics tools (`get_health_status`, `get_system_health`, `get_recent_logs`, `search_logs`, `diagnose_errors`) and `search_compendium`, and some reads use it instead of the cache (actor and item search, actor details, scene and world info, `roll_dice`). Socket.IO stays the main connection and carries every write.
 - **Shared process** (default): MCP clients may start several server instances — Claude Desktop starts several at launch — so each instance is only a lightweight relay, and the FoundryVTT connection, the bridge and the GM session live once, in a background process every relay shares. See [Shared Process Mode](#shared-process-mode); `FOUNDRY_MCP_SHARED=false` runs everything in one process instead.
@@ -85,7 +85,7 @@ Your AI assistant starts a small relay program for this server. Every relay, fro
 
 - **Node.js 18+** or **Bun**
 - **FoundryVTT v13 or v14** running an active world (the versions the server handles explicitly; older versions are not verified)
-- A dedicated Foundry user account with **Gamemaster** or **Assistant GM** role
+- A dedicated Foundry user account with the **Assistant GM** role (Gamemaster works too, with the caveat below)
 - **A Chromium-based browser installed** (for the automatic headless GM browser session — see below): Google Chrome or Microsoft Edge are detected automatically; any other Chromium browser (Brave, Vivaldi…) works through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`
 
 ### 2. Configure Dedicated Foundry User
@@ -94,9 +94,9 @@ In FoundryVTT:
 1. Open **Configuration** → **User Management**
 2. Click **Create User**
 3. Set Username: `mcp-api`, Password: `mcp` (or your choice)
-4. Role: **Gamemaster** (or **Assistant GM** with write permissions enabled)
+4. Role: **Assistant GM** (recommended). The invisible browser session runs as this account; as a Gamemaster it could become Foundry's *active GM* in place of a human Gamemaster (equal roles go to the smaller user id) and run the game system's automations. `status` and `get_health_status` warn about it. An Assistant GM cannot grant the Gamemaster role or change `core.permissions`: the server refuses those with a clear message.
 
-> **Playing as a human while the AI GMs?** No extra setup needed. Log into your own Foundry client as a normal **Player**; the server automatically logs `mcp-api` into its own invisible background browser session for GM-tier canvas access (screenshots, dice rolls, pausing, uploads). The module bridge requires this session: a GM tab you open yourself never connects to it (see [Module Bridge Security](#module-bridge-security)).
+> **Playing as a human while the AI GMs?** No extra setup needed. Log into your own Foundry client as a **Player** — or as your own **Gamemaster**: with `mcp-api` an Assistant GM, you stay the active GM. The server opens its own invisible background browser session with `mcp-api`'s session for GM-tier canvas access (screenshots, dice rolls, pausing, uploads); only `mcp-api` appears in the player list for it. The module bridge requires this session: a GM tab you open yourself never connects to it (see [Module Bridge Security](#module-bridge-security)).
 
 ### 3. Install the Companion Module (Recommended)
 
@@ -130,8 +130,8 @@ In FoundryVTT, go to **Manage Modules** and enable **FoundryVTT MCP Bridge**.
 | `FOUNDRY_MODULE_BRIDGE_ENABLED` | No | `false` | Enables WebSocket bridge for canvas screenshots & chat rolls |
 | `FOUNDRY_MODULE_BRIDGE_PORT` | No | `31415` | WebSocket port for the companion module bridge |
 | `FOUNDRY_HEADLESS_GM_ENABLED` | No | `true` | Auto-launches an invisible GM-tier browser session to host the module bridge. Required for the bridge: with `false` the companion module never connects (manually opened GM tabs are not supported) and a warning is logged at startup |
-| `FOUNDRY_HEADLESS_GM_USERNAME` | No | `FOUNDRY_USERNAME` | Overrides which account the headless session logs in as |
-| `FOUNDRY_HEADLESS_GM_PASSWORD` | No | `FOUNDRY_PASSWORD` | Password for the headless session account, if overridden |
+| `FOUNDRY_HEADLESS_GM_USERNAME` | No | — | Advanced two-account mode: another account the headless session logs in as through `/join`. Unset (or equal to `FOUNDRY_USERNAME`), the session shares the connector's own session |
+| `FOUNDRY_HEADLESS_GM_PASSWORD` | No | `FOUNDRY_PASSWORD` | Password of that other account (two-account mode only) |
 | `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` | No | — | Path to any Chromium-based browser binary (Chrome, Edge, Brave, Vivaldi…), skipping auto-detection |
 | `FOUNDRY_DATA_PATH` | No | — | Local path to Foundry `Data/` for asset dimension discovery |
 | `FOUNDRY_API_KEY` | No | — | Optional REST API key for server diagnostics tools |
@@ -160,7 +160,7 @@ By default `node dist/index.js` is a **relay**: it answers `initialize` and `too
 
 - **Automatic start**: the first relay that finds no shared process starts one in the background (detached, so it survives the client closing or restarting the relay) and waits for it — up to ~30 s. Relays started at the same time end up sharing a single process. Relays connect as soon as they start, so the FoundryVTT connection and the GM session are ready before the first tool call.
 - **Lifetime**: the shared process stays up while at least one relay is connected, however long it goes without calls. It exits after `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` with no relay connected, on `stop`, or when a relay with a different version (a rebuild counts) or configuration connects — it then lets running calls finish and the relay starts a fresh one. A call that was already running always completes, even if the client that asked for it went away.
-- **FoundryVTT not reachable yet**: the shared process stays up, returns the connection error to the call, and retries on the next call — start FoundryVTT before or after your AI client, in any order.
+- **FoundryVTT not reachable yet**: the shared process stays up, returns the connection error to the call, and retries on the next call — start FoundryVTT before or after your AI client, in any order. With FoundryVTT up but no world launched, it retries by itself in the background (every 5 s at first, at most every 2 min) and connects as soon as the world is launched.
 - **Writes**: tools that change game state run one at a time, in arrival order; reads run in parallel.
 - **Commands**:
 
@@ -331,7 +331,7 @@ npm install
 # Compile TypeScript
 npm run build
 
-# Run complete unit test suite (959 tests)
+# Run complete unit test suite (1062 tests)
 npm test
 
 # Run linter and formatting checks

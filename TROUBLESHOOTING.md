@@ -86,8 +86,7 @@ The server provides detailed diagnostics on startup. Look for:
 **Solutions**:
 1. **Verify password**: Check the password is correct
 2. **User permissions**: Ensure user has required permissions in FoundryVTT
-3. **Active sessions**: Check if the user already has an active session (some configurations limit concurrent sessions)
-4. **Debug logging**: Set `LOG_LEVEL=debug` to see the full authentication flow
+3. **Debug logging**: Set `LOG_LEVEL=debug` to see the full authentication flow
 
 ### World Data Issues
 
@@ -197,7 +196,20 @@ node dist/index.js stop     # lets running calls finish, then exits (waits up to
 #### "The shared process could not connect to FoundryVTT: …"
 FoundryVTT is not reachable yet, or the URL/credentials are wrong. The shared process stays up and retries on the next call: start FoundryVTT and call the tool again. The message carries the underlying error; `daemon.log` has the details.
 
-- **`getJoinData returned no users`**: FoundryVTT is running but no world is launched — it shows the Setup screen, typically after the Foundry server restarted (or a backup restarted it). Launch the world from the Setup screen, then call a tool again. The module bridge and the headless GM session only start once this connection succeeds, so meanwhile `node dist/index.js status` shows the headless GM session as `Logging in…`.
+#### "Reconnecting to FoundryVTT… (waiting-for-world: No active world …)" / "No active world on FoundryVTT"
+FoundryVTT is running but no world is launched: it shows the Setup screen, typically after the Foundry server restarted (a backup can restart it) or after **Return to Setup**. Launch the world; nothing else is needed. The connector retries by itself in the background — every 5 s at first, then doubling up to once every 2 min — and reconnects within that delay once the world is up, without any tool call. Each change of state is logged once in `daemon.log` (`FoundryVTT connection: waiting-for-world — …`), not once per attempt.
+
+While it reconnects:
+- `node dist/index.js status` shows `FoundryVTT: not connected (waiting-for-world — …)` (or `reauthenticating`, `retrying`), and the headless GM session `reauthenticating` or `waiting-for-session`; `get_health_status` says the same.
+- A tool call waits up to 15 s for the connection, then is refused with `Reconnecting to FoundryVTT… (<state>: <reason>)`. Nothing is ever sent to FoundryVTT on a connection it no longer recognises; a write keeps its place in the write queue while it waits.
+
+After a FoundryVTT server restart, Foundry has forgotten every login; the connector notices it at the socket's reconnection (Foundry answers it with no user) and logs in again once. A plain network drop needs no new login: the socket reconnects with the same session.
+
+#### Headless GM session: "blocked a navigation away from /game — reloading /game"
+Expected. The invisible session shares the connector's login, and leaving the game page for `/join` would log that shared login out of the world. So any navigation away from `/game` — the **Log Out** button, or Foundry reloading the client after `mcp-api`'s role or password changed — is blocked, and the page reloads the game instead. It is not a disconnection: the connector keeps its session and does not log in again. If the reloaded page finds its session gone (Foundry redirects it to `/join`), it asks the connector for a new one.
+
+#### Warning: "The connector's account … is a Gamemaster …"
+In the default single-account mode the invisible session is a real Foundry client running as the connector's account. As a Gamemaster it can become Foundry's *active GM* instead of a human Gamemaster (equal roles go to the smaller user id) and run the game system's automations there. Make the account an **Assistant GM** (Configuration → User Management) while the connector is stopped, then start it again.
 
 #### "The shared FoundryVTT MCP process did not become available within 30 s"
 The relay started a shared process that never answered. Look at the end of `daemon.log`: a configuration error, a crash at startup, or an antivirus blocking `node.exe`. Running `node dist/index.js daemon` by hand in a terminal with the same environment shows startup errors directly.
