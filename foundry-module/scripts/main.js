@@ -32,7 +32,7 @@ let transport = null;
 Hooks.once('init', () => {
   game.settings.register(MODULE_ID, 'bridgePort', {
     name: 'MCP Bridge Port',
-    hint: 'Port the foundryvtt-mcp server is listening on for the module bridge (FOUNDRY_MODULE_BRIDGE_PORT).',
+    hint: 'Fallback only: the foundryvtt-mcp headless GM session tells the module which port to use (FOUNDRY_MODULE_BRIDGE_PORT). This value is used only if it does not.',
     scope: 'world',
     config: true,
     type: Number,
@@ -40,19 +40,41 @@ Hooks.once('init', () => {
   });
 });
 
-Hooks.once('ready', () => {
+Hooks.once('ready', async () => {
   // GM-only: canvas commands run against this client's own render, and only
   // the GM's client is guaranteed connected/active.
   if (!game.user?.isGM) return;
 
-  const port = game.settings.get(MODULE_ID, 'bridgePort');
-  transport = new BridgeTransport(`ws://localhost:${port}`, async (type, params) => {
-    const handler = COMMANDS[type];
-    if (!handler) {
-      throw new Error(`Unknown command: ${type}`);
-    }
-    return handler(params);
-  });
+  // Only the foundryvtt-mcp headless GM session provides this (a Playwright
+  // binding backed by the MCP server): a GM tab opened by hand never dials
+  // the bridge.
+  const credentials = globalThis.foundryMcpBridge;
+  if (!credentials) {
+    console.info(
+      'FoundryVTT MCP Bridge | no foundryvtt-mcp credentials in this browser, bridge disabled',
+    );
+    return;
+  }
+
+  let info = null;
+  try {
+    info = await credentials.getInfo();
+  } catch (error) {
+    console.warn('FoundryVTT MCP Bridge | could not read the bridge info', error);
+  }
+  const port = Number.isInteger(info?.port) ? info.port : game.settings.get(MODULE_ID, 'bridgePort');
+
+  transport = new BridgeTransport(
+    `ws://localhost:${port}`,
+    async (type, params) => {
+      const handler = COMMANDS[type];
+      if (!handler) {
+        throw new Error(`Unknown command: ${type}`);
+      }
+      return handler(params);
+    },
+    credentials,
+  );
   transport.connect();
 
   // Pushed unsolicited (no outstanding request) so `watch_events` on the
