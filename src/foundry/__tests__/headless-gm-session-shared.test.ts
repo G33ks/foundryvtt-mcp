@@ -301,6 +301,27 @@ describe('HeadlessGmSession shared mode', () => {
     await session.stop();
   });
 
+  it('does not read as logged in while a blocked navigation reloads /game', async () => {
+    const { session, env } = await startShared('cookie-1');
+    let finishReady: () => void = () => undefined;
+    env.page.waitForFunction.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finishReady = resolve;
+        }),
+    );
+
+    await env.pageNavigates('/');
+    await settle();
+    expect(session.sessionState()).toBe('reconnecting');
+    expect(session.statusText()).toContain('loading /game');
+
+    finishReady();
+    await settle();
+    expect(session.sessionState()).toBe('logged-in');
+    await session.stop();
+  });
+
   it('stops reading as logged in when the page reloads /game into "No Active Game"', async () => {
     const { session, env, src } = await startShared('cookie-1');
     expect(session.isActive()).toBe(true);
@@ -353,7 +374,7 @@ describe('HeadlessGmSession shared mode', () => {
 
     expect(session.sessionState()).toBe('reconnecting');
     expect(session.statusText()).toBe(
-      "⏳ Cannot reach FoundryVTT, retrying — sharing the connector's session (mcp-api) (page.goto: net::ERR_INTERNET_DISCONNECTED at https://foundry.example:30000/game)",
+      "⏳ Reconnecting — sharing the connector's session (mcp-api) (page.goto: net::ERR_INTERNET_DISCONNECTED at https://foundry.example:30000/game)",
     );
     expect(src.source.reauthenticate).not.toHaveBeenCalled();
 

@@ -252,6 +252,8 @@ export class HeadlessGmSession {
   /** Shared mode: cookie updates and `/game` loads, one after the other. */
   private pageTask: Promise<void> = Promise.resolve();
   private loadingGame = false;
+  /** Shared mode: loads of /game keep failing (one warning per outage). */
+  private loadRetrying = false;
   private unsubscribeSession: (() => void) | null = null;
   private lastError: string | null = null;
   private retryDelayMs = BASE_RETRY_MS;
@@ -408,7 +410,7 @@ export class HeadlessGmSession {
       return `⏳ Reauthenticating — ${mode}${this.lastError ? ` (${this.lastError})` : ''}`;
     }
     if (state === 'reconnecting') {
-      return `⏳ Cannot reach FoundryVTT, retrying — ${mode}${this.lastError ? ` (${this.lastError})` : ''}`;
+      return `⏳ Reconnecting — ${mode}${this.lastError ? ` (${this.lastError})` : ''}`;
     }
     return this.lastError
       ? `⏳ Not connected yet — ${mode} — ${this.lastError}`
@@ -495,6 +497,11 @@ export class HeadlessGmSession {
     }
     this.loadingGame = true;
     this.active = false;
+    if (this.sharedState === 'logged-in') {
+      // Not logged in until the game is ready again.
+      this.sharedState = 'reconnecting';
+      this.lastError = 'loading /game';
+    }
     try {
       const gameUrl = new URL('/game', this.options.foundryUrl).toString();
       await this.page.goto(gameUrl, { waitUntil: 'domcontentloaded' });
@@ -564,6 +571,7 @@ export class HeadlessGmSession {
     this.sharedState = 'logged-in';
     this.lastError = null;
     this.retryDelayMs = BASE_RETRY_MS;
+    this.loadRetrying = false;
     if (announce || !wasLoggedIn) {
       logger.info(`Headless GM session logged in — ${this.modeText()}`);
     }
@@ -578,7 +586,8 @@ export class HeadlessGmSession {
     if (this.stopped) {
       return;
     }
-    if (this.sharedState !== 'reconnecting') {
+    if (!this.loadRetrying) {
+      this.loadRetrying = true;
       logger.warn(
         `Headless GM session could not load /game (${reason}) — retrying with the same session`,
       );
