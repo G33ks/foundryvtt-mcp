@@ -40,6 +40,7 @@ import {
 } from './handlers/combat-mutations.js';
 import { handleSearchCompendium } from './handlers/compendium.js';
 import {
+  type HealthRuntime,
   handleDiagnoseErrors,
   handleGetHealthStatus,
   handleGetRecentLogs,
@@ -174,6 +175,7 @@ export async function routeToolRequest(
   diagnosticSystem: DiagnosticSystem,
   moduleBridge: ModuleBridge | null = null,
   headlessGmSession: HeadlessGmSession | null = null,
+  healthRuntime: HealthRuntime = {},
 ): Promise<ToolResult> {
   logger.debug(`Routing tool request: ${name}`, { args });
 
@@ -1236,6 +1238,7 @@ export async function routeToolRequest(
         diagnosticsClient,
         moduleBridge,
         headlessGmSession,
+        healthRuntime,
       );
 
     // ActiveEffect tools (general-purpose; apply_status_effect above stays

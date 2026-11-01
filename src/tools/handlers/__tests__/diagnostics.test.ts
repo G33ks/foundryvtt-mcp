@@ -429,6 +429,24 @@ describe('handleGetHealthStatus', () => {
     expect(text).toContain('**Title:** Test World');
   });
 
+  it('has no shared-process section in the all-in-one mode', async () => {
+    const text = getText(
+      await handleGetHealthStatus({}, worldClient(true), healthClient(makeHealth())),
+    );
+    expect(text).not.toContain('**Shared Process:**');
+  });
+
+  it('lists the relays and asks to restart the clients on an older build', async () => {
+    const text = getText(
+      await handleGetHealthStatus({}, worldClient(true), healthClient(makeHealth()), null, null, {
+        relays: { connected: 2, outdated: ['1.5.2+a'] },
+      }),
+    );
+    expect(text).toContain('**Shared Process:**');
+    expect(text).toContain('**Relays:** 2 connected');
+    expect(text).toMatch(/1 on an older connector build \(v1\.5\.2\+a\).*restart them/);
+  });
+
   it('leaves the world section unmarked while the cache is live', async () => {
     const text = getText(
       await handleGetHealthStatus({}, worldClient(true), healthClient(makeHealth())),

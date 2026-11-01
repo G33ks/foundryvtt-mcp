@@ -73,12 +73,16 @@ export class IpcConnection {
 
   /** pid reported by the shared process at the handshake. */
   readonly serverPid: number;
+  /** Build the shared process reported at the handshake. */
+  readonly serverVersion: string;
 
   private constructor(
     private readonly socket: net.Socket,
     serverPid: number,
+    serverVersion: string,
   ) {
     this.serverPid = serverPid;
+    this.serverVersion = serverVersion;
   }
 
   /**
@@ -145,7 +149,7 @@ export class IpcConnection {
           }
           settled = true;
           clearTimeout(timer);
-          connection = new IpcConnection(socket, reply.data.pid);
+          connection = new IpcConnection(socket, reply.data.pid, reply.data.version);
           resolve(connection);
         }
       });

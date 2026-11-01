@@ -20,6 +20,7 @@ import { FoundryClient, type FoundryClientConfig } from './foundry/client.js';
 import { HeadlessGmSession } from './foundry/headless-gm-session.js';
 import { BRIDGE_PROTOCOL_VERSION, ModuleBridge } from './foundry/module-bridge.js';
 import { defaultStateDir } from './shared/paths.js';
+import type { HealthRuntime } from './tools/handlers/diagnostics.js';
 import { routeResourceRequest, routeToolRequest } from './tools/index.js';
 import { isWriteTool } from './tools/write-tools.js';
 import { DiagnosticSystem } from './utils/diagnostics.js';
@@ -48,6 +49,11 @@ export interface CoreStatus {
   writeQueue: number;
 }
 
+export interface FoundryCoreOptions {
+  /** Relays of the shared process hosting this core, for `get_health_status`. */
+  relays?: () => NonNullable<HealthRuntime['relays']>;
+}
+
 export class FoundryCore {
   readonly foundryClient: FoundryClient;
   private readonly diagnosticsClient: DiagnosticsClient;
@@ -57,7 +63,7 @@ export class FoundryCore {
   /** Serialises every write tool, in arrival order; reads bypass it. */
   private readonly writeQueue = new SerialQueue();
 
-  constructor() {
+  constructor(private readonly options: FoundryCoreOptions = {}) {
     // Initialize FoundryVTT client with configuration
     const clientConfig: FoundryClientConfig = {
       baseUrl: config.foundry.url,
@@ -254,6 +260,7 @@ export class FoundryCore {
         this.diagnosticSystem,
         this.moduleBridge,
         this.headlessGmSession,
+        this.options.relays ? { relays: this.options.relays() } : {},
       )) as CallToolResult;
     } catch (error) {
       if (isRefusal(error)) {

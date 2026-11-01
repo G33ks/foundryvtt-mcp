@@ -10,7 +10,12 @@
 import { EndpointUnavailableError, IpcConnection } from './ipc-client.js';
 import { isEndpointAlive } from './ipc-server.js';
 import { resolveSharedPaths, type SharedPaths } from './paths.js';
-import { DaemonStatusSchema, PROTOCOL_VERSION, StopReplySchema } from './protocol.js';
+import {
+  type DaemonStatus,
+  DaemonStatusSchema,
+  PROTOCOL_VERSION,
+  StopReplySchema,
+} from './protocol.js';
 import { readStateFile } from './state-file.js';
 import { readExistingToken } from './token.js';
 import { buildVersion } from './version.js';
@@ -51,6 +56,58 @@ function yesNo(value: boolean): string {
   return value ? 'yes' : 'no';
 }
 
+function formatRelays(status: DaemonStatus): string {
+  const outdated = status.outdatedRelays ?? [];
+  if (outdated.length === 0) {
+    return `${status.relays} connected`;
+  }
+  return (
+    `${status.relays} connected (${outdated.length} on an older build: ` +
+    `${outdated.map((v) => `v${v}`).join(', ')} — restart that client)`
+  );
+}
+
+/** The lines `foundryvtt-mcp status` prints for a running shared process. */
+export function formatStatus(status: DaemonStatus): string[] {
+  const { bridge, headlessGm } = status;
+  const lines = [
+    'Shared process: running',
+    `  PID:            ${status.pid}`,
+    `  Version:        ${status.version}`,
+    `  Uptime:         ${formatUptime(status.uptimeSeconds)} (since ${status.startedAt})`,
+    `  Relays:         ${formatRelays(status)}`,
+    `  Calls running:  ${status.inFlight}`,
+  ];
+  if (status.writeQueue !== undefined) {
+    lines.push(`  Write queue:    ${status.writeQueue} pending`);
+  }
+  lines.push(`  FoundryVTT:     ${status.foundryConnected ? 'connected' : 'not connected'}`);
+  if (status.startupError) {
+    lines.push(`  Startup error:  ${status.startupError}`);
+  }
+  lines.push(
+    bridge?.enabled
+      ? `  Module bridge:  listening on port ${bridge.port}, ` +
+          (bridge.protocol === undefined
+            ? // A shared process from before bridge authentication.
+              `no authentication, module connected: ${yesNo(bridge.moduleConnected)}`
+            : `protocol v${bridge.protocol}, authenticated module connected: ` +
+              yesNo(bridge.moduleConnected) +
+              (bridge.moduleConnectedSince ? ` (since ${bridge.moduleConnectedSince})` : ''))
+      : '  Module bridge:  disabled',
+  );
+  if (bridge?.enabled && bridge.origin) {
+    lines.push(`  Bridge origin:  ${bridge.origin}`);
+  }
+  lines.push(
+    headlessGm?.enabled
+      ? `  Headless GM:    ${headlessGm.active ? 'logged in' : 'not logged in'} (${headlessGm.status})`
+      : '  Headless GM:    disabled',
+  );
+  lines.push(`  Endpoint:       ${status.endpoint}`, `  Log:            ${status.logFile}`);
+  return lines;
+}
+
 function printNotRunning(paths: SharedPaths): void {
   console.log('Shared process: not running');
   const stale = readStateFile(paths.stateFile);
@@ -69,43 +126,9 @@ export async function runStatus(paths: SharedPaths = resolveSharedPaths()): Prom
   }
   try {
     const status = DaemonStatusSchema.parse(await connection.request('status'));
-    const { bridge, headlessGm } = status;
-    console.log('Shared process: running');
-    console.log(`  PID:            ${status.pid}`);
-    console.log(`  Version:        ${status.version}`);
-    console.log(
-      `  Uptime:         ${formatUptime(status.uptimeSeconds)} (since ${status.startedAt})`,
-    );
-    console.log(`  Relays:         ${status.relays} connected`);
-    console.log(`  Calls running:  ${status.inFlight}`);
-    if (status.writeQueue !== undefined) {
-      console.log(`  Write queue:    ${status.writeQueue} pending`);
+    for (const line of formatStatus(status)) {
+      console.log(line);
     }
-    console.log(`  FoundryVTT:     ${status.foundryConnected ? 'connected' : 'not connected'}`);
-    if (status.startupError) {
-      console.log(`  Startup error:  ${status.startupError}`);
-    }
-    console.log(
-      bridge?.enabled
-        ? `  Module bridge:  listening on port ${bridge.port}, ` +
-            (bridge.protocol === undefined
-              ? // A shared process from before bridge authentication.
-                `no authentication, module connected: ${yesNo(bridge.moduleConnected)}`
-              : `protocol v${bridge.protocol}, authenticated module connected: ` +
-                yesNo(bridge.moduleConnected) +
-                (bridge.moduleConnectedSince ? ` (since ${bridge.moduleConnectedSince})` : ''))
-        : '  Module bridge:  disabled',
-    );
-    if (bridge?.enabled && bridge.origin) {
-      console.log(`  Bridge origin:  ${bridge.origin}`);
-    }
-    console.log(
-      headlessGm?.enabled
-        ? `  Headless GM:    ${headlessGm.active ? 'logged in' : 'not logged in'} (${headlessGm.status})`
-        : '  Headless GM:    disabled',
-    );
-    console.log(`  Endpoint:       ${status.endpoint}`);
-    console.log(`  Log:            ${status.logFile}`);
     return 0;
   } finally {
     connection.close();

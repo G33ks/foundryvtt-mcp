@@ -12,6 +12,7 @@ import { CallToolResultSchema, ReadResourceResultSchema } from '@modelcontextpro
 import { getConfig } from '../config/index.js';
 import { createMcpServer, STARTUP_BANNER } from '../mcp-server.js';
 import { logger } from '../utils/logger.js';
+import { OutdatedRelayNotice } from './build-order.js';
 import { configFingerprint } from './config-hash.js';
 import { DaemonLink } from './daemon-link.js';
 import { resolveSharedPaths } from './paths.js';
@@ -32,6 +33,9 @@ export async function runRelay(entry: string): Promise<void> {
   const log = new RotatingLog(paths.relayLog);
   logger.addSink((line) => log.write(line));
   const version = buildVersion();
+  // A relay older than the shared process is served (see build-order.ts),
+  // with its startup tool list: its first tool result says so.
+  const notice = new OutdatedRelayNotice(version);
 
   const link = new DaemonLink({
     endpoint: paths.endpoint,
@@ -48,11 +52,22 @@ export async function runRelay(entry: string): Promise<void> {
       };
     },
     spawnDaemon: () => spawnDaemon(entry),
+    onConnected: (connection) => {
+      if (notice.connected(connection.serverVersion)) {
+        logger.warn(
+          `[relay ${process.pid}] this relay (v${version}) is older than the shared process (v${connection.serverVersion}); restart the MCP client to load the current tool list`,
+        );
+      }
+    },
     log: (message) => logger.info(`[relay ${process.pid}] ${message}`),
   });
 
   const server = createMcpServer({
-    callTool: async (name, args) => CallToolResultSchema.parse(await link.call('tool', name, args)),
+    callTool: async (name, args) => {
+      const result = CallToolResultSchema.parse(await link.call('tool', name, args));
+      const text = notice.take();
+      return text ? { ...result, content: [...result.content, { type: 'text', text }] } : result;
+    },
     readResource: async (uri) => ReadResourceResultSchema.parse(await link.call('resource', uri)),
   });
 

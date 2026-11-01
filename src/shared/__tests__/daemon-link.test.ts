@@ -154,6 +154,34 @@ describe('DaemonLink', () => {
     expect(connect).toHaveBeenCalledTimes(1);
   });
 
+  it('on a protocol refusal: relays the shared process advice, never spawns or advises stopping', async () => {
+    const connect = vi.fn(async () => {
+      throw new HandshakeRejectedError(
+        'protocol',
+        'Protocol 2 not supported (expected 1): restart the client.',
+      );
+    });
+    const { link, spawnDaemon } = makeLink(connect);
+    const error = await link.call('tool', 'x').catch((e: unknown) => e);
+    expect(String(error)).toMatch(/restart the client/);
+    expect(String(error)).not.toMatch(/Stop it/);
+    expect(spawnDaemon).not.toHaveBeenCalled();
+    expect(connect).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports every new connection to onConnected', async () => {
+    const onConnected = vi.fn();
+    const connection = fakeConnection(async () => 'ok');
+    const { link } = makeLink(
+      vi.fn(async () => connection),
+      { onConnected },
+    );
+    await link.call('tool', 'x');
+    await link.call('tool', 'y');
+    expect(onConnected).toHaveBeenCalledTimes(1);
+    expect(onConnected).toHaveBeenCalledWith(connection);
+  });
+
   it('resends a call the draining process refused before starting it', async () => {
     const draining = fakeConnection(async () => {
       throw new RemoteError({ code: IpcErrorCode.Draining, message: 'shutting down' });

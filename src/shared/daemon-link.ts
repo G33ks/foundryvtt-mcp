@@ -28,6 +28,8 @@ export interface DaemonLinkOptions {
   drainTimeoutMs?: number;
   /** Minimum delay between two spawns while waiting. */
   respawnIntervalMs?: number;
+  /** Called with every new connection, once the shared process accepted it. */
+  onConnected?: (connection: IpcConnection) => void;
   connect?: (endpoint: string, hello: Hello) => Promise<IpcConnection>;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
@@ -129,6 +131,7 @@ export class DaemonLink {
           }
         });
         this.connection = connection;
+        this.options.onConnected?.(connection);
         return connection;
       } catch (error) {
         if (error instanceof EndpointUnavailableError) {
@@ -138,7 +141,14 @@ export class DaemonLink {
             lastSpawn = this.now();
           }
         } else if (error instanceof HandshakeRejectedError) {
-          if (error.reason === 'unauthorized' || error.reason === 'protocol') {
+          if (error.reason === 'protocol') {
+            // The shared process says which side is outdated and what to do.
+            throw new McpError(
+              ErrorCode.InternalError,
+              `The shared FoundryVTT MCP process refused this relay: ${error.message} Log: ${this.options.logFile}`,
+            );
+          }
+          if (error.reason === 'unauthorized') {
             throw new McpError(
               ErrorCode.InternalError,
               `The shared FoundryVTT MCP process refused this relay (${error.reason}: ${error.message}). Stop it (foundryvtt-mcp stop, or end the process listed in its state file) and retry. Log: ${this.options.logFile}`,

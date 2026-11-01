@@ -31,6 +31,24 @@ const STALE_WORLD_DATA_NOTICE =
   '⚠️ **Stale:** this snapshot stopped following live changes when the connection dropped, ' +
   'and document changes made since are missing. Run `refresh_world_data` to resync.';
 
+/** What only the hosting process knows, for `get_health_status`. */
+export interface HealthRuntime {
+  /** Relays of the shared process; absent in the all-in-one mode. */
+  relays?: { connected: number; outdated: string[] };
+}
+
+function sharedProcessSection(relays: NonNullable<HealthRuntime['relays']>): string {
+  const lines = [`- **Relays:** ${relays.connected} connected`];
+  if (relays.outdated.length > 0) {
+    lines.push(
+      `⚠️ ${relays.outdated.length} on an older connector build ` +
+        `(${relays.outdated.map((v) => `v${v}`).join(', ')}): those clients keep working, ` +
+        'but restart them to load the current tool list.',
+    );
+  }
+  return lines.join('\n');
+}
+
 /**
  * Handles recent log retrieval requests
  *
@@ -372,6 +390,7 @@ export async function handleGetHealthStatus(
   diagnosticsClient: DiagnosticsClient,
   moduleBridge: ModuleBridge | null = null,
   headlessGmSession: HeadlessGmSession | null = null,
+  runtime: HealthRuntime = {},
 ) {
   return withToolError('get health status', async () => {
     const [worldInfo, systemHealth] = await Promise.all([
@@ -453,7 +472,9 @@ ${foundryClient.isConnected() ? '✅ Connected' : '❌ Disconnected'}
 ${worldLines.join('\n')}
 
 **System Health:**
-${healthSection}${moduleBridgeSection ? `\n\n**Module Bridge:**\n${moduleBridgeSection}` : ''}
+${healthSection}${moduleBridgeSection ? `\n\n**Module Bridge:**\n${moduleBridgeSection}` : ''}${
+  runtime.relays ? `\n\n**Shared Process:**\n${sharedProcessSection(runtime.relays)}` : ''
+}
 
 **Journal Integrity:**
 ${journalSection}

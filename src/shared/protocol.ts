@@ -93,6 +93,9 @@ export const DaemonStatusSchema = z.object({
   endpoint: z.string(),
   logFile: z.string(),
   relays: z.number(),
+  /** Builds of the connected relays running an older build than this process
+   *  (served, but their client should be restarted). Absent from older processes. */
+  outdatedRelays: z.array(z.string()).optional(),
   inFlight: z.number(),
   writeQueue: z.number().optional(),
   startupError: z.string().nullable(),

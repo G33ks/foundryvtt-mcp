@@ -244,6 +244,51 @@ describe('SharedProcess', () => {
     expect(old.exit).toHaveBeenCalledWith(0);
     expect(spawn).toHaveBeenCalledTimes(1);
   });
+
+  it('a relay from an older build is served, never restarts the process, and shows in status', async () => {
+    // The post-build loop: a relay started before a build only ever spawns
+    // processes of the newer build, which it used to stop one after another.
+    const paths = makePaths();
+    const current = makeProcess(paths, { version: '1.0.0+b' });
+    await current.shared.start();
+    const spawn = vi.fn(() => {
+      void makeProcess(paths, { version: '1.0.0+b' }).shared.start();
+    });
+
+    const stale = makeLink(paths, spawn, { version: '1.0.0+a' });
+    await expect(stale.call('tool', 'get_users')).resolves.toMatchObject({
+      content: [{ text: 'called get_users' }],
+    });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(current.exit).not.toHaveBeenCalled();
+
+    const control = await IpcConnection.connect(paths.endpoint, hello({ role: 'control' }));
+    const status = DaemonStatusSchema.parse(await control.request('status'));
+    control.close();
+    expect(status).toMatchObject({ relays: 1, outdatedRelays: ['1.0.0+a'] });
+  });
+
+  it('a relay whose build cannot be ordered is served without a restart', async () => {
+    const paths = makePaths();
+    const current = makeProcess(paths, { version: '1.0.0+b' });
+    await current.shared.start();
+    const link = makeLink(paths, () => {}, { version: '1.0.0+unknown' });
+    await expect(link.call('tool', 'get_users')).resolves.toBeDefined();
+    expect(current.exit).not.toHaveBeenCalled();
+  });
+
+  it('a relay from a newer build replaces the process once', async () => {
+    const paths = makePaths();
+    const old = makeProcess(paths, { version: '1.0.0+a' });
+    await old.shared.start();
+    const spawn = vi.fn(() => {
+      void makeProcess(paths, { version: '1.0.0+b' }).shared.start();
+    });
+    const next = makeLink(paths, spawn, { version: '1.0.0+b' });
+    await expect(next.call('tool', 'get_users')).resolves.toBeDefined();
+    expect(old.exit).toHaveBeenCalledWith(0);
+    expect(spawn).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('idle timeout', () => {

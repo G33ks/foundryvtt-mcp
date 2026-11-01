@@ -106,14 +106,66 @@ describe('IPC handshake', () => {
     });
   });
 
+  it('tells an older relay on another protocol to restart its client, without a restart', async () => {
+    const onMismatch = vi.fn(() => 'restart' as const);
+    const { endpoint } = await startServer({ version: '1.0.0+b', onMismatch });
+    const error = await connect(endpoint, {
+      protocol: PROTOCOL_VERSION + 1,
+      version: '1.0.0+a',
+    }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ reason: 'protocol' });
+    expect((error as Error).message).toMatch(/restart the client/i);
+    expect(onMismatch).not.toHaveBeenCalled();
+  });
+
+  it('tells a newer relay on another protocol to stop the outdated shared process', async () => {
+    const onMismatch = vi.fn(() => 'restart' as const);
+    const { endpoint } = await startServer({ version: '1.0.0+a', onMismatch });
+    const error = await connect(endpoint, {
+      protocol: PROTOCOL_VERSION + 1,
+      version: '1.0.0+b',
+    }).catch((e: unknown) => e);
+    expect(error).toMatchObject({ reason: 'protocol' });
+    expect((error as Error).message).toMatch(/foundryvtt-mcp stop/);
+    expect(onMismatch).not.toHaveBeenCalled();
+  });
+
   it.each([
-    ['version', { version: '2.0.0' }],
-    ['config', { configHash: 'other' }],
-  ] as const)('reports a %s mismatch and refuses the relay', async (reason, overrides) => {
-    const onMismatch = vi.fn();
-    const { endpoint } = await startServer({ onMismatch });
-    await expect(connect(endpoint, overrides)).rejects.toMatchObject({ reason });
-    expect(onMismatch).toHaveBeenCalledWith(reason);
+    ['version', { version: '2.0.0' }, '2.0.0'],
+    ['config', { configHash: 'other' }, '1.0.0'],
+  ] as const)(
+    'refuses the relay when a %s mismatch means a restart',
+    async (reason, overrides, relayVersion) => {
+      const onMismatch = vi.fn(() => 'restart' as const);
+      const { endpoint } = await startServer({ onMismatch });
+      await expect(connect(endpoint, overrides)).rejects.toMatchObject({ reason });
+      expect(onMismatch).toHaveBeenCalledWith(reason, relayVersion);
+    },
+  );
+
+  it('serves a relay on another build when told to accept it, and lists it as outdated', async () => {
+    const onMismatch = vi.fn(() => 'accept' as const);
+    const { server, endpoint } = await startServer({ version: '1.0.0+b', onMismatch });
+    const connection = await connect(endpoint, { version: '1.0.0+a' });
+    expect(connection.serverVersion).toBe('1.0.0+b');
+    await expect(connection.request('tool', 'get_users', {})).resolves.toEqual({
+      echo: 'get_users',
+    });
+    expect(onMismatch).toHaveBeenCalledWith('version', '1.0.0+a');
+    expect(server.outdatedRelayVersions).toEqual(['1.0.0+a']);
+
+    connection.close();
+    await vi.waitFor(() => expect(server.outdatedRelayVersions).toEqual([]));
+  });
+
+  it('still checks the configuration of an accepted older relay', async () => {
+    const onMismatch = vi.fn((reason: 'version' | 'config') =>
+      reason === 'version' ? ('accept' as const) : ('restart' as const),
+    );
+    const { endpoint } = await startServer({ version: '1.0.0+b', onMismatch });
+    await expect(
+      connect(endpoint, { version: '1.0.0+a', configHash: 'other' }),
+    ).rejects.toMatchObject({ reason: 'config' });
   });
 
   it('lets control connections in regardless of version and config', async () => {

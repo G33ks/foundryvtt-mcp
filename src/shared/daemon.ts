@@ -4,8 +4,8 @@
  * Owns the single FoundryVTT connection, module bridge and headless GM
  * session ({@link FoundryCore}) and serves tool calls forwarded by relays.
  * It outlives the relays MCP clients start and stop, and exits on `stop`,
- * after a relay with another version/configuration knocks, or once no relay
- * has been connected for the idle timeout. When the
+ * after a relay from a newer build or with another configuration knocks, or
+ * once no relay has been connected for the idle timeout. When the
  * FoundryVTT connection cannot be established (FoundryVTT not started yet,
  * wrong URL…) it stays up and retries on the next call.
  */
@@ -14,8 +14,9 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { getConfig } from '../config/index.js';
 import type { CoreStatus, FoundryCore } from '../core.js';
 import { logger } from '../utils/logger.js';
+import { compareBuilds } from './build-order.js';
 import { configFingerprint } from './config-hash.js';
-import { IpcServer } from './ipc-server.js';
+import { IpcServer, type MismatchDecision } from './ipc-server.js';
 import { resolveSharedPaths, type SharedPaths } from './paths.js';
 import type { DaemonStatus, IpcError } from './protocol.js';
 import { RotatingLog } from './rotating-log.js';
@@ -66,6 +67,23 @@ export function toIpcError(error: unknown): IpcError {
   };
 }
 
+/**
+ * Whether a relay running another build or configuration restarts this
+ * process. Only a strictly newer build does (see build-order.ts): an older
+ * or unorderable relay is served as it is. A different configuration still
+ * restarts it (the policy for that case belongs to a later change).
+ */
+export function mismatchDecision(
+  reason: 'version' | 'config',
+  relayVersion: string,
+  ownVersion: string,
+): MismatchDecision {
+  if (reason === 'config') {
+    return 'restart';
+  }
+  return compareBuilds(relayVersion, ownVersion) === 'newer' ? 'restart' : 'accept';
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -92,8 +110,16 @@ export class SharedProcess {
       toIpcError,
       log: (level, message) => logger[level](message),
       onRelayCountChange: (count) => this.updateIdleTimer(count),
-      onMismatch: (reason) => {
-        void this.drainAndExit(`a relay with a different ${reason} connected`);
+      onMismatch: (reason, relayVersion) => {
+        const decision = mismatchDecision(reason, relayVersion, options.version);
+        if (decision === 'restart') {
+          void this.drainAndExit(
+            reason === 'version'
+              ? `a relay from a newer build (v${relayVersion}) connected`
+              : 'a relay with a different configuration connected',
+          );
+        }
+        return decision;
       },
       handler: async (op, name, args) => {
         switch (op) {
@@ -193,6 +219,11 @@ export class SharedProcess {
     return this.shuttingDown;
   }
 
+  /** Connected relays, and the builds of those older than this process. */
+  relays(): { connected: number; outdated: string[] } {
+    return { connected: this.ipc.relayCount, outdated: this.ipc.outdatedRelayVersions };
+  }
+
   private status(): DaemonStatus {
     const coreStatus: Partial<CoreStatus> = this.core?.status() ?? {};
     return {
@@ -203,6 +234,7 @@ export class SharedProcess {
       endpoint: this.options.paths.endpoint,
       logFile: this.options.paths.daemonLog,
       relays: this.ipc.relayCount,
+      outdatedRelays: this.ipc.outdatedRelayVersions,
       // Excludes this status request itself.
       inFlight: this.ipc.inFlightCount - 1,
       startupError: this.startupError ? describe(this.startupError) : null,
@@ -249,14 +281,15 @@ export async function runDaemon(paths: SharedPaths = resolveSharedPaths()): Prom
 
   const token = loadOrCreateToken(paths.tokenFile);
   const config = getConfig();
-  const shared = new SharedProcess({
+  const shared: SharedProcess = new SharedProcess({
     paths,
     version: buildVersion(),
     token,
     configHash: configFingerprint(config, token),
     idleTimeoutMs: config.shared.idleTimeoutMinutes * 60_000,
     // Loaded lazily: Socket.IO, Playwright & co. are not needed to lose the race.
-    createCore: async () => new (await import('../core.js')).FoundryCore(),
+    createCore: async () =>
+      new (await import('../core.js')).FoundryCore({ relays: () => shared.relays() }),
     exit: (code) => process.exit(code),
   });
 

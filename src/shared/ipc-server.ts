@@ -10,6 +10,7 @@
 
 import { existsSync, rmSync } from 'node:fs';
 import net from 'node:net';
+import { compareBuilds } from './build-order.js';
 import {
   encodeLine,
   type HelloReply,
@@ -22,6 +23,9 @@ import {
   RequestSchema,
 } from './protocol.js';
 import { tokensMatch } from './token.js';
+
+/** What to do with a relay running another build or configuration. */
+export type MismatchDecision = 'restart' | 'accept';
 
 export type IpcHandler = (
   op: Op,
@@ -37,8 +41,12 @@ export interface IpcServerOptions {
   handler: IpcHandler;
   /** Maps a handler rejection to the error sent back. */
   toIpcError: (error: unknown) => IpcError;
-  /** A relay with another version or configuration knocked. */
-  onMismatch?: (reason: 'version' | 'config') => void;
+  /**
+   * A relay with another build (`version`) or configuration knocked: refuse
+   * it so it waits for a restart (`restart`, the default), or serve it as it
+   * is (`accept`). The owner restarts itself; this server only answers.
+   */
+  onMismatch?: (reason: 'version' | 'config', relayVersion: string) => MismatchDecision | undefined;
   /** Number of accepted relay connections changed. */
   onRelayCountChange?: (count: number) => void;
   log?: (level: 'info' | 'warn', message: string) => void;
@@ -51,6 +59,8 @@ export class IpcServer {
   private server: net.Server | null = null;
   private readonly sockets = new Set<net.Socket>();
   private relays = 0;
+  /** Build of each accepted relay running another build than this process. */
+  private readonly outdatedRelays = new Map<net.Socket, string>();
   private inFlight = 0;
   private draining = false;
   private idleWaiters: Array<() => void> = [];
@@ -60,6 +70,11 @@ export class IpcServer {
   /** Accepted relay connections (control connections excluded). */
   get relayCount(): number {
     return this.relays;
+  }
+
+  /** Builds of the connected relays that run another build than this process. */
+  get outdatedRelayVersions(): string[] {
+    return [...this.outdatedRelays.values()];
   }
 
   /** Requests currently being handled. */
@@ -185,6 +200,7 @@ export class IpcServer {
     socket.on('close', () => {
       clearTimeout(helloTimer);
       this.sockets.delete(socket);
+      this.outdatedRelays.delete(socket);
       if (role === 'relay') {
         this.relays--;
         this.options.onRelayCountChange?.(this.relays);
@@ -209,28 +225,54 @@ export class IpcServer {
       return reject('unauthorized', 'Invalid token');
     }
     if (hello.protocol !== PROTOCOL_VERSION) {
+      // Never a restart: the two builds cannot talk, and restarting would
+      // not help an old client (it would only loop) — tell the user instead.
+      const text = `Protocol ${hello.protocol} not supported (expected ${PROTOCOL_VERSION})`;
+      if (hello.role !== 'relay') {
+        return reject('protocol', text);
+      }
+      this.log(
+        'warn',
+        `Refused relay v${hello.version}: protocol ${hello.protocol}, this process speaks ${PROTOCOL_VERSION}`,
+      );
       return reject(
         'protocol',
-        `Protocol ${hello.protocol} not supported (expected ${PROTOCOL_VERSION})`,
+        compareBuilds(hello.version, this.options.version) === 'newer'
+          ? `${text}: the shared process (v${this.options.version}) is older than this client. ` +
+              'Run `foundryvtt-mcp stop` (or `node dist/index.js stop`); the next call starts the current build.'
+          : `${text}: this MCP client runs an older connector build (v${hello.version}) than the ` +
+              `shared process (v${this.options.version}). Restart the client (fully quit Claude desktop, or restart Claude Code).`,
       );
     }
+    let outdated = false;
     if (hello.role === 'relay') {
       if (this.draining) {
         return reject('draining', 'The shared process is shutting down');
       }
       if (hello.version !== this.options.version) {
-        this.log(
-          'info',
-          `Relay version ${hello.version} differs from ${this.options.version}; restarting`,
-        );
-        this.options.onMismatch?.('version');
-        return reject('version', `Shared process runs version ${this.options.version}`);
+        if (this.options.onMismatch?.('version', hello.version) === 'accept') {
+          this.log(
+            'warn',
+            `Serving relay v${hello.version} although this process runs v${this.options.version}: restart that client to load the current tool list`,
+          );
+          outdated = true;
+        } else {
+          this.log(
+            'info',
+            `Relay version ${hello.version} differs from ${this.options.version}; restarting`,
+          );
+          return reject('version', `Shared process runs version ${this.options.version}`);
+        }
       }
       if (hello.configHash !== this.options.configHash) {
-        this.log('info', 'Relay configuration differs from this process; restarting');
-        this.options.onMismatch?.('config');
-        return reject('config', 'Shared process runs with a different configuration');
+        if (this.options.onMismatch?.('config', hello.version) !== 'accept') {
+          this.log('info', 'Relay configuration differs from this process; restarting');
+          return reject('config', 'Shared process runs with a different configuration');
+        }
       }
+    }
+    if (outdated) {
+      this.outdatedRelays.set(socket, hello.version);
     }
     write(socket, {
       type: 'hello',
