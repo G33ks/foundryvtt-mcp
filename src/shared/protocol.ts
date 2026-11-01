@@ -113,7 +113,13 @@ export const DaemonStatusSchema = z.object({
     })
     .optional(),
   headlessGm: z
-    .object({ enabled: z.boolean(), active: z.boolean(), status: z.string().nullable() })
+    .object({
+      enabled: z.boolean(),
+      active: z.boolean(),
+      status: z.string().nullable(),
+      // Absent from shared processes older than these fields.
+      launchError: z.string().nullable().optional(),
+    })
     .optional(),
 });
 export type DaemonStatus = z.infer<typeof DaemonStatusSchema>;

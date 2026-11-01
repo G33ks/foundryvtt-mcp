@@ -33,4 +33,20 @@ describe('formatStatus', () => {
   it('reads a shared process from before relay builds were reported', () => {
     expect(line(BASE, 'Relays')).toBe('  Relays:         2 connected');
   });
+
+  it('shows the real browser launch error rather than "disabled"', () => {
+    const status: DaemonStatus = {
+      ...BASE,
+      headlessGm: {
+        enabled: true,
+        active: false,
+        status: null,
+        launchError:
+          "Could not launch the browser at FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH=C:\\b.exe: Executable doesn't exist",
+      },
+    };
+    expect(line(status, 'Headless GM')).toBe(
+      "  Headless GM:    browser launch failed — Could not launch the browser at FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH=C:\\b.exe: Executable doesn't exist",
+    );
+  });
 });

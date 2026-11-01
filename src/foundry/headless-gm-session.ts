@@ -51,6 +51,18 @@ import { logger } from '../utils/logger.js';
 const BROWSER_CHANNELS: Array<string | undefined> = ['chrome', 'msedge', undefined];
 
 /**
+ * playwright-core's wording for "this browser is not installed": a missing
+ * channel ("Chromium distribution 'chrome' is not found at …") or a missing
+ * executable ("Executable doesn't exist at …"). Anything else is a browser
+ * that exists but failed to start.
+ */
+const BROWSER_NOT_FOUND = /Chromium distribution '[^']*' is not found|Executable doesn't exist/;
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
  * Chromium features that stop the companion module from reaching
  * {@link ModuleBridge}. The page is served from `FOUNDRY_URL` (often a public
  * origin) while the bridge listens on `ws://localhost`, and recent Chromium
@@ -186,10 +198,11 @@ export class HeadlessGmSession {
    * the background (see {@link attemptLogin}): Foundry may not be reachable
    * yet, and that must not block server startup or take other tools down.
    *
-   * @throws if no usable browser could be launched at all (explicit path
-   *   invalid, or none of chrome/msedge/bundled chromium are installed) —
-   *   the one genuinely fatal condition, caught by the caller and logged
-   *   the same way a `ModuleBridge` port conflict is.
+   * @throws if no browser could be launched at all — the explicit path
+   *   failed, or none of chrome/msedge/bundled chromium was found or would
+   *   start. The message carries the real launch errors (install advice
+   *   only when nothing was found); the caller logs it and keeps it for
+   *   `status` and `get_health_status`.
    */
   async start(): Promise<void> {
     this.stopped = false;
@@ -276,31 +289,42 @@ export class HeadlessGmSession {
 
   private async launchBrowser(): Promise<Browser> {
     const args = [...HEADLESS_BROWSER_ARGS];
-    if (this.options.executablePath) {
-      return chromium.launch({
-        headless: true,
-        executablePath: this.options.executablePath,
-        args,
-      });
+    const { executablePath } = this.options;
+    if (executablePath) {
+      try {
+        return await chromium.launch({ headless: true, executablePath, args });
+      } catch (error) {
+        throw new Error(
+          `Could not launch the browser at FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH=${executablePath}: ` +
+            `${errorText(error)}. Check the path: it must point to the executable of a ` +
+            'Chromium-based browser (Chrome, Edge, Brave, Chromium).',
+        );
+      }
     }
 
-    const attempts: string[] = [];
+    const failures: Array<{ channel: string; message: string }> = [];
     for (const channel of BROWSER_CHANNELS) {
       try {
         return await chromium.launch(
           channel !== undefined ? { headless: true, channel, args } : { headless: true, args },
         );
       } catch (error) {
-        attempts.push(
-          `${channel ?? 'bundled chromium'}: ${error instanceof Error ? error.message : String(error)}`,
-        );
+        failures.push({ channel: channel ?? 'bundled chromium', message: errorText(error) });
       }
     }
+    const attempts = failures.map((f) => `${f.channel}: ${f.message}`).join('; ');
+    // Install advice only when nothing was found: a browser that is there
+    // but fails to start needs its real error, not a hint to install another.
+    if (failures.every((f) => BROWSER_NOT_FOUND.test(f.message))) {
+      throw new Error(
+        'No browser found for the headless GM session (tried chrome, msedge, bundled chromium). ' +
+          'Install Google Chrome or Microsoft Edge, or set FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH to the ' +
+          'executable of another Chromium-based browser (Brave, Chromium). Without this session the ' +
+          `companion module cannot connect to the bridge. Attempts: ${attempts}`,
+      );
+    }
     throw new Error(
-      `No usable browser found for the headless GM session (tried chrome, msedge, bundled chromium). ` +
-        `Install Google Chrome or Microsoft Edge, set FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH to a browser ` +
-        `binary. Without this session the companion module cannot connect to the bridge. ` +
-        `Attempts: ${attempts.join('; ')}`,
+      `Could not launch a browser for the headless GM session. Attempts: ${attempts}`,
     );
   }
 

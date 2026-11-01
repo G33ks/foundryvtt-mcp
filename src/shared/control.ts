@@ -100,9 +100,11 @@ export function formatStatus(status: DaemonStatus): string[] {
     lines.push(`  Bridge origin:  ${bridge.origin}`);
   }
   lines.push(
-    headlessGm?.enabled
-      ? `  Headless GM:    ${headlessGm.active ? 'logged in' : 'not logged in'} (${headlessGm.status})`
-      : '  Headless GM:    disabled',
+    headlessGm?.launchError
+      ? `  Headless GM:    browser launch failed — ${headlessGm.launchError}`
+      : headlessGm?.enabled
+        ? `  Headless GM:    ${headlessGm.active ? 'logged in' : 'not logged in'} (${headlessGm.status})`
+        : '  Headless GM:    disabled',
   );
   lines.push(`  Endpoint:       ${status.endpoint}`, `  Log:            ${status.logFile}`);
   return lines;

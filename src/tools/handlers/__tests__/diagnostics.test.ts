@@ -508,6 +508,21 @@ describe('handleGetHealthStatus', () => {
     expect(text).toContain('no longer supported');
   });
 
+  it('shows the real browser launch error instead of configuration advice', async () => {
+    const bridge = { isConnected: () => false } as unknown as ModuleBridge;
+
+    const text = getText(
+      await handleGetHealthStatus({}, worldClient(true), healthClient(makeHealth()), bridge, null, {
+        headlessLaunchError:
+          'Could not launch the browser at FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH=x',
+      }),
+    );
+
+    expect(text).toContain('could not be launched');
+    expect(text).toContain('FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH=x');
+    expect(text).not.toContain('FOUNDRY_HEADLESS_GM_ENABLED');
+  });
+
   it('reports no journal overwrite and where the local copies are', async () => {
     const text = getText(
       await handleGetHealthStatus({}, worldClient(true), healthClient(makeHealth())),

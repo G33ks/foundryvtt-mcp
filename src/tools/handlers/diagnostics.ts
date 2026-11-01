@@ -35,6 +35,8 @@ const STALE_WORLD_DATA_NOTICE =
 export interface HealthRuntime {
   /** Relays of the shared process; absent in the all-in-one mode. */
   relays?: { connected: number; outdated: string[] };
+  /** The real error when the headless GM session's browser could not be launched. */
+  headlessLaunchError?: string;
 }
 
 function sharedProcessSection(relays: NonNullable<HealthRuntime['relays']>): string {
@@ -438,6 +440,10 @@ export async function handleGetHealthStatus(
         moduleBridgeSection = `✅ Connected — authenticated module (protocol v${BRIDGE_PROTOCOL_VERSION})`;
       } else if (headlessGmSession) {
         moduleBridgeSection = `❌ Not connected — no authenticated module (protocol v${BRIDGE_PROTOCOL_VERSION})\n- **Headless GM session:** ${headlessGmSession.statusText()}`;
+      } else if (runtime.headlessLaunchError) {
+        moduleBridgeSection =
+          '❌ Not connected — the companion module only connects from the headless GM session, ' +
+          `whose browser could not be launched:\n- **Headless GM session:** ❌ ${runtime.headlessLaunchError}`;
       } else {
         moduleBridgeSection =
           '❌ Not connected — the companion module only connects from the headless GM session, ' +

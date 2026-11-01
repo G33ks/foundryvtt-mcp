@@ -44,7 +44,13 @@ export interface CoreStatus {
     /** ISO time the current authenticated connection was established, or `null`. */
     moduleConnectedSince: string | null;
   };
-  headlessGm: { enabled: boolean; active: boolean; status: string | null };
+  headlessGm: {
+    enabled: boolean;
+    active: boolean;
+    status: string | null;
+    /** The real error when the browser could not be launched; `null` otherwise. */
+    launchError: string | null;
+  };
   /** Write calls queued or running. */
   writeQueue: number;
 }
@@ -60,6 +66,8 @@ export class FoundryCore {
   private readonly diagnosticSystem: DiagnosticSystem;
   private moduleBridge: ModuleBridge | null;
   private headlessGmSession: HeadlessGmSession | null;
+  /** Why the headless GM session's browser could not be launched, if it could not. */
+  private headlessLaunchError: string | null = null;
   /** Serialises every write tool, in arrival order; reads bypass it. */
   private readonly writeQueue = new SerialQueue();
 
@@ -208,6 +216,9 @@ export class FoundryCore {
         try {
           await this.headlessGmSession.start();
         } catch (error) {
+          // Kept for status / get_health_status: the session is dropped, so
+          // without it they would read "disabled".
+          this.headlessLaunchError = error instanceof Error ? error.message : String(error);
           logger.error(
             'Headless GM session failed to launch — the companion module cannot connect, so canvas-only tools will be unavailable:',
             error,
@@ -260,7 +271,7 @@ export class FoundryCore {
         this.diagnosticSystem,
         this.moduleBridge,
         this.headlessGmSession,
-        this.options.relays ? { relays: this.options.relays() } : {},
+        this.healthRuntime(),
       )) as CallToolResult;
     } catch (error) {
       if (isRefusal(error)) {
@@ -283,6 +294,13 @@ export class FoundryCore {
         `Tool execution failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
       );
     }
+  }
+
+  private healthRuntime(): HealthRuntime {
+    return {
+      ...(this.options.relays ? { relays: this.options.relays() } : {}),
+      ...(this.headlessLaunchError ? { headlessLaunchError: this.headlessLaunchError } : {}),
+    };
   }
 
   /** Reads one `foundry://` resource; failures surface as {@link McpError}. */
@@ -321,9 +339,10 @@ export class FoundryCore {
         moduleConnectedSince: this.moduleBridge?.moduleConnectedSince()?.toISOString() ?? null,
       },
       headlessGm: {
-        enabled: this.headlessGmSession !== null,
+        enabled: this.headlessGmSession !== null || this.headlessLaunchError !== null,
         active: this.headlessGmSession?.isActive() ?? false,
         status: this.headlessGmSession?.statusText() ?? null,
+        launchError: this.headlessLaunchError,
       },
       writeQueue: this.writeQueue.pending,
     };
