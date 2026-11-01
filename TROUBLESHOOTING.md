@@ -178,7 +178,7 @@ The shared process died (or was killed) while it ran the call. The call is **not
 The `token` file changed while a shared process was running (deleted or edited by hand). End the shared process (see above); the next call starts one with the current token.
 
 #### The shared process keeps restarting / FoundryVTT reconnects often
-`daemon.log` shows `a relay with a different config connected` (or `version`): two MCP clients pass different settings (another `env` block, another `LOG_LEVEL`, an extra variable…) or run different versions of the server, and each one restarts the shared process with its own. Give every client the same `env` block and the same build, or set `FOUNDRY_MCP_SHARED=false` for one of them. After updating the server, restart your MCP clients so that all relays run the new version.
+`daemon.log` shows `a relay with a different config connected` (or `version`): two MCP clients pass different settings (another `env` block, another `LOG_LEVEL`, an extra variable…) or run different versions of the server, and each one restarts the shared process with its own. Give every client the same `env` block and the same build, or set `FOUNDRY_MCP_SHARED=false` for one of them. After updating or rebuilding the server, restart your MCP clients so that all relays run the new build.
 
 #### Configuration in `.env` ignored with Claude Desktop
 Claude Desktop starts MCP servers in `C:\Windows\System32`, where no `.env` file is looked up. Put the configuration in the `env` block of `claude_desktop_config.json`. A `.env` file is only read from the working directory of the process (handy for Claude Code or a terminal started in the repository).

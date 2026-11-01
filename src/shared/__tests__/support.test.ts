@@ -6,7 +6,7 @@ import { configFingerprint } from '../config-hash.js';
 import { defaultStateDir, endpointFor } from '../paths.js';
 import { LineDecoder, MAX_LINE_BYTES } from '../protocol.js';
 import { loadOrCreateToken, readExistingToken, tokensMatch } from '../token.js';
-import { packageVersion } from '../version.js';
+import { buildVersion, packageVersion } from '../version.js';
 
 const dirs: string[] = [];
 function tempDir(): string {
@@ -114,5 +114,13 @@ describe('packageVersion', () => {
   it('reads the version from package.json', () => {
     const pkg = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'));
     expect(packageVersion()).toBe(pkg.version);
+  });
+});
+
+describe('buildVersion', () => {
+  it('is the package version plus a build stamp', () => {
+    const [version, stamp] = buildVersion().split('+');
+    expect(version).toBe(packageVersion());
+    expect(stamp).toMatch(/^[0-9a-z]+$/);
   });
 });

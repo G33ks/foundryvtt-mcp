@@ -19,7 +19,7 @@ import { type Hello, PROTOCOL_VERSION } from './protocol.js';
 import { RotatingLog } from './rotating-log.js';
 import { spawnDaemon } from './spawn.js';
 import { loadOrCreateToken } from './token.js';
-import { packageVersion } from './version.js';
+import { buildVersion } from './version.js';
 
 export async function runRelay(entry: string): Promise<void> {
   process.stderr.write(STARTUP_BANNER);
@@ -31,7 +31,7 @@ export async function runRelay(entry: string): Promise<void> {
   // stderr stays the MCP client's log; relay.log keeps a history across clients.
   const log = new RotatingLog(paths.relayLog);
   logger.addSink((line) => log.write(line));
-  const version = packageVersion();
+  const version = buildVersion();
 
   const link = new DaemonLink({
     endpoint: paths.endpoint,

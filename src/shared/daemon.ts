@@ -21,7 +21,7 @@ import type { DaemonStatus, IpcError } from './protocol.js';
 import { RotatingLog } from './rotating-log.js';
 import { removeStateFile, writeStateFile } from './state-file.js';
 import { loadOrCreateToken } from './token.js';
-import { packageVersion } from './version.js';
+import { buildVersion } from './version.js';
 
 /** The part of {@link FoundryCore} the shared process drives. */
 export type SharedCore = Pick<
@@ -251,7 +251,7 @@ export async function runDaemon(paths: SharedPaths = resolveSharedPaths()): Prom
   const config = getConfig();
   const shared = new SharedProcess({
     paths,
-    version: packageVersion(),
+    version: buildVersion(),
     token,
     configHash: configFingerprint(config, token),
     idleTimeoutMs: config.shared.idleTimeoutMinutes * 60_000,

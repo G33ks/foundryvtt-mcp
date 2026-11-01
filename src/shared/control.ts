@@ -13,7 +13,7 @@ import { resolveSharedPaths, type SharedPaths } from './paths.js';
 import { DaemonStatusSchema, PROTOCOL_VERSION, StopReplySchema } from './protocol.js';
 import { readStateFile } from './state-file.js';
 import { readExistingToken } from './token.js';
-import { packageVersion } from './version.js';
+import { buildVersion } from './version.js';
 
 /** Exit code when no shared process is running. */
 const EXIT_NOT_RUNNING = 3;
@@ -28,7 +28,7 @@ async function connectControl(paths: SharedPaths): Promise<IpcConnection | null>
       type: 'hello',
       protocol: PROTOCOL_VERSION,
       role: 'control',
-      version: packageVersion(),
+      version: buildVersion(),
       configHash: '',
       token,
     });
