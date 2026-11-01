@@ -6,7 +6,7 @@
  * of the relay (`taskkill /T`) takes it down too; through the short-lived
  * launcher the shared process is orphaned and out of reach of a tree kill.
  * Detached children also leave the MCP client's kill-on-close Job Object
- * (verified with Claude desktop on Windows, see scripts/spike-detached.mjs).
+ * (verified with Claude desktop on Windows by the Phase 0 spike, commit 7647d5f).
  */
 
 import { spawn } from 'node:child_process';
