@@ -244,6 +244,11 @@ export class HeadlessGmSession {
     this.browser = null;
   }
 
+  /** True once {@link start} has launched the browser, until {@link stop}. */
+  isStarted(): boolean {
+    return this.browser !== null;
+  }
+
   /** True once the session is logged in with a live GM-tier Foundry client. */
   isActive(): boolean {
     return this.active;

@@ -85,29 +85,64 @@ export function formatStatus(status: DaemonStatus): string[] {
   if (status.startupError) {
     lines.push(`  Startup error:  ${status.startupError}`);
   }
-  lines.push(
-    bridge?.enabled
-      ? `  Module bridge:  listening on port ${bridge.port}, ` +
-          (bridge.protocol === undefined
-            ? // A shared process from before bridge authentication.
-              `no authentication, module connected: ${yesNo(bridge.moduleConnected)}`
-            : `protocol v${bridge.protocol}, authenticated module connected: ` +
-              yesNo(bridge.moduleConnected) +
-              (bridge.moduleConnectedSince ? ` (since ${bridge.moduleConnectedSince})` : ''))
-      : '  Module bridge:  disabled',
-  );
-  if (bridge?.enabled && bridge.origin) {
+  // A shared process older than `state` only says `enabled`.
+  const bridgeState = bridge?.state ?? (bridge?.enabled ? 'listening' : 'disabled');
+  const notStarted = status.foundryConnected
+    ? 'not started yet'
+    : 'not started (FoundryVTT connection failed)';
+  lines.push(`  Module bridge:  ${formatBridge(bridge, bridgeState, notStarted)}`);
+  if (bridgeState === 'listening' && bridge?.origin) {
     lines.push(`  Bridge origin:  ${bridge.origin}`);
   }
-  lines.push(
-    headlessGm?.launchError
-      ? `  Headless GM:    browser launch failed — ${headlessGm.launchError}`
-      : headlessGm?.enabled
-        ? `  Headless GM:    ${headlessGm.active ? 'logged in' : 'not logged in'} (${headlessGm.status})`
-        : '  Headless GM:    disabled',
-  );
+  lines.push(`  Headless GM:    ${formatHeadlessGm(headlessGm, bridgeState, notStarted)}`);
   lines.push(`  Endpoint:       ${status.endpoint}`, `  Log:            ${status.logFile}`);
   return lines;
+}
+
+function formatBridge(
+  bridge: DaemonStatus['bridge'],
+  state: NonNullable<NonNullable<DaemonStatus['bridge']>['state']>,
+  notStarted: string,
+): string {
+  if (!bridge || state === 'disabled') {
+    return 'disabled';
+  }
+  if (state === 'failed') {
+    return `failed to start — ${bridge.error ?? 'see the log'}`;
+  }
+  if (state === 'not-started') {
+    return notStarted;
+  }
+  return (
+    `listening on port ${bridge.port}, ` +
+    (bridge.protocol === undefined
+      ? // A shared process from before bridge authentication.
+        `no authentication, module connected: ${yesNo(bridge.moduleConnected)}`
+      : `protocol v${bridge.protocol}, authenticated module connected: ` +
+        yesNo(bridge.moduleConnected) +
+        (bridge.moduleConnectedSince ? ` (since ${bridge.moduleConnectedSince})` : ''))
+  );
+}
+
+function formatHeadlessGm(
+  headlessGm: DaemonStatus['headlessGm'],
+  bridgeState: string,
+  notStarted: string,
+): string {
+  if (headlessGm?.launchError) {
+    return `browser launch failed — ${headlessGm.launchError}`;
+  }
+  // A shared process older than `state` only says `enabled`.
+  const state = headlessGm?.state ?? (headlessGm?.enabled ? 'running' : 'disabled');
+  if (!headlessGm || state === 'disabled') {
+    return 'disabled';
+  }
+  if (state === 'not-started') {
+    return bridgeState === 'failed'
+      ? 'not started (the module bridge failed to start)'
+      : notStarted;
+  }
+  return `${headlessGm.active ? 'logged in' : 'not logged in'} (${headlessGm.status})`;
 }
 
 function printNotRunning(paths: SharedPaths): void {

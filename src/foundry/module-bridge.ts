@@ -434,6 +434,11 @@ export class ModuleBridge {
     );
   }
 
+  /** True once {@link start} has bound the port, until {@link stop}. */
+  isListening(): boolean {
+    return this.servers.length > 0;
+  }
+
   /** True while an authenticated module is connected. */
   isConnected(): boolean {
     return this.socket?.readyState === WebSocket.OPEN;

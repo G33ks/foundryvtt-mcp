@@ -110,6 +110,10 @@ export const DaemonStatusSchema = z.object({
       protocol: z.number().optional(),
       origin: z.string().optional(),
       moduleConnectedSince: z.string().nullable().optional(),
+      // Absent from shared processes older than these fields (then `enabled`
+      // alone decides, and a bridge that never started read as listening).
+      state: z.enum(['listening', 'not-started', 'failed', 'disabled']).optional(),
+      error: z.string().nullable().optional(),
     })
     .optional(),
   headlessGm: z
@@ -119,6 +123,7 @@ export const DaemonStatusSchema = z.object({
       status: z.string().nullable(),
       // Absent from shared processes older than these fields.
       launchError: z.string().nullable().optional(),
+      state: z.enum(['running', 'not-started', 'launch-failed', 'disabled']).optional(),
     })
     .optional(),
 });

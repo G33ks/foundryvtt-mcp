@@ -37,6 +37,10 @@ export interface HealthRuntime {
   relays?: { connected: number; outdated: string[] };
   /** The real error when the headless GM session's browser could not be launched. */
   headlessLaunchError?: string;
+  /** The module bridge starts only after the FoundryVTT connection, and may fail to. */
+  bridgeState?: 'listening' | 'not-started' | 'failed' | 'disabled';
+  /** Why the module bridge failed to start. */
+  bridgeError?: string;
 }
 
 function sharedProcessSection(relays: NonNullable<HealthRuntime['relays']>): string {
@@ -441,7 +445,13 @@ export async function handleGetHealthStatus(
     // without it, and a permanent "not connected" line for a feature nobody
     // opted into would just be noise.
     let moduleBridgeSection: string | null = null;
-    if (moduleBridge) {
+    if (runtime.bridgeState === 'failed') {
+      moduleBridgeSection = `❌ Failed to start — ${runtime.bridgeError ?? 'see the log'}`;
+    } else if (runtime.bridgeState === 'not-started') {
+      moduleBridgeSection = foundryClient.isConnected()
+        ? '⏳ Not started yet'
+        : '⏸️ Not started — it starts once the FoundryVTT connection is up';
+    } else if (moduleBridge) {
       if (moduleBridge.isConnected()) {
         moduleBridgeSection = `✅ Connected — authenticated module (protocol v${BRIDGE_PROTOCOL_VERSION})`;
       } else if (headlessGmSession) {

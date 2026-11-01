@@ -29,6 +29,9 @@ import { logger } from './utils/logger.js';
 import { isRefusal } from './utils/refusal.js';
 import { SerialQueue } from './utils/serial-queue.js';
 
+export type BridgeState = 'listening' | 'not-started' | 'failed' | 'disabled';
+export type HeadlessGmState = 'running' | 'not-started' | 'launch-failed' | 'disabled';
+
 /** Snapshot reported by `foundryvtt-mcp status`. */
 export interface CoreStatus {
   foundryConnected: boolean;
@@ -43,6 +46,10 @@ export interface CoreStatus {
     origin: string;
     /** ISO time the current authenticated connection was established, or `null`. */
     moduleConnectedSince: string | null;
+    /** `not-started` until the FoundryVTT connection is up (the bridge starts after it). */
+    state: BridgeState;
+    /** Why the bridge failed to start; `null` otherwise. */
+    error: string | null;
   };
   headlessGm: {
     enabled: boolean;
@@ -50,6 +57,7 @@ export interface CoreStatus {
     status: string | null;
     /** The real error when the browser could not be launched; `null` otherwise. */
     launchError: string | null;
+    state: HeadlessGmState;
   };
   /** Write calls queued or running. */
   writeQueue: number;
@@ -68,6 +76,10 @@ export class FoundryCore {
   private headlessGmSession: HeadlessGmSession | null;
   /** Why the headless GM session's browser could not be launched, if it could not. */
   private headlessLaunchError: string | null = null;
+  /** Why the module bridge failed to start, if it did. */
+  private bridgeError: string | null = null;
+  /** A headless GM session was configured (it may since have been dropped). */
+  private readonly headlessGmConfigured: boolean;
   /** Serialises every write tool, in arrival order; reads bypass it. */
   private readonly writeQueue = new SerialQueue();
 
@@ -169,6 +181,8 @@ export class FoundryCore {
       }
     }
 
+    this.headlessGmConfigured = this.headlessGmSession !== null;
+
     // Initialize DiagnosticsClient
     this.diagnosticsClient = new DiagnosticsClient(this.foundryClient);
 
@@ -197,6 +211,7 @@ export class FoundryCore {
         try {
           await this.moduleBridge.start();
         } catch (error) {
+          this.bridgeError = error instanceof Error ? error.message : String(error);
           logger.error(
             'Module bridge failed to start — canvas-only tools (capture_scene) will report unavailable; all other tools are unaffected:',
             error,
@@ -305,6 +320,8 @@ export class FoundryCore {
     return {
       ...(this.options.relays ? { relays: this.options.relays() } : {}),
       ...(this.headlessLaunchError ? { headlessLaunchError: this.headlessLaunchError } : {}),
+      bridgeState: this.bridgeState(),
+      ...(this.bridgeError ? { bridgeError: this.bridgeError } : {}),
     };
   }
 
@@ -332,11 +349,36 @@ export class FoundryCore {
     }
   }
 
+  private bridgeState(): BridgeState {
+    if (!config.moduleBridge.enabled) {
+      return 'disabled';
+    }
+    if (this.bridgeError !== null) {
+      return 'failed';
+    }
+    return this.moduleBridge?.isListening() ? 'listening' : 'not-started';
+  }
+
+  private headlessGmState(): HeadlessGmState {
+    if (this.headlessLaunchError !== null) {
+      return 'launch-failed';
+    }
+    if (!this.headlessGmConfigured) {
+      return 'disabled';
+    }
+    return this.headlessGmSession?.isStarted() ? 'running' : 'not-started';
+  }
+
   status(): CoreStatus {
+    const bridgeState = this.bridgeState();
+    const headlessGmState = this.headlessGmState();
     return {
       foundryConnected: this.foundryClient.isConnected(),
       bridge: {
-        enabled: this.moduleBridge !== null,
+        // Kept for `status` commands older than `state`: true only while listening.
+        enabled: bridgeState === 'listening',
+        state: bridgeState,
+        error: this.bridgeError,
         port: config.moduleBridge.port,
         moduleConnected: this.moduleBridge?.isConnected() ?? false,
         protocol: BRIDGE_PROTOCOL_VERSION,
@@ -344,10 +386,11 @@ export class FoundryCore {
         moduleConnectedSince: this.moduleBridge?.moduleConnectedSince()?.toISOString() ?? null,
       },
       headlessGm: {
-        enabled: this.headlessGmSession !== null || this.headlessLaunchError !== null,
+        enabled: headlessGmState !== 'disabled',
         active: this.headlessGmSession?.isActive() ?? false,
         status: this.headlessGmSession?.statusText() ?? null,
         launchError: this.headlessLaunchError,
+        state: headlessGmState,
       },
       writeQueue: this.writeQueue.pending,
     };

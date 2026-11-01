@@ -39,8 +39,10 @@ const STATUS: CoreStatus = {
     protocol: 1,
     origin: 'http://localhost:30000',
     moduleConnectedSince: '2026-11-01T00:00:00.000Z',
+    state: 'listening',
+    error: null,
   },
-  headlessGm: { enabled: true, active: true, status: 'ok' },
+  headlessGm: { enabled: true, active: true, status: 'ok', launchError: null, state: 'running' },
   writeQueue: 0,
 };
 

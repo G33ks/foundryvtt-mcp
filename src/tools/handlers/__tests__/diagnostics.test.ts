@@ -526,6 +526,35 @@ describe('handleGetHealthStatus', () => {
     expect(text).toContain('no longer supported');
   });
 
+  it('says the bridge has not started while the FoundryVTT connection is down', async () => {
+    const bridge = { isConnected: () => false } as unknown as ModuleBridge;
+    const text = getText(
+      await handleGetHealthStatus(
+        {},
+        worldClient(false),
+        healthClient(makeHealth()),
+        bridge,
+        null,
+        {
+          bridgeState: 'not-started',
+        },
+      ),
+    );
+    expect(text).toContain('**Module Bridge:**');
+    expect(text).toContain('Not started — it starts once the FoundryVTT connection is up');
+    expect(text).not.toContain('Logging in');
+  });
+
+  it('shows a bridge that failed to start, even though it was dropped', async () => {
+    const text = getText(
+      await handleGetHealthStatus({}, worldClient(true), healthClient(makeHealth()), null, null, {
+        bridgeState: 'failed',
+        bridgeError: 'listen EADDRINUSE 127.0.0.1:31415',
+      }),
+    );
+    expect(text).toContain('❌ Failed to start — listen EADDRINUSE 127.0.0.1:31415');
+  });
+
   it('shows the real browser launch error instead of configuration advice', async () => {
     const bridge = { isConnected: () => false } as unknown as ModuleBridge;
 
