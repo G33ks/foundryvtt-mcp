@@ -117,6 +117,25 @@ export function parseDocumentBroadcast(payload: unknown): DocumentBroadcast | nu
 }
 
 /**
+ * Validates a `modifyDocumentBatch` payload and splits it into broadcasts.
+ *
+ * FoundryVTT v14 sends `{results: DocumentSocketResponse[]}` on this event
+ * instead of `modifyDocument` for a `foundry.documents.modifyBatch()` call,
+ * and for any single operation with server-side side effects (activating a
+ * scene deactivates the others, deleting a folder deletes its contents, …):
+ * side effects first, the operation itself last. Each element has the shape
+ * of a `modifyDocument` broadcast; invalid ones are dropped, the rest kept.
+ *
+ * @returns the broadcasts in order, or `null` when the payload is not a batch
+ */
+export function parseDocumentBatch(payload: unknown): DocumentBroadcast[] | null {
+  if (!isRecord(payload) || !Array.isArray(payload.results)) {
+    return null;
+  }
+  return payload.results.flatMap((element) => parseDocumentBroadcast(element) ?? []);
+}
+
+/**
  * Keys that must never be copied out of a broadcast payload.
  *
  * Broadcast data arrives off the network from whatever FoundryVTT relays, so it

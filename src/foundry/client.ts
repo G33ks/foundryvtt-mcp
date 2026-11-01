@@ -69,6 +69,8 @@ import { ACTIVE_EFFECT_MODES, OWNERSHIP_LEVELS, USER_ROLES, VISIBILITY_LEVELS } 
 import {
   applyDocumentBroadcast,
   applyUserActivity,
+  type DocumentBroadcast,
+  parseDocumentBatch,
   parseDocumentBroadcast,
   parseUserActivity,
 } from './world-cache.js';
@@ -344,6 +346,8 @@ interface DocumentSocketResponse {
   /** Present when the server rejects the operation. */
   error?: { message?: string } | null;
   userId?: string;
+  /** Instead of the fields above when the operation had side effects: side effects first, the operation last. */
+  results?: unknown[];
 }
 
 export interface SearchActorsParams {
@@ -738,6 +742,9 @@ export class FoundryClient {
           // Keep the snapshot live from here on (#205). Attached only after a
           // successful handshake so the reject paths have no listener to leak.
           this.socket?.on('modifyDocument', this.onDocumentBroadcast);
+          // Batches and operations with server-side side effects arrive here
+          // instead, never on both channels.
+          this.socket?.on('modifyDocumentBatch', this.onDocumentBatchBroadcast);
           // Presence (#218): `activeUsers` is not a document collection, so it
           // only moves on this event.
           this.socket?.on('userActivity', this.onUserActivity);
@@ -774,9 +781,32 @@ export class FoundryClient {
     if (!this.worldData) {
       return;
     }
-
     const broadcast = parseDocumentBroadcast(payload);
-    if (!broadcast) {
+    if (broadcast) {
+      this.handleDocumentBroadcast(broadcast);
+    }
+  };
+
+  /**
+   * Applies a FoundryVTT v14 `modifyDocumentBatch` broadcast: each element
+   * goes through the same path as a `modifyDocument` broadcast, in order.
+   * Sent for `foundry.documents.modifyBatch()` and for any single operation
+   * with server-side side effects (see `parseDocumentBatch`).
+   *
+   * Bound field rather than a method so the same reference reaches `socket.off()`.
+   */
+  private onDocumentBatchBroadcast = (payload: unknown): void => {
+    if (!this.worldData) {
+      return;
+    }
+    for (const broadcast of parseDocumentBatch(payload) ?? []) {
+      this.handleDocumentBroadcast(broadcast);
+    }
+  };
+
+  /** Cache, event log and journal overwrite watch for one document broadcast. Never throws. */
+  private handleDocumentBroadcast(broadcast: DocumentBroadcast): void {
+    if (!this.worldData) {
       return;
     }
 
@@ -827,7 +857,7 @@ export class FoundryClient {
         }
       }
     }
-  };
+  }
 
   /**
    * Handles a collaborative-editor autosave (`pm.autosave`).
@@ -1098,6 +1128,7 @@ export class FoundryClient {
       return;
     }
     this.socket.off('modifyDocument', this.onDocumentBroadcast);
+    this.socket.off('modifyDocumentBatch', this.onDocumentBatchBroadcast);
     this.socket.off('userActivity', this.onUserActivity);
     this.socket.off('pm.autosave', this.onEditorAutosave);
     this.socket.off('connect', this.onSocketConnect);
@@ -1801,12 +1832,29 @@ export class FoundryClient {
       operation: { broadcast: true, pack: null, modifiedTime: Date.now(), ...operation },
     };
     const response = await this.emitWithAck<DocumentSocketResponse>('modifyDocument', request);
-    if (response?.error) {
+    // An operation with server-side side effects (activating a scene
+    // deactivates the others, …) is answered `{results: [...sideEffects,
+    // response]}` by FoundryVTT v14 instead of the bare response.
+    const responses: DocumentSocketResponse[] = Array.isArray(response?.results)
+      ? response.results.filter(isRecord)
+      : [response];
+    const failed = responses.find((r) => r?.error);
+    if (failed) {
       throw new Error(
-        `FoundryVTT rejected ${action} ${type}: ${response.error.message || 'unknown error'}`,
+        `FoundryVTT rejected ${action} ${type}: ${failed.error?.message || 'unknown error'}`,
       );
     }
-    const result = Array.isArray(response?.result) ? response.result : [];
+    const main = responses[responses.length - 1];
+    const result = Array.isArray(main?.result) ? main.result : [];
+    if (this.worldData) {
+      // Side effects are not echoed back to this client either.
+      for (const sideEffect of responses.slice(0, -1)) {
+        const broadcast = parseDocumentBroadcast(sideEffect);
+        if (broadcast) {
+          applyDocumentBroadcast(this.worldData, broadcast);
+        }
+      }
+    }
     // FoundryVTT does not echo a client's own writes back on the
     // `modifyDocument` broadcast channel (see world-cache.ts's header
     // comment) - without this, every write here left `worldData` stale

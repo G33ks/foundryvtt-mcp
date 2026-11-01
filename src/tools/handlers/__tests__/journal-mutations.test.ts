@@ -798,6 +798,7 @@ describe('FoundryClient journal page editing (modifyDocument)', () => {
       worldData: Record<string, unknown> & { journal: WorldJournal[] };
       worldDataStale: boolean;
       onDocumentBroadcast: (payload: unknown) => void;
+      onDocumentBatchBroadcast: (payload: unknown) => void;
       onEditorAutosave: (uuid: unknown, html: unknown) => void;
     };
     internals.socket = { connected: true, emit };
@@ -1215,6 +1216,38 @@ describe('FoundryClient journal page editing (modifyDocument)', () => {
 
       expect(client.getRecentJournalConflicts()).toEqual([]);
       expect(client.drainJournalWarnings()).toEqual([]);
+    });
+
+    it('reports an overwrite carried by a modifyDocumentBatch broadcast', async () => {
+      const { client, internals } = buildClient();
+      await appendOurs(client);
+
+      internals.onDocumentBatchBroadcast({
+        results: [
+          {
+            type: 'Folder',
+            action: 'update',
+            result: [{ _id: 'folder0000000000' }],
+            sideEffect: true,
+            userId: ALICE_ID,
+          },
+          pageBroadcast(ALICE_ID, ORIGINAL),
+        ],
+      });
+
+      expect(client.getRecentJournalConflicts()).toEqual([
+        expect.objectContaining({ pageId: PAGE_ID, reason: 'overwritten-by-Alice' }),
+      ]);
+      expect(cachedPage(client)?.text?.content).toBe(ORIGINAL);
+    });
+
+    it("ignores the connector's own sessions in a batch too", async () => {
+      const { client, internals } = buildClient();
+      await appendOurs(client);
+
+      internals.onDocumentBatchBroadcast({ results: [pageBroadcast(HEADLESS_ID, ORIGINAL)] });
+
+      expect(client.getRecentJournalConflicts()).toEqual([]);
     });
 
     it("ignores the connector's own sessions", async () => {

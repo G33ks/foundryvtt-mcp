@@ -50,6 +50,18 @@ Mutations go over the existing authenticated socket (no bridge), per PRD-003
 sees the write, and changes made by *other* users (a player moving a token, the
 GM editing in the UI) land in the cache too.
 
+FoundryVTT v14 also uses a second channel, **`modifyDocumentBatch`**
+(`{results: DocumentSocketResponse[]}`, side effects first, the operation
+last). It carries `foundry.documents.modifyBatch()` calls and **every single
+operation with server-side side effects** — activating a scene or combat
+deactivates the others, deleting a folder deletes or moves its contents,
+token moves that update attached regions, level deletions, `core.time`
+updates (server `_sideEffects`, v14.369). A change arrives on one channel
+only, and neither is echoed to the client that made it. `client.ts` handles
+both channels the same way, and `modifyDocument()` accepts the same
+`{results}` shape as the **ack** of the connector's own writes (errors can
+sit in any element; the operation's own result is the last one).
+
 Consequences for new write tools:
 
 - **Do not hand-patch `worldData` in a mutation method.** The broadcast already

@@ -4,6 +4,7 @@ import {
   applyDocumentBroadcast,
   applyUserActivity,
   type DocumentBroadcast,
+  parseDocumentBatch,
   parseDocumentBroadcast,
   parseUserActivity,
 } from '../world-cache.js';
@@ -368,6 +369,64 @@ describe('applyDocumentBroadcast — embedded documents', () => {
  * collection, so `modifyDocument` never touches it. FoundryVTT signals presence
  * on the separate `userActivity` event instead.
  */
+describe('parseDocumentBatch', () => {
+  // Shape of FoundryVTT v14's `modifyDocumentBatch` (server-backend.mjs):
+  // `{results: DocumentSocketResponse[]}`, side effects first, each with its
+  // own type/action/operation/userId.
+  it('splits a batch into its broadcasts, in order', () => {
+    const batch = parseDocumentBatch({
+      results: [
+        {
+          type: 'Scene',
+          action: 'update',
+          operation: {},
+          result: [{ _id: SCENE_ID, active: false }],
+          sideEffect: true,
+          userId: 'gm00000000000000',
+        },
+        {
+          type: 'JournalEntryPage',
+          action: 'update',
+          operation: { parentUuid: `JournalEntry.${JOURNAL_ID}` },
+          result: [{ _id: PAGE_ID, text: { content: '<p>x</p>' } }],
+          userId: 'gm00000000000000',
+        },
+      ],
+    });
+    expect(batch).toEqual([
+      {
+        type: 'Scene',
+        action: 'update',
+        result: [{ _id: SCENE_ID, active: false }],
+        userId: 'gm00000000000000',
+      },
+      {
+        type: 'JournalEntryPage',
+        action: 'update',
+        result: [{ _id: PAGE_ID, text: { content: '<p>x</p>' } }],
+        parentUuid: `JournalEntry.${JOURNAL_ID}`,
+        userId: 'gm00000000000000',
+      },
+    ]);
+  });
+
+  it('drops invalid elements and keeps the others', () => {
+    const batch = parseDocumentBatch({
+      results: [
+        null,
+        { type: 'Actor', action: 'explode', result: [] },
+        { type: 'Actor', action: 'delete', result: [ACTOR_ID], error: { message: 'no' } },
+        { type: 'Actor', action: 'delete', result: [ACTOR_ID] },
+      ],
+    });
+    expect(batch).toEqual([{ type: 'Actor', action: 'delete', result: [ACTOR_ID] }]);
+  });
+
+  it.each([null, 'x', {}, { results: 'nope' }])('returns null for %j', (payload) => {
+    expect(parseDocumentBatch(payload)).toBeNull();
+  });
+});
+
 describe('parseUserActivity', () => {
   const USER_ID = 'user0000user0001';
 

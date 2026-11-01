@@ -462,3 +462,126 @@ describe('FoundryClient scene & tile creation', () => {
     });
   });
 });
+
+/**
+ * FoundryVTT v14 answers a write that has server-side side effects with
+ * `{results: [...sideEffects, response]}` instead of a bare response
+ * (server-backend.mjs) — activating a scene deactivates the others.
+ */
+describe('FoundryClient writes answered with side effects', () => {
+  const OTHER_SCENE = 'othr0000scene000';
+
+  async function connectClient() {
+    const { io } = await import('socket.io-client');
+    const { authenticateFoundry } = await import('../auth.js');
+    vi.mocked(authenticateFoundry).mockResolvedValue({
+      session: 'test-session',
+      userId: 'test-user-id',
+    });
+    const world = structuredClone(baseWorldData()) as Record<string, unknown> & {
+      scenes: Array<Record<string, unknown>>;
+    };
+    world.scenes.push({ _id: OTHER_SCENE, name: 'Other', active: false });
+    const harness = buildMockSocket(world);
+    vi.mocked(io).mockReturnValue(harness.socket as never);
+    const client = new FoundryClient({
+      baseUrl: 'http://localhost:30000',
+      username: 'gm',
+      password: 'secret',
+      writeEnabled: true,
+    });
+    const connecting = client.connect();
+    await vi.waitFor(() => expect(harness.listeners.get('session')?.length).toBe(1));
+    harness.fire('session', { userId: 'test-user-id' });
+    await connecting;
+    return { client, ...harness };
+  }
+
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('returns the operation result and applies the side effects to the cache', async () => {
+    const { client, socket } = await connectClient();
+    socket.emit.mockImplementationOnce(((
+      _event: string,
+      _payload: unknown,
+      ack: (r: unknown) => void,
+    ) => {
+      ack({
+        results: [
+          {
+            type: 'Scene',
+            action: 'update',
+            operation: {},
+            result: [{ _id: SCENE_ID, active: false }],
+            sideEffect: true,
+            userId: 'test-user-id',
+          },
+          {
+            type: 'Scene',
+            action: 'update',
+            operation: {},
+            result: [{ _id: OTHER_SCENE, active: true }],
+            userId: 'test-user-id',
+          },
+        ],
+      });
+      return socket;
+    }) as never);
+
+    await expect(client.switchScene(OTHER_SCENE)).resolves.toEqual({
+      _id: OTHER_SCENE,
+      active: true,
+    });
+    const scenes = (client as unknown as { worldData: { scenes: Array<Record<string, unknown>> } })
+      .worldData.scenes;
+    expect(scenes.find((s) => s._id === SCENE_ID)?.active).toBe(false);
+    expect(scenes.find((s) => s._id === OTHER_SCENE)?.active).toBe(true);
+  });
+
+  it('rejects when any element of the answer carries an error', async () => {
+    const { client, socket } = await connectClient();
+    socket.emit.mockImplementationOnce(((
+      _event: string,
+      _payload: unknown,
+      ack: (r: unknown) => void,
+    ) => {
+      ack({
+        results: [
+          {
+            type: 'Scene',
+            action: 'update',
+            operation: {},
+            result: [],
+            error: { message: 'Nope' },
+          },
+        ],
+      });
+      return socket;
+    }) as never);
+
+    await expect(client.switchScene(OTHER_SCENE)).rejects.toThrow(/rejected update Scene: Nope/);
+  });
+
+  it('listens to modifyDocumentBatch and stops listening on disconnect', async () => {
+    const { client, listeners, fire } = await connectClient();
+    expect(listeners.get('modifyDocumentBatch')?.length).toBe(1);
+    fire('modifyDocumentBatch', {
+      results: [
+        {
+          type: 'Scene',
+          action: 'delete',
+          operation: {},
+          result: [OTHER_SCENE],
+          userId: 'someone000000000',
+        },
+      ],
+    });
+    const scenes = (client as unknown as { worldData: { scenes: Array<Record<string, unknown>> } })
+      .worldData.scenes;
+    expect(scenes.map((s) => s._id)).not.toContain(OTHER_SCENE);
+    await client.disconnect();
+    expect(listeners.get('modifyDocumentBatch')?.length ?? 0).toBe(0);
+  });
+});
