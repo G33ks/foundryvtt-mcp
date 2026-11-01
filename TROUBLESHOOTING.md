@@ -123,6 +123,25 @@ The server provides detailed diagnostics on startup. Look for:
 1. **Check formula**: Ensure dice notation is valid (e.g., "1d20+5", "3d6")
 2. **FoundryVTT version**: The server handles FoundryVTT v13 and v14 explicitly; older versions are not verified
 
+#### A journal edit was overwritten
+**Symptoms**: A journal tool response starts with `⚠️ Journal overwrite detected`, `get_health_status` lists an overwrite under **Journal Integrity**, or the GMs received a whispered chat message about it. Text the connector wrote to a page is gone, or a change made in FoundryVTT was replaced by the connector's write.
+
+**What is prevented**: every page write (`update_journal_page`, `add_journal_page`) first reads the entry back from the server, never from the cache. An append is added to the page as currently stored, and a replace is refused (nothing is written) unless its `expectedVersion` still matches the stored page — read it again with `get_journal` `raw: true` and rewrite it.
+
+**What is only detected** (for 6 hours after each write, in memory):
+- **A stale save** — someone saved an older copy of the page over the connector's text. The history reason is `overwritten-by-<user name>`.
+- **An open editor's autosave** — while a text page is open in a FoundryVTT editor, the server keeps its own copy of the page and saves it every `core.editorAutosaveSecs` (60 s by default), **even if nobody types**. A connector write never reaches that copy, so the next autosave reverts it. Reason: `overwritten-by-editor-autosave` (FoundryVTT does not say who is editing). A page autosaved in the last 10 minutes is flagged in the write response: close the editor before writing, or write after the session.
+- **A change that crossed the connector's write** — someone saved the page between the connector's read-back and its write; the connector's write replaced it. Reason: `overwritten-by-connector`; the copy holds *their* version.
+
+Detection compares paragraphs of text, not HTML, so markup rewritten by FoundryVTT or the editor does not count as a loss. Changes made by the connector's own accounts (`FOUNDRY_USERNAME` and the headless GM user) are never reported.
+
+**Where the copies are**: in the state directory (see [Shared Process](#where-are-the-logs)), under `journal-history\<journalId>\<pageId>\`. Each copy is a `<time>-<reason>.html` file — the page body exactly as stored — with a `.json` next to it (entry and page names, reason, version token, user, date). A copy is written before every page write (`before-replace`, `before-append`) and for every detected overwrite; a page write is refused if its copy cannot be written. Each page keeps its 20 most recent copies, none older than 30 days. `get_health_status` prints the folder; `daemon.log` records ids, version tokens and copy paths, never page text.
+
+**Restoring by hand**:
+1. Find the copy: the path is in the warning, the whisper and `get_health_status`, or sort the page's folder by name (the newest is last).
+2. Check it: open the `.html` file in a text editor (or a browser) and compare it with the page in FoundryVTT. Make sure nobody has the page open in an editor.
+3. Put it back: in FoundryVTT, open the page, switch the editor to its HTML source view, replace the content with the copy's content and save. Or ask the assistant to read the copy and rewrite the page with `get_journal` `raw: true` followed by `update_journal_page` (replace, with the version just read). That rewrite itself saves a `before-replace` copy of what it replaces.
+
 #### Module Bridge Never Connects / "WebSocket ... failed"
 **Symptoms**: `get_health_status` keeps reporting the module bridge as disconnected (canvas tools such as `capture_scene` say no module is connected), even though the server logs `Module bridge listening on ws://localhost:31415` and the GM session is logged in. The browser console of the GM tab shows `WebSocket connection to 'ws://localhost:31415/' failed`, with no further detail.
 

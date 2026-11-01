@@ -48,6 +48,7 @@ commands must not load Socket.IO or Playwright.
 | Shared mode | `src/shared/` | Relay, shared process, IPC protocol, autostart, `status`/`stop` |
 | Write tools | `src/tools/write-tools.ts` | Tools serialised by the write queue — add every new mutation tool |
 | Client | `src/foundry/client.ts` | Socket.IO connection, world state cache |
+| Journal integrity | `src/foundry/journal-integrity.ts`, `journal-history.ts` | Page version tokens, overwrite watch (`modifyDocument` + `pm.autosave`), local copies in the state dir |
 | Auth | `src/foundry/auth.ts` | 4-step Socket.IO authentication |
 | Config | `src/config/index.ts` | Zod-validated environment config |
 | Tools | `src/tools/definitions.ts` | MCP tool schemas |

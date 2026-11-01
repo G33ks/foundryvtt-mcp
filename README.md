@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue.svg)](https://www.typescriptlang.org/)
-[![Vitest](https://img.shields.io/badge/Tests-886%20passing-brightgreen.svg)](https://vitest.dev/)
+[![Vitest](https://img.shields.io/badge/Tests-949%20passing-brightgreen.svg)](https://vitest.dev/)
 [![Tools](https://img.shields.io/badge/MCP%20Tools-114-purple.svg)](https://modelcontextprotocol.io/)
 
 A comprehensive, production-grade [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for **Foundry Virtual Tabletop (FoundryVTT)**.
@@ -298,7 +298,7 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
 - `search_world` — search actors, items, scenes, and journals by name at once, grouped by collection.
 - `get_users` / `set_user_role` — list connected users and change permission roles with self-demotion lockout guards.
 - `create_journal_entry` / `get_journal` / `search_journals` / `delete_journal_entry` — manage session notes and lore. `get_journal` lists each page's id; pass `raw: true` for the full, unmodified page HTML.
-- `update_journal_page` / `add_journal_page` / `update_journal_entry` — edit existing journals: replace or append to a page's content (or rename it), add a page after the last one, and rename, refile, or change the visibility of an entry.
+- `update_journal_page` / `add_journal_page` / `update_journal_entry` — edit existing journals: replace or append to a page's content (or rename it), add a page after the last one, and rename, refile, or change the visibility of an entry. Page writes work on the page as stored on the server, never on the cache: an append is added to the current text, and a replace needs the `version` token printed by `get_journal` `raw: true` and is refused if the page changed since. Every write keeps a local copy of the previous text, returns the new version token, and the page is watched for a later overwrite (a stale save, or an open FoundryVTT editor's autosave) — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#a-journal-edit-was-overwritten).
 
 ### 7. Scene, Weather & Exploration
 - `create_scene` / `delete_scene` / `get_scene_info` / `switch_scene` — scene creation and player activation.
@@ -331,7 +331,7 @@ npm install
 # Compile TypeScript
 npm run build
 
-# Run complete unit test suite (886 tests)
+# Run complete unit test suite (949 tests)
 npm test
 
 # Run linter and formatting checks
