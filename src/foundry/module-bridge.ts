@@ -43,7 +43,8 @@ function isBridgeMessage(value: unknown): value is BridgeMessage {
 }
 
 export class ModuleBridge {
-  private wss: WebSocketServer | null = null;
+  /** One listener per loopback address. */
+  private servers: WebSocketServer[] = [];
   private socket: WebSocket | null = null;
   private pending = new Map<string, PendingRequest>();
   private nextId = 1;
@@ -61,17 +62,42 @@ export class ModuleBridge {
     this.requestTimeoutMs = requestTimeoutMs;
   }
 
-  /** Starts the relay server and waits for it to be listening. */
-  start(): Promise<void> {
+  /**
+   * Starts the relay server and waits for it to be listening.
+   *
+   * Loopback only: the module dials `ws://localhost:<port>` from a browser
+   * on this machine, and the bridge drives a GM session, so it must not be
+   * reachable from the network. `localhost` may resolve to either family,
+   * hence one listener on 127.0.0.1 and one on ::1 (skipped when IPv6 is
+   * unavailable).
+   */
+  async start(): Promise<void> {
+    await this.listenOn('127.0.0.1');
+    try {
+      await this.listenOn('::1');
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EADDRNOTAVAIL' && code !== 'EAFNOSUPPORT') {
+        await this.stop();
+        throw error;
+      }
+      logger.debug(`Module bridge: IPv6 loopback unavailable (${code}); IPv4 only`);
+    }
+    logger.info(`Module bridge listening on ws://localhost:${this.port} (loopback only)`);
+  }
+
+  private listenOn(host: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const wss = new WebSocketServer({ port: this.port });
-      this.wss = wss;
+      const wss = new WebSocketServer({ host, port: this.port });
 
       wss.once('listening', () => {
-        logger.info(`Module bridge listening on ws://localhost:${this.port}`);
+        this.servers.push(wss);
         resolve();
       });
-      wss.once('error', (err: Error) => reject(err));
+      wss.once('error', (err: Error) => {
+        wss.close();
+        reject(err);
+      });
 
       wss.on('connection', (ws) => {
         logger.info('Foundry module connected to bridge');
@@ -101,13 +127,16 @@ export class ModuleBridge {
     this.pending.clear();
     this.socket?.close();
     this.socket = null;
-    await new Promise<void>((resolve, reject) => {
-      if (!this.wss) {
-        resolve();
-        return;
-      }
-      this.wss.close((err) => (err ? reject(err) : resolve()));
-    });
+    const servers = this.servers;
+    this.servers = [];
+    await Promise.all(
+      servers.map(
+        (wss) =>
+          new Promise<void>((resolve, reject) => {
+            wss.close((err) => (err ? reject(err) : resolve()));
+          }),
+      ),
+    );
   }
 
   isConnected(): boolean {
