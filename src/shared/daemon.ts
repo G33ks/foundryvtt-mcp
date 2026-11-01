@@ -4,7 +4,8 @@
  * Owns the single FoundryVTT connection, module bridge and headless GM
  * session ({@link FoundryCore}) and serves tool calls forwarded by relays.
  * It outlives the relays MCP clients start and stop, and exits on `stop`,
- * or after a relay with another version/configuration knocks. When the
+ * after a relay with another version/configuration knocks, or once no relay
+ * has been connected for the idle timeout. When the
  * FoundryVTT connection cannot be established (FoundryVTT not started yet,
  * wrong URL…) it stays up and retries on the next call.
  */
@@ -17,6 +18,7 @@ import { configFingerprint } from './config-hash.js';
 import { IpcServer } from './ipc-server.js';
 import { resolveSharedPaths, type SharedPaths } from './paths.js';
 import type { DaemonStatus, IpcError } from './protocol.js';
+import { RotatingLog } from './rotating-log.js';
 import { removeStateFile, writeStateFile } from './state-file.js';
 import { loadOrCreateToken } from './token.js';
 import { packageVersion } from './version.js';
@@ -35,6 +37,8 @@ export interface SharedProcessOptions {
   /** Builds the core once the single-instance lock is held. */
   createCore: () => Promise<SharedCore>;
   exit: (code: number) => void;
+  /** Exit after this long with no relay connected; 0 = never. */
+  idleTimeoutMs?: number;
   /** Longest a tool call waits for the FoundryVTT connection attempt at startup. */
   startupWaitMs?: number;
   /** Longest a shutdown waits for in-flight calls before tearing down anyway. */
@@ -77,6 +81,7 @@ export class SharedProcess {
   private startup: Promise<void> | null = null;
   private startupError: unknown = null;
   private shuttingDown: Promise<void> | null = null;
+  private idleTimer: NodeJS.Timeout | null = null;
 
   constructor(private readonly options: SharedProcessOptions) {
     this.ipc = new IpcServer({
@@ -86,6 +91,7 @@ export class SharedProcess {
       configHash: options.configHash,
       toIpcError,
       log: (level, message) => logger[level](message),
+      onRelayCountChange: (count) => this.updateIdleTimer(count),
       onMismatch: (reason) => {
         void this.drainAndExit(`a relay with a different ${reason} connected`);
       },
@@ -124,7 +130,29 @@ export class SharedProcess {
     logger.info(`Shared process ${process.pid} (v${version}) listening on ${paths.endpoint}`);
 
     this.startup = this.bootCore();
+    this.updateIdleTimer(0);
     return 'listening';
+  }
+
+  /**
+   * Arms the idle timer while no relay is connected, disarms it otherwise.
+   * Hours without a call do not count as idle as long as a relay is there.
+   */
+  private updateIdleTimer(relays: number): void {
+    const idleTimeoutMs = this.options.idleTimeoutMs ?? 0;
+    if (this.idleTimer) {
+      clearTimeout(this.idleTimer);
+      this.idleTimer = null;
+    }
+    if (relays === 0 && idleTimeoutMs > 0 && !this.shuttingDown) {
+      this.idleTimer = setTimeout(
+        () =>
+          void this.drainAndExit(
+            `no relay connected for ${Number((idleTimeoutMs / 60_000).toFixed(2))} min`,
+          ),
+        idleTimeoutMs,
+      );
+    }
   }
 
   /** Builds and starts a core, replacing one whose start failed. */
@@ -149,6 +177,9 @@ export class SharedProcess {
     this.shuttingDown ??= (async () => {
       const { drainMaxMs = 120_000, shutdownGraceMs = 5000, paths, exit } = this.options;
       logger.info(`Shared process shutting down: ${reason}`);
+      if (this.idleTimer) {
+        clearTimeout(this.idleTimer);
+      }
       this.ipc.setDraining();
       await Promise.race([this.ipc.waitForIdle(), sleep(drainMaxMs)]);
       const force = setTimeout(() => exit(1), shutdownGraceMs);
@@ -209,12 +240,21 @@ export class SharedProcess {
 
 /** Entry point of `foundryvtt-mcp daemon`. */
 export async function runDaemon(paths: SharedPaths = resolveSharedPaths()): Promise<void> {
+  // Started detached with stdio ignored: the log file is the only output.
+  const log = new RotatingLog(paths.daemonLog);
+  logger.addSink((line) => log.write(line));
+  logger.info(
+    `Shared process ${process.pid} starting (node ${process.version}, cwd ${process.cwd()})`,
+  );
+
   const token = loadOrCreateToken(paths.tokenFile);
+  const config = getConfig();
   const shared = new SharedProcess({
     paths,
     version: packageVersion(),
     token,
-    configHash: configFingerprint(getConfig(), token),
+    configHash: configFingerprint(config, token),
+    idleTimeoutMs: config.shared.idleTimeoutMinutes * 60_000,
     // Loaded lazily: Socket.IO, Playwright & co. are not needed to lose the race.
     createCore: async () => new (await import('../core.js')).FoundryCore(),
     exit: (code) => process.exit(code),

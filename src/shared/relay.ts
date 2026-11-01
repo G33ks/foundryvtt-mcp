@@ -16,6 +16,7 @@ import { configFingerprint } from './config-hash.js';
 import { DaemonLink } from './daemon-link.js';
 import { resolveSharedPaths } from './paths.js';
 import { type Hello, PROTOCOL_VERSION } from './protocol.js';
+import { RotatingLog } from './rotating-log.js';
 import { spawnDaemon } from './spawn.js';
 import { loadOrCreateToken } from './token.js';
 import { packageVersion } from './version.js';
@@ -27,6 +28,9 @@ export async function runRelay(entry: string): Promise<void> {
   // a broken setup fails here, visibly, not on the first tool call.
   const config = getConfig();
   const paths = resolveSharedPaths();
+  // stderr stays the MCP client's log; relay.log keeps a history across clients.
+  const log = new RotatingLog(paths.relayLog);
+  logger.addSink((line) => log.write(line));
   const version = packageVersion();
 
   const link = new DaemonLink({

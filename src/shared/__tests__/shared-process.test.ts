@@ -238,6 +238,39 @@ describe('SharedProcess', () => {
   });
 });
 
+describe('idle timeout', () => {
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  it('exits when no relay has been connected for the timeout', async () => {
+    const paths = makePaths();
+    const { shared, exit } = makeProcess(paths, { idleTimeoutMs: 100 });
+    await shared.start();
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0));
+  });
+
+  it('stays up while a relay is connected, however long without calls', async () => {
+    const paths = makePaths();
+    const { shared, exit } = makeProcess(paths, { idleTimeoutMs: 150 });
+    await shared.start();
+    const link = makeLink(paths, () => {});
+    await link.ensureConnected();
+
+    await sleep(400);
+    expect(exit).not.toHaveBeenCalled();
+
+    link.close();
+    await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(0));
+  });
+
+  it('never exits on idle with a timeout of 0', async () => {
+    const paths = makePaths();
+    const { shared, exit } = makeProcess(paths, { idleTimeoutMs: 0 });
+    await shared.start();
+    await sleep(200);
+    expect(exit).not.toHaveBeenCalled();
+  });
+});
+
 describe('autostart with concurrent relays', () => {
   it('five relays racing to start the shared process end up with one', async () => {
     const paths = makePaths();
