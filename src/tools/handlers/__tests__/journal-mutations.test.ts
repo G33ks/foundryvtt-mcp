@@ -1059,7 +1059,9 @@ describe('FoundryClient journal page editing (modifyDocument)', () => {
 
       const written = await client.appendJournalPage(JOURNAL_ID, PAGE_ID, '<p>x</p>');
 
-      expect(written.notices).toEqual([expect.stringMatching(/probably open in an editor/)]);
+      expect(written.notices).toEqual([
+        expect.stringMatching(/may still be open in an editor.*persist .* after it was closed/),
+      ]);
     });
 
     it('fails clearly when the page is not in the journal', async () => {

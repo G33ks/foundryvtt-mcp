@@ -2801,8 +2801,9 @@ export class FoundryClient {
     if (this.journalWatch.hasRecentAutosave(journalId, pageId)) {
       notices.push(
         `⚠️ A FoundryVTT editor autosaved this page in the last ${RECENT_AUTOSAVE_MS / 60000} minutes: ` +
-          'it is probably open in an editor, whose autosave can overwrite this write. ' +
-          'Closing that editor is safer.',
+          'it may still be open in an editor, whose autosave can overwrite this write if text was ' +
+          'typed in it. Closing that editor is safer. FoundryVTT does not report when an editor ' +
+          'closes, so this notice can persist for a few minutes after it was closed.',
       );
     }
 
