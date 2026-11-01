@@ -15,7 +15,8 @@ const copy = (overrides = {}) => ({
   pageName: 'Recap',
   reason: 'before-append',
   content: '<p>Old</p>',
-  user: 'mcp-api',
+  overwrittenBy: 'mcp-api',
+  connectorAccount: 'mcp-api',
   ...overrides,
 });
 
@@ -49,9 +50,24 @@ describe('JournalHistory', () => {
       pageName: 'Recap',
       reason: 'before-append',
       version: journalVersion('<p>Old</p>'),
-      user: 'mcp-api',
+      overwrittenBy: 'mcp-api',
+      connectorAccount: 'mcp-api',
       savedAt: '2026-11-01T15:05:09.123Z',
     });
+  });
+
+  it('records who overwrote a version and whose version it was', () => {
+    const file = history.save(
+      copy({ reason: 'overwritten-by-Alice', overwrittenBy: 'Alice', versionBy: 'mcp-api' }),
+    );
+    const meta = JSON.parse(readFileSync(file.replace(/.html$/, '.json'), 'utf8'));
+    expect(meta).toMatchObject({
+      reason: 'overwritten-by-Alice',
+      overwrittenBy: 'Alice',
+      versionBy: 'mcp-api',
+      connectorAccount: 'mcp-api',
+    });
+    expect(meta).not.toHaveProperty('user');
   });
 
   it('keeps two copies made in the same millisecond', () => {

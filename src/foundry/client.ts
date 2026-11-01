@@ -73,6 +73,9 @@ import {
   parseUserActivity,
 } from './world-cache.js';
 
+/** Who overwrote a page when an editor autosave did: FoundryVTT does not say. */
+const EDITOR_AUTOSAVE_USER = 'editor-autosave (unknown user)';
+
 /** FoundryVTT document IDs are 16-character alphanumeric strings. */
 const FOUNDRY_ID_PATTERN = /^[a-zA-Z0-9]{16}$/;
 
@@ -878,6 +881,11 @@ export class FoundryClient {
     return ids;
   }
 
+  /** Name of the account this client is logged in with. */
+  private connectorAccountName(): string {
+    return this.worldData ? this.userName(this.worldData.userId) : 'connector';
+  }
+
   private userName(userId: string): string {
     return this.worldData?.users?.find((user) => user._id === userId)?.name ?? userId;
   }
@@ -899,7 +907,8 @@ export class FoundryClient {
       savedBy,
       // The version that was lost is the connector's.
       copy: watched.after,
-      copyUser: this.worldData ? this.userName(this.worldData.userId) : 'connector',
+      overwrittenBy: savedBy ?? EDITOR_AUTOSAVE_USER,
+      versionBy: this.connectorAccountName(),
       detail: `${seen.lost.length} paragraph(s) the connector had written are gone`,
     });
   }
@@ -917,7 +926,8 @@ export class FoundryClient {
     reason: string;
     savedBy: string | null;
     copy: string;
-    copyUser: string;
+    overwrittenBy: string;
+    versionBy: string;
     detail: string;
   }): void {
     let historyPath: string | null = null;
@@ -929,7 +939,9 @@ export class FoundryClient {
         pageName: params.pageName,
         reason: params.reason,
         content: params.copy,
-        user: params.copyUser,
+        overwrittenBy: params.overwrittenBy,
+        versionBy: params.versionBy,
+        connectorAccount: this.connectorAccountName(),
       });
     } catch (error) {
       logger.warn('Could not save a local copy of an overwritten journal page', {
@@ -2808,7 +2820,7 @@ export class FoundryClient {
       );
     }
 
-    const connectorName = this.worldData ? this.userName(this.worldData.userId) : 'connector';
+    const connectorName = this.connectorAccountName();
     let historyPath: string;
     try {
       historyPath = this.journalHistory.save({
@@ -2818,7 +2830,8 @@ export class FoundryClient {
         pageName: page.name,
         reason: change.mode === 'append' ? 'before-append' : 'before-replace',
         content: before,
-        user: connectorName,
+        overwrittenBy: connectorName,
+        connectorAccount: connectorName,
       });
     } catch (error) {
       throw new Error(
@@ -2894,9 +2907,10 @@ export class FoundryClient {
         reason: OVERWRITTEN_BY_CONNECTOR,
         savedBy: foreign.source.kind === 'autosave' ? null : this.userName(foreign.source.userId),
         copy: foreign.content,
-        copyUser:
+        overwrittenBy: this.connectorAccountName(),
+        versionBy:
           foreign.source.kind === 'autosave'
-            ? 'editor-autosave'
+            ? EDITOR_AUTOSAVE_USER
             : this.userName(foreign.source.userId),
         detail:
           'their change reached the server while the connector was writing the page and was overwritten',

@@ -3,7 +3,8 @@
  * directory before every page write and when an overwrite is detected.
  *
  * Layout: `<root>/<journalId>/<pageId>/<timestamp>-<reason>.html` with a
- * `.json` sidecar (entry and page names, reason, version token, user, date).
+ * `.json` sidecar (entry and page names, reason, version token, who overwrote
+ * the version or is about to, the connector account, date).
  * Each new copy prunes its page's folder to {@link MAX_COPIES_PER_PAGE}
  * copies, dropping any older than {@link MAX_COPY_AGE_MS}.
  */
@@ -27,8 +28,15 @@ export interface JournalCopy {
   reason: string;
   /** The page body being kept. */
   content: string;
-  /** Name of the user whose version this is (or who is about to replace it). */
-  user: string;
+  /**
+   * Who replaced this version, or is about to: a user name, the connector
+   * account for its own writes, or `editor-autosave (unknown user)`.
+   */
+  overwrittenBy: string;
+  /** Whose version the copy holds, when it is an overwritten one and known. */
+  versionBy?: string;
+  /** The connector's FoundryVTT account (FOUNDRY_USERNAME). */
+  connectorAccount: string;
 }
 
 /** Makes a reason safe as part of a file name (user names may hold anything). */
@@ -76,7 +84,9 @@ export class JournalHistory {
           pageName: copy.pageName,
           reason: copy.reason,
           version: journalVersion(copy.content),
-          user: copy.user,
+          overwrittenBy: copy.overwrittenBy,
+          ...(copy.versionBy !== undefined ? { versionBy: copy.versionBy } : {}),
+          connectorAccount: copy.connectorAccount,
           savedAt: savedAt.toISOString(),
         },
         null,

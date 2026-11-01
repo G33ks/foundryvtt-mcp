@@ -838,6 +838,8 @@ describe('FoundryClient journal page editing (modifyDocument)', () => {
     }
   };
   const ORIGINAL = '<p>The party arrived in Terris.</p>';
+  const copyMeta = (historyPath: string | null | undefined) =>
+    JSON.parse(readFileSync((historyPath ?? '').replace(/.html$/, '.json'), 'utf8'));
   const setServerBody = (server: { journal: WorldJournal | null }, content: string) => {
     const page = server.journal?.pages?.find((p) => p._id === PAGE_ID);
     if (page) {
@@ -969,7 +971,8 @@ describe('FoundryClient journal page editing (modifyDocument)', () => {
         pageName: 'Summary',
         reason: 'before-replace',
         version: versionOf(ORIGINAL),
-        user: 'mcp-api',
+        overwrittenBy: 'mcp-api',
+        connectorAccount: 'mcp-api',
       });
     });
 
@@ -1189,6 +1192,12 @@ describe('FoundryClient journal page editing (modifyDocument)', () => {
       expect(onConflict).toHaveBeenCalledWith(conflict);
       // The lost version — ours — is kept.
       expect(readFileSync(conflict?.historyPath ?? '', 'utf8')).toBe(`${ORIGINAL}<p>Ours</p>`);
+      expect(copyMeta(conflict?.historyPath)).toMatchObject({
+        reason: 'overwritten-by-Alice',
+        overwrittenBy: 'Alice',
+        versionBy: 'mcp-api',
+        connectorAccount: 'mcp-api',
+      });
       const warnings = client.drainJournalWarnings();
       expect(warnings).toEqual([expect.stringMatching(/Journal overwrite detected.*Alice/)]);
       expect(client.drainJournalWarnings()).toEqual([]);
@@ -1225,9 +1234,15 @@ describe('FoundryClient journal page editing (modifyDocument)', () => {
       // The editor session still holds the pre-write body and saves it back.
       internals.onEditorAutosave(autosaveUuid, ORIGINAL);
 
-      expect(client.getRecentJournalConflicts()).toEqual([
+      const conflicts = client.getRecentJournalConflicts();
+      expect(conflicts).toEqual([
         expect.objectContaining({ reason: 'overwritten-by-editor-autosave', savedBy: null }),
       ]);
+      expect(copyMeta(conflicts[0]?.historyPath)).toMatchObject({
+        overwrittenBy: 'editor-autosave (unknown user)',
+        versionBy: 'mcp-api',
+        connectorAccount: 'mcp-api',
+      });
     });
 
     it('re-reads the entry after an editor autosave', async () => {
@@ -1260,6 +1275,12 @@ describe('FoundryClient journal page editing (modifyDocument)', () => {
       expect(conflict).toMatchObject({ reason: 'overwritten-by-connector', savedBy: 'Alice' });
       // Their version is the one that was overwritten.
       expect(readFileSync(conflict?.historyPath ?? '', 'utf8')).toBe(theirs);
+      expect(copyMeta(conflict?.historyPath)).toMatchObject({
+        reason: 'overwritten-by-connector',
+        overwrittenBy: 'mcp-api',
+        versionBy: 'Alice',
+        connectorAccount: 'mcp-api',
+      });
       expect(client.drainJournalWarnings()).toEqual([
         expect.stringMatching(/while the connector was writing the page/),
       ]);
