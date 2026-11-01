@@ -129,14 +129,24 @@ The server provides detailed diagnostics on startup. Look for:
 **Cause**: The companion module runs inside the Foundry page, served from `FOUNDRY_URL`, and dials the bridge on `localhost`. When Foundry is reached through a public address, recent Chromium-based browsers treat this as a public site reaching into the local machine and block it: Chromium's Local Network Access (formerly Private Network Access) asks for a permission first, and Brave adds its own "localhost access" permission. Until that permission is granted the connection is refused silently.
 
 **Solutions**:
-1. **Automatic headless GM session**: Nothing to do — the server launches its headless browser with these checks disabled (a throwaway browser with a fresh profile that only loads `FOUNDRY_URL`). If it still fails, check that the bridge port matches the module setting and look for errors in the server logs.
-2. **GM tab opened by hand** (`FOUNDRY_HEADLESS_GM_ENABLED=false`): Grant the Foundry site access to the local machine — accept the prompt if the browser shows one, or open the site settings from the icon left of the address bar:
-   - **Chrome / Edge**: allow **Local network access**
-   - **Brave**: allow **Localhost access**
-
-   Then reload the Foundry tab.
+1. **Automatic headless GM session**: Nothing to do — the server launches its headless browser with these checks disabled (a throwaway browser with a fresh profile that only loads `FOUNDRY_URL`). If it still fails, look for errors in the server logs (`daemon.log` in shared-process mode), in particular `Module bridge refused a connection: …` (see [below](#module-bridge-refused-a-connection-)).
+2. **GM tab opened by hand**: no longer supported. Since module 0.5.0 the module only connects from the headless GM session, which provides the `window.foundryMcpBridge` function it authenticates with; `FOUNDRY_HEADLESS_GM_ENABLED=false` therefore disables the bridge in practice. In an ordinary GM tab, the browser console line `FoundryVTT MCP Bridge | no foundryvtt-mcp credentials in this browser, bridge disabled` is normal — that tab is not meant to connect.
 3. **Check the bridge itself**: If the server log has no `Module bridge listening` line, the port may already be in use or `FOUNDRY_MODULE_BRIDGE_ENABLED` is `false`. In shared-process mode that log is `daemon.log` (see [Shared Process](#shared-process)); `node dist/index.js status` shows whether the bridge listens and whether the module is connected. The port is typically held by another process running in all-in-one mode (`FOUNDRY_MCP_SHARED=false`), or by a shared process from a second state directory.
 4. **Bridge reached from another machine**: The bridge listens on loopback only (`127.0.0.1`, `::1`). The module must run in a browser on the same machine as the MCP server — which the headless GM session always does.
+
+#### "Module bridge refused a connection: …"
+**Symptoms**: The server log (`daemon.log` in shared-process mode) shows `Module bridge refused a connection: <reason>`, and the module bridge stays disconnected — or stays connected, if the refused client was not the module.
+
+**Cause**: The bridge port is reachable by every local process and every page open in a local browser, so the bridge only accepts the companion module (0.5.0 or later) running in the headless GM session, after a mutual authentication (see the README, [Module Bridge Security](README.md#module-bridge-security)). Any other client is refused, and the refused connection never affects the connected module. At most 10 refusals are logged per minute; the rest are summarised as `N more refused connection(s) not logged in the last minute`.
+
+**Reasons**:
+- **`unexpected Origin`** (with the `origin` received): the WebSocket did not come from a page served at `FOUNDRY_URL`'s origin. If it is the module, the address the headless browser loaded does not match the origin of `FOUNDRY_URL` exactly — scheme (`http`/`https`), host (IP address vs domain name, `localhost` vs `127.0.0.1`) and port must all be identical; fix `FOUNDRY_URL`. Otherwise it is a foreign page or program (origin `(none)` for a non-browser client), and the refusal is expected.
+- **`client did not authenticate within 5000 ms; likely an outdated foundryvtt-mcp-bridge module (< 0.5.0), redeploy it`**: the client opened the socket from the right origin but never authenticated. Usually the installed module is older than 0.5.0 — copy `foundry-module` into `Data/modules/foundryvtt-mcp-bridge` again (see [SETUP_GUIDE.md](SETUP_GUIDE.md#3-install-companion-module-foundryvtt-mcp-bridge)) and reload the world. Otherwise, a foreign client.
+- **`wrong authentication proof`**: the client answered with a proof that does not match this server's secret — a foreign client. The module in the headless session always computes the right proof, since the secret lives in the same process.
+- **`unsupported bridge protocol … (expected 1)`**: a module speaking another version of the handshake. Install the module from the same checkout as the server.
+- **`non-JSON message before authentication`**, **`message other than auth_response before authentication`**, **`malformed auth_response`**, **`message over 4096 bytes before authentication`**: the client sent something other than the module's handshake — a foreign client, or a module copy that does not match the server. Redeploy the module from the same checkout if the bridge stays disconnected.
+
+**Check it**: `node dist/index.js status` shows the `Module bridge:` line (`protocol v1, authenticated module connected: yes/no`) and the `Bridge origin:` line, the only origin accepted — compare it with the address Foundry is served from. With the module connected, `npm run check:bridge-security` makes four forged connections and confirms each one is refused while the module stays connected.
 
 ### Shared Process
 
@@ -167,6 +177,8 @@ node dist/index.js stop     # lets running calls finish, then exits (waits up to
 
 #### "The shared process could not connect to FoundryVTT: …"
 FoundryVTT is not reachable yet, or the URL/credentials are wrong. The shared process stays up and retries on the next call: start FoundryVTT and call the tool again. The message carries the underlying error; `daemon.log` has the details.
+
+- **`getJoinData returned no users`**: FoundryVTT is running but no world is launched — it shows the Setup screen, typically after the Foundry server restarted (or a backup restarted it). Launch the world from the Setup screen, then call a tool again. The module bridge and the headless GM session only start once this connection succeeds, so meanwhile `node dist/index.js status` shows the headless GM session as `Logging in…`.
 
 #### "The shared FoundryVTT MCP process did not become available within 30 s"
 The relay started a shared process that never answered. Look at the end of `daemon.log`: a configuration error, a crash at startup, or an antivirus blocking `node.exe`. Running `node dist/index.js daemon` by hand in a terminal with the same environment shows startup errors directly.
