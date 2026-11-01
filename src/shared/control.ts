@@ -87,9 +87,13 @@ export async function runStatus(paths: SharedPaths = resolveSharedPaths()): Prom
     }
     console.log(
       bridge?.enabled
-        ? `  Module bridge:  listening on port ${bridge.port}, protocol v${bridge.protocol ?? '?'}, ` +
-            `authenticated module connected: ${yesNo(bridge.moduleConnected)}` +
-            (bridge.moduleConnectedSince ? ` (since ${bridge.moduleConnectedSince})` : '')
+        ? `  Module bridge:  listening on port ${bridge.port}, ` +
+            (bridge.protocol === undefined
+              ? // A shared process from before bridge authentication.
+                `no authentication, module connected: ${yesNo(bridge.moduleConnected)}`
+              : `protocol v${bridge.protocol}, authenticated module connected: ` +
+                yesNo(bridge.moduleConnected) +
+                (bridge.moduleConnectedSince ? ` (since ${bridge.moduleConnectedSince})` : ''))
         : '  Module bridge:  disabled',
     );
     if (bridge?.enabled && bridge.origin) {
