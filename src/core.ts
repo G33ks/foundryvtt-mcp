@@ -73,8 +73,11 @@ export class FoundryCore {
     // Canvas-only tools (scene screenshots, etc.) relay through a companion
     // Foundry module over a plain WebSocket; disabled unless opted in, since
     // most tools need only the Socket.IO document API set up above.
+    // Only the module running in a page served from FOUNDRY_URL may connect.
     this.moduleBridge = config.moduleBridge.enabled
-      ? new ModuleBridge(config.moduleBridge.port)
+      ? new ModuleBridge(config.moduleBridge.port, {
+          expectedOrigin: new URL(config.foundry.url).origin,
+        })
       : null;
     if (this.moduleBridge) {
       // The bridge stays ignorant of FoundryClient; it only relays what the

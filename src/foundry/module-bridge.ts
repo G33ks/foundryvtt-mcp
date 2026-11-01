@@ -14,12 +14,57 @@
  * `WebSocketClient.ts` (MIT), which this mirrors from the server side.
  *
  * Exactly one module connection is supported at a time (the GM's client); a
- * new connection replaces the previous one.
+ * new *authenticated* connection replaces the previous one.
+ *
+ * Authentication (protocol v1). The loopback listener is reachable by every
+ * local process and every page open in a local browser, so a connection is
+ * only trusted once it has proven it is the module running in the headless
+ * GM session ({@link HeadlessGmSession}), and the module only obeys once the
+ * server has proven it is this process:
+ *
+ * 1. Upgrade: the `Origin` header must be `FOUNDRY_URL`'s origin (HTTP 403
+ *    otherwise), so a page from any other site cannot even open the socket.
+ * 2. Server → module `{type: "auth_challenge", protocol: 1, nonce: Ns}`.
+ * 3. Module → server `{type: "auth_response", protocol: 1, nonce: Nc, proof: Pc}`.
+ * 4. Server → module `{type: "auth_ok", proof: Ps}`.
+ *
+ * Both proofs are HMAC-SHA256 over the two nonces, keyed by a random secret
+ * generated per instance that never leaves this class: the module obtains
+ * `Nc`, `Pc` and the expected `Ps` from {@link ModuleBridge.prove}, which the
+ * headless session exposes to its page through a Playwright binding. Until
+ * step 3 checks out, a connection cannot replace the current module, receives
+ * no command, and nothing it sends is processed.
  */
 
-import { WebSocket, WebSocketServer } from 'ws';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import type { IncomingMessage } from 'node:http';
+import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import { isRecord } from '../utils/guards.js';
 import { logger } from '../utils/logger.js';
+
+/** Version of the authentication handshake spoken by this server. */
+export const BRIDGE_PROTOCOL_VERSION = 1;
+
+/** Close codes sent to a connection that fails authentication. */
+export const BRIDGE_CLOSE_CODES = {
+  /** Wrong proof, unknown protocol version, or any other message before authenticating. */
+  unauthorized: 4401,
+  /** No `auth_response` within the authentication window. */
+  authTimeout: 4408,
+  /** A message larger than {@link MAX_PREAUTH_MESSAGE_BYTES} before authenticating. */
+  messageTooBig: 1009,
+} as const;
+
+const NONCE_BYTES = 32;
+/** Length of the base64 encoding of {@link NONCE_BYTES} bytes. */
+const NONCE_BASE64_LENGTH = 44;
+const AUTH_TIMEOUT_MS = 5000;
+const MAX_PREAUTH_MESSAGE_BYTES = 4096;
+const PROOF_LABEL = 'foundryvtt-mcp-bridge/v1';
+
+/** Refusal warnings logged per window; the rest are counted and summarised. */
+const REFUSAL_LOG_LIMIT = 10;
+const REFUSAL_LOG_WINDOW_MS = 60_000;
 
 interface PendingRequest {
   resolve: (result: unknown) => void;
@@ -38,18 +83,103 @@ interface BridgeMessage {
   payload?: unknown;
 }
 
+/** What the headless session hands the module through `window.foundryMcpBridge.prove`. */
+export interface BridgeProof {
+  /** Client nonce `Nc`, base64. */
+  nonce: string;
+  /** `Pc`, to send in `auth_response`. */
+  clientProof: string;
+  /** `Ps`, the proof `auth_ok` must carry. */
+  serverProof: string;
+}
+
+/** Returned by `window.foundryMcpBridge.getInfo()`. */
+export interface BridgeInfo {
+  protocol: number;
+  port: number;
+}
+
+export interface ModuleBridgeOptions {
+  /** The only accepted `Origin`: the origin of `FOUNDRY_URL`, where the module's page is served. */
+  expectedOrigin: string;
+  requestTimeoutMs?: number;
+  /** How long a connection may stay unauthenticated. */
+  authTimeoutMs?: number;
+}
+
 function isBridgeMessage(value: unknown): value is BridgeMessage {
   return typeof value === 'object' && value !== null;
+}
+
+/** A canonical base64 encoding of exactly {@link NONCE_BYTES} bytes. */
+function isNonce(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length !== NONCE_BASE64_LENGTH) {
+    return false;
+  }
+  const bytes = Buffer.from(value, 'base64');
+  return bytes.length === NONCE_BYTES && bytes.toString('base64') === value;
+}
+
+function rawDataBytes(data: RawData): number {
+  if (Array.isArray(data)) {
+    return data.reduce((total, chunk) => total + chunk.length, 0);
+  }
+  return data instanceof ArrayBuffer ? data.byteLength : data.length;
+}
+
+function rawDataText(data: RawData): string {
+  if (Array.isArray(data)) {
+    return Buffer.concat(data).toString();
+  }
+  return data instanceof ArrayBuffer ? Buffer.from(data).toString() : data.toString();
+}
+
+/**
+ * Logs connection refusals without letting a local process flood the log by
+ * reconnecting in a loop: at most {@link REFUSAL_LOG_LIMIT} per window, then
+ * one line with the count of the ones left out.
+ */
+class RefusalLog {
+  private windowStart = 0;
+  private logged = 0;
+  private suppressed = 0;
+
+  warn(message: string, meta: Record<string, unknown>): void {
+    const now = Date.now();
+    if (now - this.windowStart >= REFUSAL_LOG_WINDOW_MS) {
+      if (this.suppressed > 0) {
+        logger.warn(
+          `Module bridge: ${this.suppressed} more refused connection(s) not logged in the last minute`,
+        );
+      }
+      this.windowStart = now;
+      this.logged = 0;
+      this.suppressed = 0;
+    }
+    if (this.logged < REFUSAL_LOG_LIMIT) {
+      this.logged++;
+      logger.warn(message, meta);
+    } else {
+      this.suppressed++;
+    }
+  }
 }
 
 export class ModuleBridge {
   /** One listener per loopback address. */
   private servers: WebSocketServer[] = [];
+  /** The authenticated module connection; unauthenticated ones are never stored here. */
   private socket: WebSocket | null = null;
+  private connectedSince: Date | null = null;
   private pending = new Map<string, PendingRequest>();
   private nextId = 1;
   private readonly port: number;
+  private readonly expectedOrigin: string;
   private readonly requestTimeoutMs: number;
+  private readonly authTimeoutMs: number;
+  /** HMAC key of the handshake. In memory only: never logged, persisted or returned. */
+  private readonly secret = randomBytes(32);
+  private readonly refusals = new RefusalLog();
   /**
    * Invoked for every unsolicited `{event, payload}` push from the module —
    * canvas activity (targeting, pings) that never crosses FoundryVTT's own
@@ -57,9 +187,11 @@ export class ModuleBridge {
    */
   onEvent: ((type: string, payload: Record<string, unknown>) => void) | null = null;
 
-  constructor(port: number, requestTimeoutMs = 15000) {
+  constructor(port: number, options: ModuleBridgeOptions) {
     this.port = port;
-    this.requestTimeoutMs = requestTimeoutMs;
+    this.expectedOrigin = options.expectedOrigin;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 15000;
+    this.authTimeoutMs = options.authTimeoutMs ?? AUTH_TIMEOUT_MS;
   }
 
   /**
@@ -88,7 +220,21 @@ export class ModuleBridge {
 
   private listenOn(host: string): Promise<void> {
     return new Promise((resolve, reject) => {
-      const wss = new WebSocketServer({ host, port: this.port });
+      const wss = new WebSocketServer({
+        host,
+        port: this.port,
+        verifyClient: (info, done) => {
+          if (info.origin === this.expectedOrigin) {
+            done(true);
+            return;
+          }
+          this.refusals.warn('Module bridge refused a connection: unexpected Origin', {
+            origin: info.origin ?? '(none)',
+            remoteAddress: info.req.socket.remoteAddress,
+          });
+          done(false, 403, 'Forbidden');
+        },
+      });
 
       wss.once('listening', () => {
         this.servers.push(wss);
@@ -99,24 +245,168 @@ export class ModuleBridge {
         reject(err);
       });
 
-      wss.on('connection', (ws) => {
-        logger.info('Foundry module connected to bridge');
-        // A new connection (e.g. the GM reloaded) replaces the previous one.
-        this.socket?.terminate();
-        this.socket = ws;
-
-        ws.on('message', (data) => this.handleMessage(data.toString()));
-        ws.on('close', () => {
-          logger.warn('Foundry module disconnected from bridge');
-          if (this.socket === ws) {
-            this.socket = null;
-          }
-        });
-        ws.on('error', (err) => {
-          logger.error('Module bridge socket error', { error: err.message });
-        });
-      });
+      wss.on('connection', (ws, req) => this.handleConnection(ws, req));
     });
+  }
+
+  /**
+   * Challenges a fresh connection. It only becomes the module connection —
+   * replacing the previous one — once its `auth_response` checks out.
+   */
+  private handleConnection(ws: WebSocket, req: IncomingMessage): void {
+    const remoteAddress = req.socket.remoteAddress;
+    const serverNonce = randomBytes(NONCE_BYTES).toString('base64');
+    let authenticated = false;
+    let refused = false;
+
+    const refuse = (code: number, reason: string, detail: string): void => {
+      refused = true;
+      clearTimeout(authTimer);
+      this.refusals.warn(`Module bridge refused a connection: ${detail}`, { remoteAddress });
+      ws.close(code, reason);
+    };
+
+    const authTimer = setTimeout(
+      () =>
+        refuse(
+          BRIDGE_CLOSE_CODES.authTimeout,
+          'authentication timeout',
+          `client did not authenticate within ${this.authTimeoutMs} ms; likely an outdated ` +
+            'foundryvtt-mcp-bridge module (< 0.5.0), redeploy it',
+        ),
+      this.authTimeoutMs,
+    );
+
+    ws.on('message', (data) => {
+      if (authenticated) {
+        // A replaced module may still be sending until its socket closes.
+        if (this.socket === ws) {
+          this.handleMessage(rawDataText(data));
+        }
+        return;
+      }
+      if (refused) {
+        return;
+      }
+      if (rawDataBytes(data) > MAX_PREAUTH_MESSAGE_BYTES) {
+        refuse(
+          BRIDGE_CLOSE_CODES.messageTooBig,
+          'message too big',
+          `message over ${MAX_PREAUTH_MESSAGE_BYTES} bytes before authentication`,
+        );
+        return;
+      }
+      const verdict = this.checkAuthResponse(rawDataText(data), serverNonce);
+      if (!verdict.ok) {
+        refuse(BRIDGE_CLOSE_CODES.unauthorized, 'unauthorized', verdict.reason);
+        return;
+      }
+      authenticated = true;
+      clearTimeout(authTimer);
+      ws.send(JSON.stringify({ type: 'auth_ok', proof: verdict.serverProof }));
+      this.adopt(ws, remoteAddress);
+    });
+    ws.on('close', () => {
+      clearTimeout(authTimer);
+      if (this.socket === ws) {
+        logger.warn('Foundry module disconnected from bridge');
+        this.socket = null;
+        this.connectedSince = null;
+      }
+    });
+    ws.on('error', (err) => {
+      logger.error('Module bridge socket error', { error: err.message });
+    });
+
+    ws.send(
+      JSON.stringify({
+        type: 'auth_challenge',
+        protocol: BRIDGE_PROTOCOL_VERSION,
+        nonce: serverNonce,
+      }),
+    );
+  }
+
+  /** Makes an authenticated connection the module connection. */
+  private adopt(ws: WebSocket, remoteAddress: string | undefined): void {
+    const previous = this.socket;
+    this.socket = ws;
+    this.connectedSince = new Date();
+    if (previous) {
+      // e.g. the headless page reloaded before its old socket closed.
+      previous.terminate();
+      logger.info('Foundry module re-authenticated; previous module connection replaced', {
+        remoteAddress,
+      });
+    } else {
+      logger.info(
+        `Foundry module connected and authenticated (protocol v${BRIDGE_PROTOCOL_VERSION})`,
+        { remoteAddress },
+      );
+    }
+  }
+
+  private checkAuthResponse(
+    raw: string,
+    serverNonce: string,
+  ): { ok: true; serverProof: string } | { ok: false; reason: string } {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { ok: false, reason: 'non-JSON message before authentication' };
+    }
+    if (!isRecord(parsed) || parsed.type !== 'auth_response') {
+      return { ok: false, reason: 'message other than auth_response before authentication' };
+    }
+    if (parsed.protocol !== BRIDGE_PROTOCOL_VERSION) {
+      return {
+        ok: false,
+        reason: `unsupported bridge protocol ${JSON.stringify(parsed.protocol)} (expected ${BRIDGE_PROTOCOL_VERSION})`,
+      };
+    }
+    if (!isNonce(parsed.nonce) || typeof parsed.proof !== 'string') {
+      return { ok: false, reason: 'malformed auth_response' };
+    }
+    const expected = this.hmac('client', serverNonce, parsed.nonce);
+    const received = Buffer.from(parsed.proof, 'base64');
+    if (received.length !== expected.length || !timingSafeEqual(received, expected)) {
+      return { ok: false, reason: 'wrong authentication proof' };
+    }
+    return {
+      ok: true,
+      serverProof: this.hmac('server', serverNonce, parsed.nonce).toString('base64'),
+    };
+  }
+
+  private hmac(role: 'client' | 'server', serverNonce: string, clientNonce: string): Buffer {
+    return createHmac('sha256', this.secret)
+      .update(`${PROOF_LABEL}|${role}|${serverNonce}|${clientNonce}`)
+      .digest();
+  }
+
+  /**
+   * Answers a server challenge on the module's behalf: picks the client
+   * nonce and computes both proofs. Called from the headless session's page
+   * binding, so `serverNonce` is untrusted input.
+   *
+   * @throws if `serverNonce` is not the base64 of {@link NONCE_BYTES} bytes
+   */
+  prove(serverNonce: unknown): BridgeProof {
+    if (!isNonce(serverNonce)) {
+      throw new Error('Invalid server nonce');
+    }
+    const nonce = randomBytes(NONCE_BYTES).toString('base64');
+    return {
+      nonce,
+      clientProof: this.hmac('client', serverNonce, nonce).toString('base64'),
+      serverProof: this.hmac('server', serverNonce, nonce).toString('base64'),
+    };
+  }
+
+  /** What the module needs to dial in: the protocol and this bridge's port. */
+  info(): BridgeInfo {
+    return { protocol: BRIDGE_PROTOCOL_VERSION, port: this.port };
   }
 
   async stop(): Promise<void> {
@@ -127,20 +417,31 @@ export class ModuleBridge {
     this.pending.clear();
     this.socket?.close();
     this.socket = null;
+    this.connectedSince = null;
     const servers = this.servers;
     this.servers = [];
     await Promise.all(
       servers.map(
         (wss) =>
           new Promise<void>((resolve, reject) => {
+            // Unauthenticated connections are not tracked here; close them too.
+            for (const client of wss.clients) {
+              client.terminate();
+            }
             wss.close((err) => (err ? reject(err) : resolve()));
           }),
       ),
     );
   }
 
+  /** True while an authenticated module is connected. */
   isConnected(): boolean {
     return this.socket?.readyState === WebSocket.OPEN;
+  }
+
+  /** When the current authenticated module connection was established, or `null`. */
+  moduleConnectedSince(): Date | null {
+    return this.isConnected() ? this.connectedSince : null;
   }
 
   /**
@@ -153,7 +454,7 @@ export class ModuleBridge {
   send(type: string, params: Record<string, unknown> = {}): Promise<unknown> {
     if (!this.isConnected() || !this.socket) {
       throw new Error(
-        'No Foundry module connected to the bridge. Install and enable the companion module, and confirm FOUNDRY_MODULE_BRIDGE_ENABLED=true.',
+        'No authenticated Foundry module connected to the bridge. Install and enable the companion module (0.5.0 or later), confirm FOUNDRY_MODULE_BRIDGE_ENABLED=true, and check that the headless GM session is logged in.',
       );
     }
     const id = String(this.nextId++);
