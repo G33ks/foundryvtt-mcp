@@ -14,6 +14,7 @@
     "smoke": "node scripts/smoke-test.js",
     "smoke:dotenv": "node scripts/smoke-dotenv.js",
     "smoke:pack": "node scripts/smoke-pack.js",
+    "stress:shared": "node scripts/stress-shared.js",
     "test": "vitest run",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest run --coverage",
