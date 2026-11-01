@@ -39,7 +39,7 @@ Your AI assistant starts a small relay program for this server. Every relay, fro
 - **Socket.IO connection**: authenticates as `FOUNDRY_USERNAME` (Gamemaster or Assistant GM role) and performs every write over Foundry's core `modifyDocument` protocol — only when `FOUNDRY_WRITE_ENABLED=true`.
 - **Invisible GM session**: started when `FOUNDRY_MODULE_BRIDGE_ENABLED=true`. The shared process drives a background browser through `playwright-core`: Chrome, then Edge, then Playwright's own Chromium (`npx playwright install chromium`), or any Chromium-based browser set in `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`. It logs in as `FOUNDRY_HEADLESS_GM_USERNAME` / `FOUNDRY_HEADLESS_GM_PASSWORD`; each one falls back to `FOUNDRY_USERNAME` / `FOUNDRY_PASSWORD` when unset. A separate GM or Assistant GM account is recommended — and required on Foundry v14, where logging the same account in again ejects its previous session. A watchdog reloads the page if the module stays disconnected for about a minute. A human can meanwhile play as a normal **Player** in their own browser.
 - **Companion module** (`foundryvtt-mcp-bridge`, 0.5.0 or later): runs only in that GM session and serves the bridge tools — `capture_scene` (canvas screenshot with a grid overlay), `roll_and_post` (native `Roll` chat cards), `get_document_schema`, `search_compendium_content` and compendium imports, `upload_asset` (FilePicker), `set_pause`, `ping_canvas`, `set_target` / `get_targets`. Without it these tools report unavailable; everything else keeps working. The bridge listens on loopback only and authenticates the module — see [Module Bridge Security](#module-bridge-security).
-- **Optional REST API module**: with `FOUNDRY_API_KEY` set, the server also queries the Foundry Local REST API module over HTTP for the diagnostics tools (`get_health_status`, `get_system_health`, `get_recent_logs`, `search_logs`, `diagnose_errors`); Socket.IO stays the main connection.
+- **Optional REST API module**: with `FOUNDRY_API_KEY` set, the server also connects to the Foundry Local REST API module over HTTP. It backs the diagnostics tools (`get_health_status`, `get_system_health`, `get_recent_logs`, `search_logs`, `diagnose_errors`) and `search_compendium`, and some reads use it instead of the cache (actor and item search, actor details, scene and world info, `roll_dice`). Socket.IO stays the main connection and carries every write.
 - **Shared process** (default): MCP clients may start several server instances — Claude Desktop starts several at launch — so each instance is only a lightweight relay, and the FoundryVTT connection, the bridge and the GM session live once, in a background process every relay shares. See [Shared Process Mode](#shared-process-mode); `FOUNDRY_MCP_SHARED=false` runs everything in one process instead.
 
 ---
@@ -84,7 +84,7 @@ Your AI assistant starts a small relay program for this server. Every relay, fro
 ### 1. Prerequisites
 
 - **Node.js 18+** or **Bun**
-- **FoundryVTT v11+ / v12+** running an active world
+- **FoundryVTT v13 or v14** running an active world (the versions the server handles explicitly; older versions are not verified)
 - A dedicated Foundry user account with **Gamemaster** or **Assistant GM** role
 - **A Chromium-based browser installed** (for the automatic headless GM browser session — see below): Google Chrome or Microsoft Edge are detected automatically; any other Chromium browser (Brave, Vivaldi…) works through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`
 
@@ -273,6 +273,7 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
 - `get_actor_details` — retrieve actor system data, statistics, attributes, and health.
 - `update_actor_attributes` — patch nested system data using dot paths (`attributes.hp.value`, `currency.gp`).
 - `get_actor_inventory` — list owned items with full system properties.
+- `search_items` — search world item documents by name, optionally filtered by type (world items, not owned items).
 - `create_actor_item` — create inline items OR import directly from compendium packs (`source: { type: 'compendium', compendiumId, itemId }`).
 - `update_actor_item` — apply JSON merge patches to owned items.
 - `delete_actor_item` — delete specific items from actor inventories.
@@ -293,6 +294,8 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
 - `create_roll_table` / `delete_roll_table` / `roll_table` / `list_roll_tables` — table creation and result rolling.
 - `get_world_setting` / `set_world_setting` — inspect and modify system/module settings with core protection.
 - `set_document_ownership` — configure granular document permissions (`none`, `limited`, `observer`, `owner`).
+- `get_world_summary` — world metadata (title, game system, core version) and per-collection document counts.
+- `search_world` — search actors, items, scenes, and journals by name at once, grouped by collection.
 - `get_users` / `set_user_role` — list connected users and change permission roles with self-demotion lockout guards.
 - `create_journal_entry` / `get_journal` / `search_journals` / `delete_journal_entry` — manage session notes and lore. `get_journal` lists each page's id; pass `raw: true` for the full, unmodified page HTML.
 - `update_journal_page` / `add_journal_page` / `update_journal_entry` — edit existing journals: replace or append to a page's content (or rename it), add a page after the last one, and rename, refile, or change the visibility of an entry.
@@ -308,6 +311,7 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
 - `roll_and_post` — evaluates formulas via Foundry's native engine and posts interactive chat cards.
 - `lookup_rule` — search world journals and system compendium packs for rules with snippet previews.
 - `get_document_schema` — introspect game system DataModel schemas for actor and item types.
+- `search_compendium` — search compendium packs by name and metadata, across all enabled packs or one pack (requires the REST API module; returns no results without it).
 - `search_compendium_content` — deep search inside compendium pack documents and journal pages.
 - `send_chat_message` / `get_chat_messages` — post and read messages from the Foundry chat log.
 - `generate_npc` / `generate_loot` — instant procedural generators.

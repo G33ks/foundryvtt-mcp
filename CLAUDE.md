@@ -56,16 +56,22 @@ commands must not load Socket.IO or Playwright.
 
 ### Authentication & transport selection
 
-`client.ts` selects transport purely by whether `FOUNDRY_API_KEY` is set:
+The two transports in `client.ts` are **additive** (see `connect()` and
+`isConnected()`):
 
-- **`FOUNDRY_API_KEY` unset → Socket.IO mode** (default): authenticates with
-  `FOUNDRY_USERNAME`/`FOUNDRY_PASSWORD` and loads full `worldData`.
-- **`FOUNDRY_API_KEY` set → REST API mode**: connects to the REST module's
-  `/api/status` instead. This is a transport **switch**, not an additive layer —
-  it does not run alongside the Socket.IO `worldData` path.
-- `USE_REST_MODULE` (seen in some `.env`/example files and the `test-connection`
-  tips) is **not read** by `src/config/index.ts` — it is a no-op. Transport is
-  decided solely by `apiKey` presence.
+- **Socket.IO** (primary): runs whenever `FOUNDRY_USERNAME` (or
+  `FOUNDRY_USER_ID`) and `FOUNDRY_PASSWORD` are set — authenticates, loads full
+  `worldData` and carries every write.
+- **REST API module** (`FOUNDRY_API_KEY` set): `connect()` also checks the
+  module's `/api/status`. It backs the diagnostics tools and
+  `search_compendium`, and a few reads prefer it over the cache when a key is
+  set (`searchActors`, `getActor`, `searchItems`, `getCurrentScene`,
+  `getWorldInfo`, `rollDice`). A REST failure is non-fatal while Socket.IO
+  credentials are present; with an API key alone, REST is the only transport.
+- `isConnected()` prefers the socket's state once a socket exists, and falls
+  back to the REST link only without one.
+- `USE_REST_MODULE` is **not read** anywhere — a no-op if it shows up in an
+  old `.env`.
 
 ## Environment Variables
 
@@ -75,7 +81,7 @@ commands must not load Socket.IO or Playwright.
 | `FOUNDRY_USERNAME` | Yes | FoundryVTT user |
 | `FOUNDRY_PASSWORD` | Yes | FoundryVTT password |
 | `FOUNDRY_USER_ID` | No | Bypass username→ID resolution |
-| `FOUNDRY_API_KEY` | No | REST API module key (read-only diagnostics path) |
+| `FOUNDRY_API_KEY` | No | REST API module key (read-only, alongside Socket.IO: diagnostics, `search_compendium`, some reads) |
 | `FOUNDRY_WRITE_ENABLED` | No | Enable game-state mutations — `true` required for the write tools (default `false`) |
 | `LOG_LEVEL` | No | `debug` for verbose output |
 | `FOUNDRY_TIMEOUT` | No | Request timeout (ms, default 10000) |

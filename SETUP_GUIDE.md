@@ -8,7 +8,7 @@ This guide walks you through setting up and configuring the FoundryVTT Model Con
 
 ### 1. Prerequisites
 - **Node.js 18+** or **Bun** installed.
-- **FoundryVTT v11+ / v12+** running with an **active world** (not on the world selection/setup screen).
+- **FoundryVTT v13 or v14** (the versions the server handles explicitly; older versions are not verified) running with an **active world** (not on the world selection/setup screen).
 - An MCP client (Claude Desktop, Claude Code, Oh My Pi, VS Code, Cursor).
 - **A Chromium-based browser installed**, for the automatic headless GM browser session (step 4): Google Chrome or Microsoft Edge are detected automatically; any other Chromium browser (Brave, Vivaldi…) works through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`.
 

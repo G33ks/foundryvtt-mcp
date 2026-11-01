@@ -121,7 +121,7 @@ The server provides detailed diagnostics on startup. Look for:
 **Symptoms**: Dice roll commands fail
 **Solutions**:
 1. **Check formula**: Ensure dice notation is valid (e.g., "1d20+5", "3d6")
-2. **FoundryVTT version**: Ensure FoundryVTT version 11+ for best compatibility
+2. **FoundryVTT version**: The server handles FoundryVTT v13 and v14 explicitly; older versions are not verified
 
 #### Module Bridge Never Connects / "WebSocket ... failed"
 **Symptoms**: `get_health_status` keeps reporting the module bridge as disconnected (canvas tools such as `capture_scene` say no module is connected), even though the server logs `Module bridge listening on ws://localhost:31415` and the GM session is logged in. The browser console of the GM tab shows `WebSocket connection to 'ws://localhost:31415/' failed`, with no further detail.
