@@ -78,6 +78,7 @@ The server employs a hybrid architecture to deliver real-time responsiveness and
 2. **Companion Module Bridge (`foundryvtt-mcp-bridge`)**: A lightweight Foundry module running in a browser that executes canvas-bound operations (PIXI canvas screenshot with grid overlay, native `Roll` chat card rendering, document schema introspection, and compendium item extraction). It only activates for a GM/Assistant-GM user — Foundry itself restricts pausing the game and uploading files to that tier, and a Player's canvas is fog-of-war-limited.
 3. **Automatic Headless GM Session**: The server drives its own invisible, background browser tab (via `playwright-core`, reusing whatever Chrome/Edge is already installed, or any Chromium-based browser such as Brave or Vivaldi set through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`; without either it falls back to Playwright's own Chromium, which requires a one-time `npx playwright install chromium`) that logs in as the same `mcp-api` account and hosts the module above. This means a human can play the game as a normal Player in their own visible client while the AI has full GM-tier canvas access through this separate, invisible session — no manual second browser tab required. A watchdog polls the bridge's own connectivity independently of the Foundry login state and force-reloads the tab to recover a dropped module WebSocket (the module's own reconnect logic gives up permanently after ~85 minutes) — self-healing without a server restart. Falls back gracefully (canvas-only tools report unavailable) if no browser is found; a manually-opened GM tab still works as before if preferred (set `FOUNDRY_HEADLESS_GM_ENABLED=false`).
 4. **Optional REST API Module**: Provides server diagnostics, log retrieval, and health reporting when the local REST module is installed.
+5. **Shared Process (default)**: MCP clients start and stop server instances freely — Claude Desktop starts several at launch and restarts its connector when tools run in parallel. Each instance is therefore only a lightweight relay; the Socket.IO connection, the module bridge and the headless GM session live in one background process that every relay shares and that survives relay restarts. See [Shared Process Mode](#shared-process-mode).
 
 ---
 
@@ -140,6 +141,9 @@ In FoundryVTT, go to **Manage Modules** and enable **FoundryVTT MCP Bridge**.
 | `FOUNDRY_EVENT_BUFFER_SIZE` | No | `500` | In-memory event log ring buffer capacity |
 | `FOUNDRY_EVENT_WAIT_MS` | No | `25000` | Default long-polling timeout for `watch_events` |
 | `LOG_LEVEL` | No | `info` | Logging verbosity (`debug`, `info`, `warn`, `error`) |
+| `FOUNDRY_MCP_SHARED` | No | `true` | Shared-process mode; `false` makes every instance own its own connection, bridge and browser (all-in-one) |
+| `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` | No | `30` | Minutes the shared process stays up with **no relay connected** before exiting; `0` = never |
+| `FOUNDRY_MCP_STATE_DIR` | No | see below | Directory for the shared process's token, state file and logs; a non-default directory also gets its own pipe (an isolated shared process) |
 
 #### Choosing the Headless GM Browser
 
@@ -152,6 +156,27 @@ Without `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`, the server tries Google Chrome, t
 ```
 
 Forward slashes (`C:/Program Files/...`) also work and need no escaping. The headless browser is launched with Chromium's local network access checks disabled so the module can reach `ws://localhost` from the Foundry page — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#module-bridge-never-connects--websocket--failed).
+
+### Shared Process Mode
+
+By default `node dist/index.js` is a **relay**: it answers `initialize` and `tools/list` immediately and forwards `tools/call` and `resources/read` to a **shared process** (`node dist/index.js daemon`) that holds the FoundryVTT connection, the module bridge and the headless GM session.
+
+- **Automatic start**: the first relay that finds no shared process starts one in the background (detached, so it survives the client closing or restarting the relay) and waits for it — up to ~30 s. Relays started at the same time end up sharing a single process. Relays connect as soon as they start, so the FoundryVTT connection and the GM session are ready before the first tool call.
+- **Lifetime**: the shared process stays up while at least one relay is connected, however long it goes without calls. It exits after `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` with no relay connected, on `stop`, or when a relay with a different version or configuration connects — it then lets running calls finish and the relay starts a fresh one. A call that was already running always completes, even if the client that asked for it went away.
+- **FoundryVTT not reachable yet**: the shared process stays up, returns the connection error to the call, and retries on the next call — start FoundryVTT before or after your AI client, in any order.
+- **Writes**: tools that change game state run one at a time, in arrival order; reads run in parallel.
+- **Commands**:
+
+  ```bash
+  node dist/index.js status   # pid, version, uptime, FoundryVTT / bridge / GM session state, relays, log path
+  node dist/index.js stop     # finish running calls, then stop the shared process
+  ```
+
+  They only read the state directory, so they work from any terminal — no FoundryVTT configuration needed.
+- **State directory**: `%LOCALAPPDATA%\foundryvtt-mcp\` on Windows, `$XDG_STATE_HOME/foundryvtt-mcp/` (or `~/.local/state/foundryvtt-mcp/`) elsewhere. It holds the access token relays must present (`token`), the state file (`daemon.json`) and the logs (`daemon.log`, `relay.log`, rotated at 5 MB × 3). Relays reach the shared process through the named pipe `\\.\pipe\foundryvtt-mcp-<user>` (Windows) or a Unix socket in the state directory.
+- **One configuration for every client**: the shared process runs with the configuration of the relay that started it. If two clients (say Claude Desktop and Claude Code) pass different settings, each one restarts the shared process with its own — use the same `env` block everywhere, or set `FOUNDRY_MCP_SHARED=false` for one of them (only one process can own the bridge port).
+- **Configuration source**: Claude Desktop starts MCP servers with `C:\Windows\System32` as working directory, where no `.env` file is looked up — put the configuration in the `env` block of the client configuration. The shared process inherits the environment and working directory of the relay that starts it.
+- **Module bridge**: listens on loopback only (`127.0.0.1` and `::1`); the module reaches it at `ws://localhost:<port>` from the headless browser on the same machine.
 
 ### Claude Desktop Configuration
 

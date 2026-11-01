@@ -135,7 +135,53 @@ The server provides detailed diagnostics on startup. Look for:
    - **Brave**: allow **Localhost access**
 
    Then reload the Foundry tab.
-3. **Check the bridge itself**: If the server log has no `Module bridge listening` line, the port may already be in use or `FOUNDRY_MODULE_BRIDGE_ENABLED` is `false`.
+3. **Check the bridge itself**: If the server log has no `Module bridge listening` line, the port may already be in use or `FOUNDRY_MODULE_BRIDGE_ENABLED` is `false`. In shared-process mode that log is `daemon.log` (see [Shared Process](#shared-process)); `node dist/index.js status` shows whether the bridge listens and whether the module is connected. The port is typically held by another process running in all-in-one mode (`FOUNDRY_MCP_SHARED=false`), or by a shared process from a second state directory.
+4. **Bridge reached from another machine**: The bridge listens on loopback only (`127.0.0.1`, `::1`). The module must run in a browser on the same machine as the MCP server — which the headless GM session always does.
+
+### Shared Process
+
+By default MCP clients start lightweight relays, and one background **shared process** holds the FoundryVTT connection, the module bridge and the headless GM session (see the README, *Shared Process Mode*).
+
+#### Where are the logs?
+In the state directory — `%LOCALAPPDATA%\foundryvtt-mcp\` on Windows, `$XDG_STATE_HOME/foundryvtt-mcp/` or `~/.local/state/foundryvtt-mcp/` elsewhere:
+
+| File | Contents |
+|------|----------|
+| `daemon.log` (+ `.1` … `.3`) | The shared process: FoundryVTT connection, bridge, GM session, every tool call. It runs detached, so this file is its only output. |
+| `relay.log` (+ `.1` … `.3`) | Every relay: start, connection to the shared process, exit. Relays also keep logging to stderr, i.e. to the MCP client's own log. |
+| `daemon.json` | pid, version, start time, pipe and log path of the running shared process. |
+| `token` | Secret the relays present to the shared process. Do not share it. |
+
+`node dist/index.js status` prints the paths actually in use. Set `LOG_LEVEL=debug` in the client's `env` block for more detail (it applies to the shared process started next).
+
+#### Inspecting and stopping the shared process
+```bash
+node dist/index.js status   # running?, pid, uptime, FoundryVTT / bridge / GM session, relays, write queue
+node dist/index.js stop     # lets running calls finish, then exits (waits up to ~2.5 min)
+```
+`status` exits with code 3 when nothing runs. If `stop` cannot reach the process (for example after the `token` file was deleted), end the pid listed in `daemon.json` — Task Manager, `Stop-Process -Id <pid>` (PowerShell) or `kill <pid>`. The next tool call starts a fresh one.
+
+#### Checking the pipe
+- **Windows** (PowerShell): `Get-ChildItem \\.\pipe\ | Where-Object Name -like 'foundryvtt-mcp*'` lists `foundryvtt-mcp-<user>` while the shared process runs. A name with an extra `-xxxxxxxx` suffix belongs to a non-default `FOUNDRY_MCP_STATE_DIR` (the stress script uses one).
+- **Linux/macOS**: `ls -l ~/.local/state/foundryvtt-mcp/daemon.sock` (a socket left by a crash is detected and replaced automatically; very deep state directories fall back to `$TMPDIR/foundryvtt-mcp-<user>/daemon.sock`).
+
+#### "The shared process could not connect to FoundryVTT: …"
+FoundryVTT is not reachable yet, or the URL/credentials are wrong. The shared process stays up and retries on the next call: start FoundryVTT and call the tool again. The message carries the underlying error; `daemon.log` has the details.
+
+#### "The shared FoundryVTT MCP process did not become available within 30 s"
+The relay started a shared process that never answered. Look at the end of `daemon.log`: a configuration error, a crash at startup, or an antivirus blocking `node.exe`. Running `node dist/index.js daemon` by hand in a terminal with the same environment shows startup errors directly.
+
+#### "The shared FoundryVTT MCP process exited during this call; its outcome is unknown"
+The shared process died (or was killed) while it ran the call. The call is **not** resent automatically: for a write, check in FoundryVTT whether it happened before retrying. The next call starts a new shared process.
+
+#### "refused this relay (unauthorized …)"
+The `token` file changed while a shared process was running (deleted or edited by hand). End the shared process (see above); the next call starts one with the current token.
+
+#### The shared process keeps restarting / FoundryVTT reconnects often
+`daemon.log` shows `a relay with a different config connected` (or `version`): two MCP clients pass different settings (another `env` block, another `LOG_LEVEL`, an extra variable…) or run different versions of the server, and each one restarts the shared process with its own. Give every client the same `env` block and the same build, or set `FOUNDRY_MCP_SHARED=false` for one of them. After updating the server, restart your MCP clients so that all relays run the new version.
+
+#### Configuration in `.env` ignored with Claude Desktop
+Claude Desktop starts MCP servers in `C:\Windows\System32`, where no `.env` file is looked up. Put the configuration in the `env` block of `claude_desktop_config.json`. A `.env` file is only read from the working directory of the process (handy for Claude Code or a terminal started in the repository).
 
 #### Diagnostics Tools Not Working
 **Symptoms**: Health monitoring and log tools fail

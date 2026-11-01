@@ -28,15 +28,25 @@ bun run test-connection # Test MCP→FoundryVTT connection
 
 ### Data Flow
 
-1. AI assistant calls MCP tool → `src/tools/router.ts`
-2. Router dispatches to handler → `src/tools/handlers/`
-3. Handler queries cached worldData → `src/foundry/client.ts`
-4. Response returned as MCP result
+1. AI assistant calls MCP tool → relay (`src/shared/relay.ts`, default mode) forwards it
+   over a named pipe / Unix socket to the shared process (`src/shared/daemon.ts`);
+   with `FOUNDRY_MCP_SHARED=false` the stdio process handles it itself (`src/server.ts`)
+2. `FoundryCore.callTool` (`src/core.ts`) → write tools wait in a FIFO queue → `src/tools/router.ts`
+3. Router dispatches to handler → `src/tools/handlers/`
+4. Handler queries cached worldData → `src/foundry/client.ts`
+5. Response returned as MCP result
+
+`src/index.ts` only dispatches on the first argument (`daemon`, `status`, `stop`,
+none = MCP stdio server) and imports each role lazily: the relay and the control
+commands must not load Socket.IO or Playwright.
 
 ### Key Modules
 
 | Module | Path | Purpose |
 |--------|------|---------|
+| Core | `src/core.ts` | FoundryVTT client + module bridge + headless GM session, tool routing, write queue |
+| Shared mode | `src/shared/` | Relay, shared process, IPC protocol, autostart, `status`/`stop` |
+| Write tools | `src/tools/write-tools.ts` | Tools serialised by the write queue — add every new mutation tool |
 | Client | `src/foundry/client.ts` | Socket.IO connection, world state cache |
 | Auth | `src/foundry/auth.ts` | 4-step Socket.IO authentication |
 | Config | `src/config/index.ts` | Zod-validated environment config |
@@ -69,6 +79,9 @@ bun run test-connection # Test MCP→FoundryVTT connection
 | `FOUNDRY_WRITE_ENABLED` | No | Enable game-state mutations — `true` required for the write tools (default `false`) |
 | `LOG_LEVEL` | No | `debug` for verbose output |
 | `FOUNDRY_TIMEOUT` | No | Request timeout (ms, default 10000) |
+| `FOUNDRY_MCP_SHARED` | No | `false` = all-in-one process instead of relay + shared process (default `true`) |
+| `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` | No | Shared process exits after this long with no relay connected (default 30, `0` = never) |
+| `FOUNDRY_MCP_STATE_DIR` | No | Isolated state dir (token, `daemon.json`, logs) with its own pipe — use it in tests |
 
 ## Rules
 
