@@ -17,7 +17,7 @@ import { config } from './config/index.js';
 import { DiagnosticsClient } from './diagnostics/client.js';
 import { FoundryClient, type FoundryClientConfig } from './foundry/client.js';
 import { HeadlessGmSession } from './foundry/headless-gm-session.js';
-import { ModuleBridge } from './foundry/module-bridge.js';
+import { BRIDGE_PROTOCOL_VERSION, ModuleBridge } from './foundry/module-bridge.js';
 import { routeResourceRequest, routeToolRequest } from './tools/index.js';
 import { isWriteTool } from './tools/write-tools.js';
 import { DiagnosticSystem } from './utils/diagnostics.js';
@@ -27,7 +27,18 @@ import { SerialQueue } from './utils/serial-queue.js';
 /** Snapshot reported by `foundryvtt-mcp status`. */
 export interface CoreStatus {
   foundryConnected: boolean;
-  bridge: { enabled: boolean; port: number; moduleConnected: boolean };
+  bridge: {
+    enabled: boolean;
+    port: number;
+    /** An authenticated module is connected. */
+    moduleConnected: boolean;
+    /** Handshake protocol version the bridge speaks. */
+    protocol: number;
+    /** The only `Origin` the bridge accepts. */
+    origin: string;
+    /** ISO time the current authenticated connection was established, or `null`. */
+    moduleConnectedSince: string | null;
+  };
   headlessGm: { enabled: boolean; active: boolean; status: string | null };
   /** Write calls queued or running. */
   writeQueue: number;
@@ -267,6 +278,9 @@ export class FoundryCore {
         enabled: this.moduleBridge !== null,
         port: config.moduleBridge.port,
         moduleConnected: this.moduleBridge?.isConnected() ?? false,
+        protocol: BRIDGE_PROTOCOL_VERSION,
+        origin: new URL(config.foundry.url).origin,
+        moduleConnectedSince: this.moduleBridge?.moduleConnectedSince()?.toISOString() ?? null,
       },
       headlessGm: {
         enabled: this.headlessGmSession !== null,

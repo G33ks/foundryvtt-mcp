@@ -31,7 +31,14 @@ function makePaths(): SharedPaths {
 
 const STATUS: CoreStatus = {
   foundryConnected: true,
-  bridge: { enabled: true, port: 31415, moduleConnected: true },
+  bridge: {
+    enabled: true,
+    port: 31415,
+    moduleConnected: true,
+    protocol: 1,
+    origin: 'http://localhost:30000',
+    moduleConnectedSince: '2026-11-01T00:00:00.000Z',
+  },
   headlessGm: { enabled: true, active: true, status: 'ok' },
   writeQueue: 0,
 };
@@ -137,7 +144,7 @@ describe('SharedProcess', () => {
       relays: 1,
       inFlight: 0,
       foundryConnected: true,
-      bridge: { enabled: true, moduleConnected: true },
+      bridge: { enabled: true, moduleConnected: true, protocol: 1 },
     });
   });
 

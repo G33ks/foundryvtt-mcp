@@ -445,7 +445,7 @@ describe('handleGetHealthStatus', () => {
     );
 
     expect(text).toContain('**Module Bridge:**');
-    expect(text).toContain('✅ Connected');
+    expect(text).toContain('✅ Connected — authenticated module (protocol v1)');
   });
 
   it('surfaces the headless GM session status when the bridge has no module connected', async () => {
@@ -469,7 +469,7 @@ describe('handleGetHealthStatus', () => {
     expect(text).toContain('no user named "mcp-api"');
   });
 
-  it('points at manual setup when the bridge has no headless session configured', async () => {
+  it('explains the module needs the headless session when none is configured', async () => {
     const bridge = { isConnected: () => false } as unknown as ModuleBridge;
 
     const text = getText(
@@ -478,6 +478,7 @@ describe('handleGetHealthStatus', () => {
 
     expect(text).toContain('❌ Not connected');
     expect(text).toContain('FOUNDRY_HEADLESS_GM_ENABLED');
+    expect(text).toContain('no longer supported');
   });
 });
 

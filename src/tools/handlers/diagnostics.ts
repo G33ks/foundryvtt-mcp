@@ -10,7 +10,7 @@ import type { LogEntry } from '../../diagnostics/types.js';
 import { LogEntrySchema } from '../../diagnostics/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import type { HeadlessGmSession } from '../../foundry/headless-gm-session.js';
-import type { ModuleBridge } from '../../foundry/module-bridge.js';
+import { BRIDGE_PROTOCOL_VERSION, type ModuleBridge } from '../../foundry/module-bridge.js';
 import { withToolError } from './utils.js';
 
 /** Valid log levels recognized by the tool schema */
@@ -416,13 +416,14 @@ export async function handleGetHealthStatus(
     let moduleBridgeSection: string | null = null;
     if (moduleBridge) {
       if (moduleBridge.isConnected()) {
-        moduleBridgeSection = '✅ Connected';
+        moduleBridgeSection = `✅ Connected — authenticated module (protocol v${BRIDGE_PROTOCOL_VERSION})`;
       } else if (headlessGmSession) {
-        moduleBridgeSection = `❌ Not connected\n- **Headless GM session:** ${headlessGmSession.statusText()}`;
+        moduleBridgeSection = `❌ Not connected — no authenticated module (protocol v${BRIDGE_PROTOCOL_VERSION})\n- **Headless GM session:** ${headlessGmSession.statusText()}`;
       } else {
         moduleBridgeSection =
-          '❌ Not connected — no GM/Assistant-GM browser tab is logged in. Open one manually, ' +
-          'or set FOUNDRY_HEADLESS_GM_ENABLED=true with FOUNDRY_USERNAME/FOUNDRY_PASSWORD to automate it.';
+          '❌ Not connected — the companion module only connects from the headless GM session, ' +
+          'which is not running. Set FOUNDRY_HEADLESS_GM_ENABLED=true with ' +
+          'FOUNDRY_USERNAME/FOUNDRY_PASSWORD (a manually opened GM tab is no longer supported).';
       }
     }
 

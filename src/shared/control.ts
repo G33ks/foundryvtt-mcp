@@ -87,9 +87,14 @@ export async function runStatus(paths: SharedPaths = resolveSharedPaths()): Prom
     }
     console.log(
       bridge?.enabled
-        ? `  Module bridge:  listening on port ${bridge.port}, module connected: ${yesNo(bridge.moduleConnected)}`
+        ? `  Module bridge:  listening on port ${bridge.port}, protocol v${bridge.protocol ?? '?'}, ` +
+            `authenticated module connected: ${yesNo(bridge.moduleConnected)}` +
+            (bridge.moduleConnectedSince ? ` (since ${bridge.moduleConnectedSince})` : '')
         : '  Module bridge:  disabled',
     );
+    if (bridge?.enabled && bridge.origin) {
+      console.log(`  Bridge origin:  ${bridge.origin}`);
+    }
     console.log(
       headlessGm?.enabled
         ? `  Headless GM:    ${headlessGm.active ? 'logged in' : 'not logged in'} (${headlessGm.status})`

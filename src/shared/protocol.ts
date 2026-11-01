@@ -98,7 +98,16 @@ export const DaemonStatusSchema = z.object({
   startupError: z.string().nullable(),
   foundryConnected: z.boolean().optional(),
   bridge: z
-    .object({ enabled: z.boolean(), port: z.number(), moduleConnected: z.boolean() })
+    .object({
+      enabled: z.boolean(),
+      port: z.number(),
+      /** An authenticated module is connected. */
+      moduleConnected: z.boolean(),
+      // Absent from shared processes older than bridge authentication.
+      protocol: z.number().optional(),
+      origin: z.string().optional(),
+      moduleConnectedSince: z.string().nullable().optional(),
+    })
     .optional(),
   headlessGm: z
     .object({ enabled: z.boolean(), active: z.boolean(), status: z.string().nullable() })
