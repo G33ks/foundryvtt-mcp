@@ -19,11 +19,18 @@
  * This class removes that step: it drives a headless Chromium/Chrome/Edge tab
  * (via `playwright-core` — it launches whatever Chrome/Edge is already
  * installed, any Chromium-based browser given by an explicit executable path,
- * or Playwright's own Chromium if it was downloaded) through Foundry's own `/join`
- * login form using the same account {@link FoundryClient} already
- * authenticates as, and keeps it logged in for as long as the server runs,
- * re-logging in automatically if Foundry kicks it back to `/join` (a world
- * restart, a server restart, a session timeout).
+ * or Playwright's own Chromium if it was downloaded) and keeps it on `/game`
+ * for as long as the server runs, in one of two modes:
+ *
+ * - **Shared** (default, one account): the page reuses {@link FoundryClient}'s
+ *   own session cookie in a dedicated browser context and never fills the
+ *   `/join` form. FoundryVTT keeps any number of sockets per session, so the
+ *   two connections coexist. Only `FoundryClient` authenticates: when the
+ *   cookie stops opening the game (server restart, world shutdown, 24-hour
+ *   session expiry) the page asks it for a new session and waits for it.
+ * - **Separate account** (`FOUNDRY_HEADLESS_GM_USERNAME` naming another
+ *   user): the page logs that account in through `/join` itself and logs in
+ *   again if Foundry kicks it back there.
  *
  * A separate watchdog covers a narrower failure the Foundry-level login
  * check above cannot see: the module's own WebSocket to {@link ModuleBridge}
@@ -43,7 +50,7 @@
  * connected" until this resolves itself or the operator fixes the cause.
  */
 
-import type { Browser, Frame, Page } from 'playwright-core';
+import type { Browser, BrowserContext, Frame, Page, Route } from 'playwright-core';
 import { chromium } from 'playwright-core';
 import { logger } from '../utils/logger.js';
 
@@ -115,6 +122,20 @@ const BRIDGE_INIT_SCRIPT = `(() => {
   });
 })();`;
 
+/**
+ * Shared mode: main-frame navigations the page may make are to `/game` only;
+ * see {@link HeadlessGmSession.guardNavigations}. Matches same-origin URLs
+ * whose path has no file extension (pages, not assets) other than `/game`,
+ * so only those few requests are intercepted.
+ */
+function guardedNavigationPattern(origin: string): RegExp {
+  const escaped = origin.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`^${escaped}/(?!game(?:[/?#]|$))[^.?#]*(?:[?#].*)?$`);
+}
+
+/** Shared mode: how long a loaded `/game` may take to report `game.ready`. */
+const GAME_READY_TIMEOUT_MS = 60000;
+
 const JOIN_SELECTOR_TIMEOUT_MS = 20000;
 const LOGIN_NAV_TIMEOUT_MS = 15000;
 const BASE_RETRY_MS = 5000;
@@ -136,10 +157,41 @@ export interface BridgeCredentials {
   prove(serverNonce: unknown): { nonce: string; clientProof: string; serverProof: string };
 }
 
+/**
+ * The connector's own FoundryVTT session, shared with the page (one account
+ * for both). Implemented by `FoundryClient`, the only side that authenticates.
+ */
+export interface SessionSource {
+  /** Current session cookie; `null` before the first authentication. */
+  currentSession(): string | null;
+  /** @returns a function that removes the listener */
+  onSessionChanged(listener: (session: string) => void): () => void;
+  /** Authenticates again; concurrent requests share one attempt. */
+  reauthenticate(reason: string): Promise<void>;
+}
+
+/**
+ * Where a session stands. Shared mode: `waiting-for-session` (no cookie
+ * yet), `logged-in`, `reauthenticating` (the cookie was refused; a new one
+ * was asked for). Separate account: `logging-in` or `logged-in`.
+ */
+export type HeadlessSessionState =
+  | 'waiting-for-session'
+  | 'logging-in'
+  | 'logged-in'
+  | 'reauthenticating';
+
 export interface HeadlessGmSessionOptions {
   foundryUrl: string;
+  /** Account the page runs as (shown in status lines). */
   username: string;
-  password: string;
+  /** Separate-account mode: password for the page's own `/join` login. */
+  password?: string;
+  /**
+   * Shared mode: the page reuses this session cookie and never fills the
+   * `/join` form; `password` is then unused.
+   */
+  sessionSource?: SessionSource;
   /** Explicit browser executable path; skips the channel-detection fallback chain. */
   executablePath?: string;
   /**
@@ -181,8 +233,19 @@ const LOGGED_OUT_PATHS: Record<string, true> = {
 export class HeadlessGmSession {
   private readonly options: HeadlessGmSessionOptions;
   private browser: Browser | null = null;
+  /** Shared mode: the dedicated context holding the shared cookie. */
+  private context: BrowserContext | null = null;
   private page: Page | null = null;
   private active = false;
+  private sharedState: HeadlessSessionState = 'waiting-for-session';
+  /** Shared mode: a new session was asked for and has not arrived yet. */
+  private reauthRequested = false;
+  /** Shared mode: a new cookie waits its turn; a load still using the old one may fail. */
+  private sessionQueued = false;
+  /** Shared mode: cookie updates and `/game` loads, one after the other. */
+  private pageTask: Promise<void> = Promise.resolve();
+  private loadingGame = false;
+  private unsubscribeSession: (() => void) | null = null;
   private lastError: string | null = null;
   private retryDelayMs = BASE_RETRY_MS;
   private retryTimer: NodeJS.Timeout | null = null;
@@ -208,7 +271,14 @@ export class HeadlessGmSession {
   async start(): Promise<void> {
     this.stopped = false;
     this.browser = await this.launchBrowser();
-    this.page = await this.browser.newPage();
+    const { sessionSource } = this.options;
+    if (sessionSource) {
+      // A context of its own: the shared cookie never mixes with anything else.
+      this.context = await this.browser.newContext();
+      this.page = await this.context.newPage();
+    } else {
+      this.page = await this.browser.newPage();
+    }
     if (this.options.bridgeCredentials) {
       // Before the first navigation, so the module finds it on its first `ready`.
       await this.exposeBridgeCredentials(this.page, this.options.bridgeCredentials);
@@ -218,7 +288,17 @@ export class HeadlessGmSession {
         return;
       }
       const path = new URL(frame.url()).pathname;
-      if (this.active && LOGGED_OUT_PATHS[path]) {
+      if (!LOGGED_OUT_PATHS[path]) {
+        return;
+      }
+      if (sessionSource) {
+        // Only a server redirect gets here (guardNavigations blocks the
+        // page's own navigations), and FoundryVTT redirects to /join only
+        // when the session is no longer valid.
+        this.onSessionRefused(`FoundryVTT redirected the page to ${path}`);
+        return;
+      }
+      if (this.active) {
         logger.warn('Headless GM session logged out unexpectedly — re-logging in', {
           url: frame.url(),
         });
@@ -226,7 +306,19 @@ export class HeadlessGmSession {
         this.scheduleLogin(0);
       }
     });
-    this.scheduleLogin(0);
+    if (sessionSource) {
+      await this.guardNavigations(this.page);
+      this.unsubscribeSession = sessionSource.onSessionChanged((session) => {
+        this.useSession(session);
+      });
+      const session = sessionSource.currentSession();
+      if (session) {
+        this.useSession(session);
+      }
+    } else {
+      this.sharedState = 'logging-in';
+      this.scheduleLogin(0);
+    }
     if (this.options.isBridgeConnected) {
       this.watchdogTimer = setInterval(() => this.checkBridgeHealth(), WATCHDOG_INTERVAL_MS);
     }
@@ -238,10 +330,14 @@ export class HeadlessGmSession {
     this.retryTimer = null;
     clearInterval(this.watchdogTimer ?? undefined);
     this.watchdogTimer = null;
+    this.unsubscribeSession?.();
+    this.unsubscribeSession = null;
     this.active = false;
     await this.page?.close().catch(() => undefined);
+    await this.context?.close().catch(() => undefined);
     await this.browser?.close().catch(() => undefined);
     this.page = null;
+    this.context = null;
     this.browser = null;
   }
 
@@ -255,12 +351,185 @@ export class HeadlessGmSession {
     return this.active;
   }
 
+  /** `shared`: the page reuses the connector's session; `separate`: its own account. */
+  mode(): 'shared' | 'separate' {
+    return this.options.sessionSource ? 'shared' : 'separate';
+  }
+
+  /** Account the page runs as. */
+  username(): string {
+    return this.options.username;
+  }
+
+  /** See {@link HeadlessSessionState}. */
+  sessionState(): HeadlessSessionState {
+    if (this.active) {
+      return 'logged-in';
+    }
+    return this.sharedState;
+  }
+
+  /** e.g. "sharing the connector's session (mcp-api)" or "separate account (mcp-gm)". */
+  modeText(): string {
+    return this.mode() === 'shared'
+      ? `sharing the connector's session (${this.options.username})`
+      : `separate account (${this.options.username})`;
+  }
+
   /** Short human-readable status line for `get_health_status`. */
   statusText(): string {
+    const mode = this.modeText();
     if (this.active) {
-      return `✅ Logged in as \`${this.options.username}\``;
+      return `✅ Logged in — ${mode}`;
     }
-    return this.lastError ? `⏳ Not connected yet — ${this.lastError}` : '⏳ Logging in…';
+    const state = this.sessionState();
+    if (state === 'waiting-for-session') {
+      return `⏳ Waiting for the connector's session — ${mode}`;
+    }
+    if (state === 'reauthenticating') {
+      return `⏳ Reauthenticating — ${mode}${this.lastError ? ` (${this.lastError})` : ''}`;
+    }
+    return this.lastError
+      ? `⏳ Not connected yet — ${mode} — ${this.lastError}`
+      : `⏳ Logging in — ${mode}`;
+  }
+
+  /**
+   * Shared mode: blocks every main-frame navigation away from `/game` —
+   * `game.logOut()` (the "Log Out" button, or the client reacting to its
+   * own role change) loads `/join`, and a GET /join logs the SHARED session
+   * out of the world (server sessions.mjs `logoutWorld`), which would leave
+   * the connector's socket anonymous at its next reconnection. The page
+   * reloads `/game` instead.
+   *
+   * A server redirect escapes this: Playwright calls a route handler only
+   * for the first URL of a redirect chain, so GET /game → 302 /join is not
+   * intercepted. That is harmless: FoundryVTT redirects /game to /join only
+   * when the session no longer names a user (server views/game.mjs), so the
+   * GET /join it causes has nothing left to log out, and the
+   * `framenavigated` handler asks for a new session.
+   */
+  private async guardNavigations(page: Page): Promise<void> {
+    const origin = new URL(this.options.foundryUrl).origin;
+    await page.route(guardedNavigationPattern(origin), async (route: Route) => {
+      const request = route.request();
+      if (!request.isNavigationRequest() || request.frame() !== page.mainFrame()) {
+        await route.continue().catch(() => undefined);
+        return;
+      }
+      logger.warn('Headless GM session blocked a navigation away from /game — reloading /game', {
+        path: new URL(request.url()).pathname,
+      });
+      await route.abort('aborted').catch(() => undefined);
+      if (this.active && !this.loadingGame) {
+        this.active = false;
+        this.enqueuePageTask(() => this.loadGame());
+      }
+    });
+  }
+
+  /** Shared mode: installs a new session cookie, then (re)loads `/game`. */
+  private useSession(session: string): void {
+    this.reauthRequested = false;
+    this.sessionQueued = true;
+    this.enqueuePageTask(async () => {
+      this.sessionQueued = false;
+      if (!this.context) {
+        return;
+      }
+      const url = new URL(this.options.foundryUrl);
+      await this.context.clearCookies();
+      await this.context.addCookies([
+        {
+          name: 'session',
+          value: session,
+          domain: url.hostname,
+          path: '/',
+          httpOnly: true,
+          secure: url.protocol === 'https:',
+          sameSite: 'Strict',
+        },
+      ]);
+      await this.loadGame();
+    });
+  }
+
+  private enqueuePageTask(task: () => Promise<void>): void {
+    this.pageTask = this.pageTask.then(task).catch((error: unknown) => {
+      // loadGame() handles its own failures; this guards the chain itself.
+      logger.error('Headless GM session page task failed unexpectedly', error);
+    });
+  }
+
+  /**
+   * Shared mode: loads `/game` with the current cookie and waits for
+   * `game.ready`. FoundryVTT answers /game with its "No Active Game" page
+   * (HTTP 200, no `game`) when no world runs, hence the ready check.
+   */
+  private async loadGame(): Promise<void> {
+    if (this.stopped || !this.page) {
+      return;
+    }
+    this.loadingGame = true;
+    this.active = false;
+    try {
+      const gameUrl = new URL('/game', this.options.foundryUrl).toString();
+      await this.page.goto(gameUrl, { waitUntil: 'domcontentloaded' });
+      const path = new URL(this.page.url()).pathname;
+      if (path !== '/game') {
+        this.onSessionRefused(`FoundryVTT redirected the page to ${path}`);
+        return;
+      }
+      const ready = await this.page
+        .waitForFunction(
+          () => (globalThis as { game?: { ready?: boolean } }).game?.ready === true,
+          null,
+          { timeout: GAME_READY_TIMEOUT_MS },
+        )
+        .then(
+          () => true,
+          () => false,
+        );
+      if (this.stopped) {
+        return;
+      }
+      if (!ready) {
+        this.onSessionRefused('the game never became ready (no active world?)');
+        return;
+      }
+      this.active = true;
+      this.sharedState = 'logged-in';
+      this.lastError = null;
+      logger.info(`Headless GM session logged in — ${this.modeText()}`);
+    } catch (error) {
+      this.onSessionRefused(errorText(error));
+    } finally {
+      this.loadingGame = false;
+    }
+  }
+
+  /**
+   * Shared mode: the cookie no longer opens the game. Asks the connector for
+   * a new session — once, however many events report it, until one arrives.
+   */
+  private onSessionRefused(reason: string): void {
+    const { sessionSource } = this.options;
+    if (!sessionSource || this.stopped) {
+      return;
+    }
+    this.active = false;
+    this.sharedState = 'reauthenticating';
+    this.lastError = reason;
+    // A newer cookie is about to be tried: this refusal was the old one's.
+    if (this.reauthRequested || this.sessionQueued) {
+      return;
+    }
+    this.reauthRequested = true;
+    logger.warn(`Headless GM session: ${reason} — asking the connector for a new session`);
+    sessionSource.reauthenticate(`headless GM page: ${reason}`).catch((error: unknown) => {
+      // The connector keeps retrying on its own; the page waits for its cookie.
+      this.lastError = `${reason}; reauthentication failed: ${errorText(error)}`;
+    });
   }
 
   /**
@@ -396,7 +665,7 @@ export class HeadlessGmSession {
         (await this.page.$('input[name="password"]')) ??
         (await this.page.$('input[type="password"]'));
       if (passwordInput) {
-        await passwordInput.fill(this.options.password);
+        await passwordInput.fill(this.options.password ?? '');
       }
 
       await Promise.all([
