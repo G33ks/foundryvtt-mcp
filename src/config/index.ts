@@ -115,6 +115,19 @@ const ConfigSchema = z.object({
     bufferSize: z.number().default(500),
     defaultWaitMs: z.number().default(25000),
   }),
+
+  /**
+   * Shared-process mode: MCP clients start lightweight stdio relays that
+   * forward tool calls to one long-lived background process owning the
+   * FoundryVTT connection, the module bridge and the headless GM session.
+   * `enabled: false` keeps the all-in-one process (one connection per
+   * client-spawned instance).
+   */
+  shared: z.object({
+    enabled: z.boolean().default(true),
+    /** Minutes with no relay connected before the shared process exits; 0 = never. */
+    idleTimeoutMinutes: z.number().min(0).default(30),
+  }),
 });
 
 /**
@@ -209,6 +222,16 @@ function loadConfig(): Config {
         ? parseInt(process.env.FOUNDRY_EVENT_WAIT_MS, 10)
         : undefined,
     },
+
+    shared: {
+      enabled:
+        process.env.FOUNDRY_MCP_SHARED !== undefined
+          ? process.env.FOUNDRY_MCP_SHARED !== 'false'
+          : undefined,
+      idleTimeoutMinutes: process.env.FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES
+        ? Number(process.env.FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES)
+        : undefined,
+    },
   };
 
   try {
@@ -276,6 +299,17 @@ export const config = new Proxy({} as Config, {
     return _config[prop as keyof Config];
   },
 });
+
+/**
+ * Returns the whole validated configuration as a plain object. Unlike the
+ * {@link config} proxy it can be enumerated (e.g. to fingerprint it).
+ */
+export function getConfig(): Config {
+  if (_config === null) {
+    _config = loadConfig();
+  }
+  return _config;
+}
 
 /**
  * Resets the cached configuration - used for testing

@@ -84,6 +84,31 @@ export const ResponseSchema = z.union([
 ]);
 export type IpcResponse = z.infer<typeof ResponseSchema>;
 
+/** Result of the `status` op. FoundryVTT fields are absent until the core is built. */
+export const DaemonStatusSchema = z.object({
+  pid: z.number(),
+  version: z.string(),
+  startedAt: z.string(),
+  uptimeSeconds: z.number(),
+  endpoint: z.string(),
+  logFile: z.string(),
+  relays: z.number(),
+  inFlight: z.number(),
+  writeQueue: z.number().optional(),
+  startupError: z.string().nullable(),
+  foundryConnected: z.boolean().optional(),
+  bridge: z
+    .object({ enabled: z.boolean(), port: z.number(), moduleConnected: z.boolean() })
+    .optional(),
+  headlessGm: z
+    .object({ enabled: z.boolean(), active: z.boolean(), status: z.string().nullable() })
+    .optional(),
+});
+export type DaemonStatus = z.infer<typeof DaemonStatusSchema>;
+
+/** Result of the `stop` op. */
+export const StopReplySchema = z.object({ stopping: z.literal(true), pid: z.number() });
+
 /** Serialises one message as a protocol line. */
 export function encodeLine(message: unknown): string {
   return `${JSON.stringify(message)}\n`;

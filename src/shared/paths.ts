@@ -6,6 +6,7 @@
  * paths without a valid FoundryVTT configuration.
  */
 
+import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -41,12 +42,17 @@ function userTag(): string {
 
 /**
  * `%LOCALAPPDATA%\foundryvtt-mcp` on Windows, `$XDG_STATE_HOME/foundryvtt-mcp`
- * or `~/.local/state/foundryvtt-mcp` elsewhere.
+ * or `~/.local/state/foundryvtt-mcp` elsewhere. `FOUNDRY_MCP_STATE_DIR`
+ * overrides it, which also gives that directory its own endpoint (an
+ * isolated shared process, e.g. for tests).
  */
 export function defaultStateDir(
   platform: NodeJS.Platform = process.platform,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
+  if (env.FOUNDRY_MCP_STATE_DIR) {
+    return path.resolve(env.FOUNDRY_MCP_STATE_DIR);
+  }
   if (platform === 'win32') {
     const base = env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local');
     return path.join(base, 'foundryvtt-mcp');
@@ -64,9 +70,14 @@ export function endpointFor(
   stateDir: string,
   platform: NodeJS.Platform = process.platform,
   user: string = userTag(),
+  isDefaultStateDir = true,
 ): string {
   if (platform === 'win32') {
-    return `\\\\.\\pipe\\foundryvtt-mcp-${user}`;
+    // Pipes live in one flat namespace: a non-default state dir gets its own.
+    const suffix = isDefaultStateDir
+      ? ''
+      : `-${createHash('sha256').update(stateDir.toLowerCase()).digest('hex').slice(0, 8)}`;
+    return `\\\\.\\pipe\\foundryvtt-mcp-${user}${suffix}`;
   }
   const preferred = path.join(stateDir, 'daemon.sock');
   if (Buffer.byteLength(preferred) <= MAX_UNIX_SOCKET_PATH) {
@@ -78,7 +89,12 @@ export function endpointFor(
 /** Resolves every shared-process path and creates the directories they live in. */
 export function resolveSharedPaths(stateDir: string = defaultStateDir()): SharedPaths {
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
-  const endpoint = endpointFor(stateDir);
+  const endpoint = endpointFor(
+    stateDir,
+    process.platform,
+    userTag(),
+    !process.env.FOUNDRY_MCP_STATE_DIR,
+  );
   if (process.platform !== 'win32') {
     mkdirSync(path.dirname(endpoint), { recursive: true, mode: 0o700 });
   }

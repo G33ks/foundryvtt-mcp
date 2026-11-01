@@ -88,8 +88,17 @@ describe('paths', () => {
     );
   });
 
-  it('names a per-user pipe on Windows', () => {
+  it('honours FOUNDRY_MCP_STATE_DIR', () => {
+    expect(defaultStateDir('win32', { FOUNDRY_MCP_STATE_DIR: '/custom' })).toBe(
+      path.resolve('/custom'),
+    );
+  });
+
+  it('names a per-user pipe on Windows, with a suffix for a non-default state dir', () => {
     expect(endpointFor('ignored', 'win32', 'alice')).toBe('\\\\.\\pipe\\foundryvtt-mcp-alice');
+    const a = endpointFor('C:\\a', 'win32', 'alice', false);
+    expect(a).toMatch(/^\\\\\.\\pipe\\foundryvtt-mcp-alice-[0-9a-f]{8}$/);
+    expect(endpointFor('C:\\b', 'win32', 'alice', false)).not.toBe(a);
   });
 
   it('falls back to a short socket path when the state dir is too deep', () => {

@@ -54,6 +54,9 @@ writeFileSync(
     'FOUNDRY_USERNAME=dotenv-smoke',
     'FOUNDRY_PASSWORD=dotenv-smoke',
     'LOG_LEVEL=error',
+    // All-in-one mode: the default relay would start a background shared
+    // process that outlives this test.
+    'FOUNDRY_MCP_SHARED=false',
     '',
   ].join('\n'),
 );
