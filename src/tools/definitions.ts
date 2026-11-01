@@ -1542,7 +1542,7 @@ export const diagnosticsTools = [
   {
     name: 'get_health_status',
     description:
-      "Get a combined health report: MCP-to-FoundryVTT connection state, world title/system/core version, and the server's health status with its active/total user counts, uptime, heap memory and recent error/warning counts. The world section is prefixed with a stale marker when the cached snapshot stopped following live document changes - typically a dropped connection, whose missed updates are never replayed - and refresh_world_data resyncs it. The connection line is a live read of the socket on the default Socket.IO transport, so it follows a link that drops or comes back in both directions; with FOUNDRY_API_KEY set there is no socket and it reports the outcome of the last REST request instead, not a live probe, so a server that went away between requests still reads as connected until the next request fails. Uptime and memory are omitted when the server does not report them; CPU, disk and playtime are not reported at all. Degrades gracefully - sections that need the REST API module (FOUNDRY_API_KEY) report as unavailable rather than failing. Use when: first checking which world is loaded and whether the server reports itself healthy.",
+      "Get a combined health report: MCP-to-FoundryVTT connection state, world title/system/core version, and the server's health status with its active/total user counts, uptime, heap memory and recent error/warning counts. The world section is prefixed with a stale marker when the cached snapshot stopped following live document changes - typically a dropped connection, whose missed updates are never replayed - and refresh_world_data resyncs it. The connection line is a live read of the socket on the default Socket.IO transport, so it follows a link that drops or comes back in both directions; with FOUNDRY_API_KEY set there is no socket and it reports the outcome of the last REST request instead, not a live probe, so a server that went away between requests still reads as connected until the next request fails. Uptime and memory are omitted when the server does not report them; CPU, disk and playtime are not reported at all. Also lists the journal page overwrites detected in the last 24 hours (a connector write lost to a stale save or an open editor's autosave), with the path of each local copy. Degrades gracefully - sections that need the REST API module (FOUNDRY_API_KEY) report as unavailable rather than failing. Use when: first checking which world is loaded and whether the server reports itself healthy.",
     inputSchema: {
       type: 'object',
       properties: {},
@@ -2059,7 +2059,7 @@ export const journalTools = [
   {
     name: 'get_journal',
     description:
-      'Get one journal entry by id with the id and text of each page. By default page bodies are HTML-stripped and each is truncated to its first 500 characters, marked with a trailing "...", so long pages come back partial; pass raw: true for the full, unmodified HTML. Use when: you have a journalId and need the text of its pages, or a pageId and the exact current HTML before editing a page with update_journal_page. Do not use when: you only have a title or keyword - run search_journals first.',
+      'Get one journal entry by id with the id and text of each page. By default page bodies are HTML-stripped and each is truncated to its first 500 characters, marked with a trailing "...", so long pages come back partial, and they come from the cached snapshot (flagged when it is stale). Pass raw: true to read the entry from the server instead, with the full, unmodified HTML and the version token of each page (version: <token>) - the expectedVersion update_journal_page requires to replace the content of that page. Use when: you have a journalId and need the text of its pages, or a pageId and the exact current HTML before editing a page with update_journal_page. Do not use when: you only have a title or keyword - run search_journals first.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2070,7 +2070,7 @@ export const journalTools = [
         raw: {
           type: 'boolean',
           description:
-            "Return each page's full, unmodified HTML (text.content) instead of the stripped 500-character preview. Use before rewriting a page so no markup or text is lost.",
+            "Read the entry from the server and return each page's full, unmodified HTML (text.content) and version token instead of the stripped 500-character preview. Use before rewriting a page so no markup or text is lost, and pass the page's version to update_journal_page as expectedVersion.",
           default: false,
         },
       },
@@ -2086,7 +2086,7 @@ export const journalMutationTools = [
   {
     name: 'create_journal_entry',
     description:
-      'Create a new journal entry with one or more text pages, optionally filed under a folder. Defaults to GM-only visibility - pass visibility to let players read it. Use when: recording session notes, lore, or a handout in the world. Do not use when: adding text to an existing entry - this always creates a new one. ' +
+      'Create a new journal entry with one or more text pages, optionally filed under a folder. Defaults to GM-only visibility - pass visibility to let players read it. Use when: recording session notes, lore, or a handout in the world. Returns the id and version token of each created page. Do not use when: adding text to an existing entry - this always creates a new one. ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -2131,7 +2131,7 @@ export const journalMutationTools = [
   {
     name: 'update_journal_page',
     description:
-      'Edit one page of an existing journal entry. mode "replace" (default) sets a new name and/or replaces the whole page content; mode "append" adds HTML to the end of the current content. Get the pageId (and, before a replace, the exact current HTML) from get_journal with raw: true. Use when: correcting, rewriting, or extending session notes, lore, or a handout page. Do not use when: adding a separate new page - use add_journal_page; renaming or moving the entry itself - use update_journal_entry. ' +
+      'Edit one page of an existing journal entry. mode "replace" (default) sets a new name and/or replaces the whole page content; mode "append" adds HTML to the end of the page as currently stored on the server. Replacing content requires expectedVersion: read the page with get_journal raw: true, rewrite from that HTML, and pass the version printed for the page - the write is refused, with nothing written, if the page changed since. Every write saves the previous content to a local copy first, and returns the new version token so another edit can follow without re-reading. The response warns when the page looks open in a FoundryVTT editor, whose autosave can overwrite the write. Use when: correcting, rewriting, or extending session notes, lore, or a handout page. Do not use when: adding a separate new page - use add_journal_page; renaming or moving the entry itself - use update_journal_entry. ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -2148,7 +2148,7 @@ export const journalMutationTools = [
           type: 'string',
           enum: ['replace', 'append'],
           description:
-            "'replace' (default) overwrites the page content with content and/or renames it; 'append' adds content after the existing content (name not allowed).",
+            "'replace' (default) overwrites the page content with content (expectedVersion required) and/or renames it; 'append' adds content after the existing content as read from the server (name not allowed).",
           default: 'replace',
         },
         name: {
@@ -2160,6 +2160,11 @@ export const journalMutationTools = [
           description:
             'Page body as HTML or plain text. In replace mode it replaces the entire page content; in append mode it is added at the end.',
         },
+        expectedVersion: {
+          type: 'string',
+          description:
+            'Version token of the page as last read (get_journal raw: true, or the version returned by the previous write). Required to replace content; optional in append mode. The write is refused if the page has changed since.',
+        },
       },
       required: ['journalId', 'pageId'],
     },
@@ -2167,7 +2172,7 @@ export const journalMutationTools = [
   {
     name: 'add_journal_page',
     description:
-      'Add a new text page to an existing journal entry, placed after its last page. Use when: a journal needs another section (a new session, an NPC, a location). Do not use when: the entry does not exist yet - use create_journal_entry; changing an existing page - use update_journal_page. ' +
+      'Add a new text page to an existing journal entry, placed after its last page as read from the server. Returns the new page id and version token. Use when: a journal needs another section (a new session, an NPC, a location). Do not use when: the entry does not exist yet - use create_journal_entry; changing an existing page - use update_journal_page. ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',

@@ -4,8 +4,15 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
+import { journalVersion } from '../../foundry/journal-integrity.js';
 import { stripHtml } from '../../utils/sanitize.js';
-import { withToolError } from './utils.js';
+import { withJournalWarnings, withToolError } from './utils.js';
+
+/** Shown on cache-served journal reads while the snapshot is stale (#217). */
+const STALE_JOURNAL_NOTICE =
+  '⚠️ **Stale:** this comes from a cached snapshot that stopped following live changes when ' +
+  'the connection dropped. Use `raw: true` to read the entry from the server, or ' +
+  '`refresh_world_data` to resync everything.';
 
 export async function handleSearchJournals(
   args: { query: string; limit?: number },
@@ -17,14 +24,14 @@ export async function handleSearchJournals(
     const limited = results.slice(0, limit);
 
     if (limited.length === 0) {
-      return {
+      return withJournalWarnings(foundryClient, {
         content: [
           {
             type: 'text',
             text: `No journals found matching "${args.query}".`,
           },
         ],
-      };
+      });
     }
 
     const formatted = limited
@@ -34,14 +41,14 @@ export async function handleSearchJournals(
       })
       .join('\n');
 
-    return {
+    return withJournalWarnings(foundryClient, {
       content: [
         {
           type: 'text',
           text: `**Journal Search** — "${args.query}" (${results.length} results)\n\n${formatted}`,
         },
       ],
-    };
+    });
   });
 }
 
@@ -50,7 +57,12 @@ export async function handleGetJournal(
   foundryClient: FoundryClient,
 ) {
   return withToolError('get journal', async () => {
-    const journal = foundryClient.getJournal(args.journalId);
+    const raw = args.raw === true;
+    // raw reads the entry from the server: its HTML and version tokens are
+    // what update_journal_page will be checked against.
+    const journal = raw
+      ? await foundryClient.fetchJournalEntry(args.journalId)
+      : foundryClient.getJournal(args.journalId);
 
     if (!journal) {
       throw new McpError(ErrorCode.InvalidParams, `Journal not found: ${args.journalId}`);
@@ -62,8 +74,9 @@ export async function handleGetJournal(
           const heading = `### ${p.name} — ID: ${p._id}`;
           // raw returns the stored HTML untouched so a caller can rewrite the
           // page with update_journal_page without losing markup or text.
-          if (args.raw === true) {
-            return `${heading}\n${p.text?.content ?? ''}`;
+          if (raw) {
+            const body = p.text?.content ?? '';
+            return `${heading}\nversion: ${journalVersion(body)}\n${body}`;
           }
           const content = stripHtml(p.text?.content || '')
             .trim()
@@ -72,13 +85,14 @@ export async function handleGetJournal(
         })
         .join('\n\n') || 'No pages.';
 
-    return {
+    const stale = !raw && foundryClient.isWorldDataStale() ? `${STALE_JOURNAL_NOTICE}\n\n` : '';
+    return withJournalWarnings(foundryClient, {
       content: [
         {
           type: 'text',
-          text: `**Journal: ${journal.name}**\nID: ${journal._id}\n\n${pages}`,
+          text: `${stale}**Journal: ${journal.name}**\nID: ${journal._id}\n\n${pages}`,
         },
       ],
-    };
+    });
   });
 }

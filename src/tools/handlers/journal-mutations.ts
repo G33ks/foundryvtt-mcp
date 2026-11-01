@@ -9,14 +9,21 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
+import { journalVersion } from '../../foundry/journal-integrity.js';
 import type {
   DocumentVisibility,
   JournalEntryUpdate,
   JournalPageCreateSource,
   JournalPageUpdate,
+  JournalPageWriteResult,
 } from '../../foundry/types.js';
 import { VISIBILITY_LEVELS } from '../../foundry/types.js';
-import { withToolError } from './utils.js';
+import { withJournalWarnings, withToolError } from './utils.js';
+
+/** Version token of a page body as returned by the server. */
+function pageVersion(page: { text?: { content?: string | null } } | undefined): string {
+  return journalVersion(page?.text?.content ?? '');
+}
 
 /** Human-readable summary of who can see the entry, for the tool response. */
 const VISIBILITY_SUMMARY: Record<DocumentVisibility, string> = {
@@ -67,8 +74,11 @@ export async function handleCreateJournalEntry(
 
   return withToolError('create journal entry', async () => {
     const journal = await foundryClient.createJournalEntry(name, pages, folder, visibility);
+    const pageLines = (journal.pages ?? []).map(
+      (p) => `- ${p.name} — ID: ${p._id} — version: ${pageVersion(p)}`,
+    );
 
-    return {
+    return withJournalWarnings(foundryClient, {
       content: [
         {
           type: 'text',
@@ -76,10 +86,10 @@ export async function handleCreateJournalEntry(
 **Name:** ${journal.name}
 **ID:** ${journal._id}
 **Pages:** ${journal.pages?.length ?? pages.length}
-**Visible to:** ${VISIBILITY_SUMMARY[visibility ?? 'gm-only']}`,
+**Visible to:** ${VISIBILITY_SUMMARY[visibility ?? 'gm-only']}${pageLines.length > 0 ? `\n${pageLines.join('\n')}` : ''}`,
         },
       ],
-    };
+    });
   });
 }
 
@@ -105,10 +115,11 @@ export async function handleUpdateJournalPage(
     mode?: JournalPageUpdateMode;
     name?: string;
     content?: string;
+    expectedVersion?: string;
   },
   foundryClient: FoundryClient,
 ) {
-  const { journalId, pageId, name, content } = args;
+  const { journalId, pageId, name, content, expectedVersion } = args;
   const mode = args.mode ?? 'replace';
 
   requireId(journalId, 'journalId');
@@ -138,10 +149,26 @@ export async function handleUpdateJournalPage(
   } else if (name === undefined && content === undefined) {
     throw new McpError(ErrorCode.InvalidParams, 'replace mode requires a name or content');
   }
+  if (expectedVersion !== undefined && (typeof expectedVersion !== 'string' || !expectedVersion)) {
+    throw new McpError(ErrorCode.InvalidParams, 'expectedVersion must be a non-empty string');
+  }
+  if (mode === 'replace' && content !== undefined && !expectedVersion) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      'Replacing a page body requires expectedVersion: call get_journal with raw: true, ' +
+        'rewrite the page from that HTML, and pass the version printed for the page.',
+    );
+  }
 
   return withToolError('update journal page', async () => {
+    let written: JournalPageWriteResult;
     if (mode === 'append') {
-      await foundryClient.appendJournalPage(journalId, pageId, content as string);
+      written = await foundryClient.appendJournalPage(
+        journalId,
+        pageId,
+        content as string,
+        expectedVersion,
+      );
     } else {
       const patch: JournalPageUpdate = {};
       if (name !== undefined) {
@@ -150,24 +177,24 @@ export async function handleUpdateJournalPage(
       if (content !== undefined) {
         patch.content = content;
       }
-      await foundryClient.updateJournalPage(journalId, pageId, patch);
+      if (expectedVersion !== undefined) {
+        patch.expectedVersion = expectedVersion;
+      }
+      written = await foundryClient.updateJournalPage(journalId, pageId, patch);
     }
 
-    // The write has already been applied to the cache, so this reads the result.
-    const journal = foundryClient.getJournal(journalId);
-    const page = journal?.pages?.find((p) => p._id === pageId);
-
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `📝 **Journal Page Updated**
-**Journal:** ${journal?.name ?? journalId} (${journalId})
-**Page:** ${page?.name ?? pageId} (${pageId})
-**Mode:** ${mode}`,
-        },
-      ],
-    };
+    const lines = [
+      ...written.notices,
+      ...(written.notices.length > 0 ? [''] : []),
+      '📝 **Journal Page Updated**',
+      `**Journal:** ${written.journalName} (${journalId})`,
+      `**Page:** ${written.page.name} (${pageId})`,
+      `**Mode:** ${mode}`,
+      `**Version:** ${written.version}`,
+    ];
+    return withJournalWarnings(foundryClient, {
+      content: [{ type: 'text', text: lines.join('\n') }],
+    });
   });
 }
 
@@ -192,16 +219,17 @@ export async function handleAddJournalPage(
     const page = await foundryClient.addJournalPage(journalId, { name, content });
     const journal = foundryClient.getJournal(journalId);
 
-    return {
+    return withJournalWarnings(foundryClient, {
       content: [
         {
           type: 'text',
           text: `📄 **Journal Page Added**
 **Journal:** ${journal?.name ?? journalId} (${journalId})
-**Page:** ${page?.name ?? name} (${page?._id ?? 'unknown id'})`,
+**Page:** ${page?.name ?? name} (${page?._id ?? 'unknown id'})
+**Version:** ${pageVersion(page)}`,
         },
       ],
-    };
+    });
   });
 }
 
@@ -264,7 +292,9 @@ export async function handleUpdateJournalEntry(
       lines.push(`**Visible to:** ${VISIBILITY_SUMMARY[visibility]}`);
     }
 
-    return { content: [{ type: 'text', text: lines.join('\n') }] };
+    return withJournalWarnings(foundryClient, {
+      content: [{ type: 'text', text: lines.join('\n') }],
+    });
   });
 }
 
@@ -286,10 +316,10 @@ export async function handleDeleteJournalEntry(
     const name = target?.name ?? journalId;
     await foundryClient.deleteJournalEntry(journalId);
 
-    return {
+    return withJournalWarnings(foundryClient, {
       content: [
         { type: 'text', text: `🗑️ **Journal Entry Deleted**\n**Entry:** ${name} (${journalId})` },
       ],
-    };
+    });
   });
 }

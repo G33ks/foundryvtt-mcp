@@ -880,11 +880,19 @@ export async function routeToolRequest(
       if (!('pageId' in args) || typeof args.pageId !== 'string') {
         throw new Error('Missing required parameter: pageId');
       }
+      if (
+        'expectedVersion' in args &&
+        args.expectedVersion !== undefined &&
+        typeof args.expectedVersion !== 'string'
+      ) {
+        throw new Error('Invalid parameter: expectedVersion must be a string');
+      }
       return handleUpdateJournalPage(
         args as {
           journalId: string;
           pageId: string;
           mode?: JournalPageUpdateMode;
+          expectedVersion?: string;
           name?: string;
           content?: string;
         },

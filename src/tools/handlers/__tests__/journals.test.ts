@@ -4,6 +4,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import type { FoundryClient } from '../../../foundry/client.js';
+import { journalVersion } from '../../../foundry/journal-integrity.js';
 import { handleGetJournal, handleSearchJournals } from '../journals.js';
 
 interface MockJournal {
@@ -15,6 +16,14 @@ interface MockJournal {
     type: string;
     text?: { content: string; format: number };
   }>;
+}
+
+function mockClient(overrides: Record<string, unknown>): FoundryClient {
+  return {
+    drainJournalWarnings: vi.fn(() => []),
+    isWorldDataStale: vi.fn(() => false),
+    ...overrides,
+  } as unknown as FoundryClient;
 }
 
 function getText(result: { content: Array<{ type: string; text: string }> }): string {
@@ -42,9 +51,7 @@ describe('handleSearchJournals', () => {
         makeJournal('jrnl-2', 'Lore Compendium', 1),
         makeJournal('jrnl-3', 'Empty Journal', 0),
       ];
-      const client = {
-        searchJournals: vi.fn((_q: string) => journals),
-      } as unknown as FoundryClient;
+      const client = mockClient({ searchJournals: vi.fn((_q: string) => journals) });
 
       const result = await handleSearchJournals({ query: 'adventure' }, client);
       const text = getText(result);
@@ -64,9 +71,7 @@ describe('handleSearchJournals', () => {
       const journals: MockJournal[] = Array.from({ length: 25 }, (_, i) =>
         makeJournal(`jrnl-${i}`, `Journal ${i}`, 1),
       );
-      const client = {
-        searchJournals: vi.fn(() => journals),
-      } as unknown as FoundryClient;
+      const client = mockClient({ searchJournals: vi.fn(() => journals) });
 
       const result = await handleSearchJournals({ query: 'j', limit: 5 }, client);
       const text = getText(result);
@@ -82,9 +87,7 @@ describe('handleSearchJournals', () => {
 
   describe('edge cases', () => {
     it('returns "No journals found" placeholder when search returns empty', async () => {
-      const client = {
-        searchJournals: vi.fn(() => []),
-      } as unknown as FoundryClient;
+      const client = mockClient({ searchJournals: vi.fn(() => []) });
 
       const result = await handleSearchJournals({ query: 'xyzzy' }, client);
       const text = getText(result);
@@ -109,9 +112,7 @@ describe('handleGetJournal', () => {
           },
         ],
       };
-      const client = {
-        getJournal: vi.fn((_id: string) => journal),
-      } as unknown as FoundryClient;
+      const client = mockClient({ getJournal: vi.fn((_id: string) => journal) });
 
       const result = await handleGetJournal({ journalId: 'jrnl-1' }, client);
       const text = getText(result);
@@ -128,7 +129,7 @@ describe('handleGetJournal', () => {
 
     it("shows each page's id next to its name", async () => {
       const journal = makeJournal('jrnl-1', 'Adventure Log', 2);
-      const client = { getJournal: vi.fn(() => journal) } as unknown as FoundryClient;
+      const client = mockClient({ getJournal: vi.fn(() => journal) });
 
       const text = getText(await handleGetJournal({ journalId: 'jrnl-1' }, client));
 
@@ -138,9 +139,7 @@ describe('handleGetJournal', () => {
 
     it('falls back to "No pages." when journal has no pages', async () => {
       const journal: MockJournal = { _id: 'jrnl-2', name: 'Empty', pages: [] };
-      const client = {
-        getJournal: vi.fn(() => journal),
-      } as unknown as FoundryClient;
+      const client = mockClient({ getJournal: vi.fn(() => journal) });
 
       const result = await handleGetJournal({ journalId: 'jrnl-2' }, client);
       const text = getText(result);
@@ -152,9 +151,7 @@ describe('handleGetJournal', () => {
 
   describe('edge cases', () => {
     it('throws McpError when journal not found', async () => {
-      const client = {
-        getJournal: vi.fn(() => undefined),
-      } as unknown as FoundryClient;
+      const client = mockClient({ getJournal: vi.fn(() => undefined) });
 
       await expect(handleGetJournal({ journalId: 'missing' }, client)).rejects.toThrow(
         /Journal not found: missing/,
@@ -175,9 +172,7 @@ describe('handleGetJournal', () => {
           },
         ],
       };
-      const client = {
-        getJournal: vi.fn(() => journal),
-      } as unknown as FoundryClient;
+      const client = mockClient({ getJournal: vi.fn(() => journal) });
 
       const result = await handleGetJournal({ journalId: 'jrnl-3' }, client);
       const text = getText(result);
@@ -197,17 +192,37 @@ describe('handleGetJournal', () => {
       pages: [{ _id: 'p-1', name: 'Big Page', type: 'text', text: { content: html, format: 1 } }],
     };
 
-    it('returns the full, unmodified HTML of each page when raw is true', async () => {
-      const client = { getJournal: vi.fn(() => journal) } as unknown as FoundryClient;
+    it('reads the entry from the server and returns full HTML with a version per page', async () => {
+      const client = mockClient({
+        getJournal: vi.fn(() => undefined),
+        fetchJournalEntry: vi.fn(async () => journal),
+      });
 
       const text = getText(await handleGetJournal({ journalId: 'jrnl-4', raw: true }, client));
 
-      expect(text).toContain('### Big Page — ID: p-1');
-      expect(text).toContain(html);
+      expect(client.fetchJournalEntry).toHaveBeenCalledWith('jrnl-4');
+      expect(client.getJournal).not.toHaveBeenCalled();
+      expect(text).toContain(`### Big Page — ID: p-1\nversion: ${journalVersion(html)}\n${html}`);
+    });
+
+    it('does not flag a raw read as stale: it came from the server', async () => {
+      const client = mockClient({
+        fetchJournalEntry: vi.fn(async () => journal),
+        isWorldDataStale: vi.fn(() => true),
+      });
+      const text = getText(await handleGetJournal({ journalId: 'jrnl-4', raw: true }, client));
+      expect(text).not.toContain('Stale');
+    });
+
+    it('throws McpError when the server has no such entry', async () => {
+      const client = mockClient({ fetchJournalEntry: vi.fn(async () => undefined) });
+      await expect(handleGetJournal({ journalId: 'missing', raw: true }, client)).rejects.toThrow(
+        /Journal not found: missing/,
+      );
     });
 
     it('keeps the stripped, truncated preview when raw is false', async () => {
-      const client = { getJournal: vi.fn(() => journal) } as unknown as FoundryClient;
+      const client = mockClient({ getJournal: vi.fn(() => journal) });
 
       const text = getText(await handleGetJournal({ journalId: 'jrnl-4', raw: false }, client));
 
@@ -222,12 +237,48 @@ describe('handleGetJournal', () => {
         name: 'Maps',
         pages: [{ _id: 'p-1', name: 'Map', type: 'image' }],
       };
-      const client = { getJournal: vi.fn(() => imageJournal) } as unknown as FoundryClient;
+      const client = mockClient({ fetchJournalEntry: vi.fn(async () => imageJournal) });
 
       const text = getText(await handleGetJournal({ journalId: 'jrnl-5', raw: true }, client));
 
-      expect(text).toContain('### Map — ID: p-1');
+      expect(text).toContain(`### Map — ID: p-1\nversion: ${journalVersion('')}`);
       expect(text).not.toContain('undefined');
+    });
+  });
+
+  describe('cache staleness and pending warnings', () => {
+    const journal = makeJournal('jrnl-6', 'Log', 1);
+
+    it('flags a cache-served read while the snapshot is stale', async () => {
+      const client = mockClient({
+        getJournal: vi.fn(() => journal),
+        isWorldDataStale: vi.fn(() => true),
+      });
+      const text = getText(await handleGetJournal({ journalId: 'jrnl-6' }, client));
+      expect(text.startsWith('⚠️ **Stale:**')).toBe(true);
+    });
+
+    it('puts pending overwrite warnings at the top, once', async () => {
+      const pending = ['⚠️ **Journal overwrite detected:** one'];
+      const client = mockClient({
+        getJournal: vi.fn(() => journal),
+        drainJournalWarnings: vi.fn(() => pending.splice(0)),
+      });
+      const first = getText(await handleGetJournal({ journalId: 'jrnl-6' }, client));
+      const second = getText(await handleGetJournal({ journalId: 'jrnl-6' }, client));
+      expect(first.startsWith('⚠️ **Journal overwrite detected:** one\n\n**Journal: Log**')).toBe(
+        true,
+      );
+      expect(second.startsWith('**Journal: Log**')).toBe(true);
+    });
+
+    it('shows pending warnings on search_journals too', async () => {
+      const client = mockClient({
+        searchJournals: vi.fn(() => []),
+        drainJournalWarnings: vi.fn(() => ['⚠️ warning']),
+      });
+      const text = getText(await handleSearchJournals({ query: 'x' }, client));
+      expect(text.startsWith('⚠️ warning\n\nNo journals found')).toBe(true);
     });
   });
 });

@@ -623,6 +623,24 @@ export interface JournalPageUpdate {
   name?: string;
   /** Replacement page body (HTML), stored as the page's `text.content`. */
   content?: string;
+  /**
+   * Version token of the body the caller read (get_journal `raw: true`).
+   * Required when `content` is set: the write is refused if the page changed since.
+   */
+  expectedVersion?: string;
+}
+
+/** Outcome of a journal page write. */
+export interface JournalPageWriteResult {
+  journalName: string;
+  /** The page as cached after the write. */
+  page: WorldJournalPage;
+  /** Version token of the body as stored by the server after the write. */
+  version: string;
+  /** Things the caller should know about this write (stale cache, open editor). */
+  notices: string[];
+  /** Local copy of the body as it was before the write. */
+  historyPath: string;
 }
 
 /** Fields of an existing journal entry that update_journal_entry can change. */

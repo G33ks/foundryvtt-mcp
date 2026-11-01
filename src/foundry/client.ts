@@ -15,6 +15,7 @@ import {
 import axios, { type AxiosInstance, type AxiosRequestConfig, type AxiosResponse } from 'axios';
 import { io, type Socket } from 'socket.io-client';
 import { z } from 'zod';
+import { defaultStateDir } from '../shared/paths.js';
 import { isRecord } from '../utils/guards.js';
 import { getImageSize, type ImageSize } from '../utils/image-size.js';
 import { logger } from '../utils/logger.js';
@@ -22,6 +23,18 @@ import { authenticateFoundry, sessionSocketOptions } from './auth.js';
 import { evaluateDiceFormula } from './dice-formula.js';
 import type { EventFilter, EventReadResult } from './event-log.js';
 import { summarizeDocumentBroadcast, WorldEventLog } from './event-log.js';
+import { JournalHistory } from './journal-history.js';
+import {
+  conflictAuthor,
+  type ForeignChange,
+  type JournalConflict,
+  JournalWatch,
+  journalConflictMessage,
+  journalContribution,
+  journalVersion,
+  OVERWRITTEN_BY_CONNECTOR,
+  RECENT_AUTOSAVE_MS,
+} from './journal-integrity.js';
 import type {
   ActorAttributeUpdateResult,
   ActorEffectInput,
@@ -38,6 +51,7 @@ import type {
   JournalEntryUpdate,
   JournalPageCreateSource,
   JournalPageUpdate,
+  JournalPageWriteResult,
   WorldActor,
   WorldCombat,
   WorldData,
@@ -59,6 +73,35 @@ import {
 
 /** FoundryVTT document IDs are 16-character alphanumeric strings. */
 const FOUNDRY_ID_PATTERN = /^[a-zA-Z0-9]{16}$/;
+
+/** A journal entry as read back from the server by {@link FoundryClient.fetchJournalEntry}. */
+const FetchedJournalSchema = z
+  .object({
+    _id: z.string(),
+    name: z.string(),
+    pages: z.array(
+      z
+        .object({
+          _id: z.string(),
+          name: z.string(),
+          type: z.string(),
+          sort: z.number().optional(),
+          // Non-text pages carry `text.content: null`.
+          text: z
+            .object({
+              content: z
+                .string()
+                .nullish()
+                .transform((content) => content ?? ''),
+              format: z.number().catch(1),
+            })
+            .passthrough()
+            .optional(),
+        })
+        .passthrough(),
+    ),
+  })
+  .passthrough();
 
 /** Extensions {@link FoundryClient.listSceneAssets} treats as browsable image assets. */
 const IMAGE_EXTENSION_PATTERN = /\.(png|jpe?g|webp)$/i;
@@ -277,6 +320,16 @@ export interface FoundryClientConfig {
    * (FOUNDRY_EVENT_BUFFER_SIZE). Defaults to 500 when unset.
    */
   eventBufferSize?: number;
+  /**
+   * Folder for local copies of journal pages (see journal-history.ts).
+   * Defaults to `journal-history` in the shared-process state directory.
+   */
+  journalHistoryDir?: string;
+  /**
+   * Usernames of the connector's other sessions (the headless GM). Their
+   * changes are the connector's own and never count as overwrites.
+   */
+  connectorUsernames?: string[];
 }
 
 /** Minimal shape of FoundryVTT's `modifyDocument` Socket.IO acknowledgement. */
@@ -502,6 +555,16 @@ export class FoundryClient {
   private restLinkLive = true;
   /** Records every observed document/presence/module broadcast for `watch_events`. */
   private readonly eventLog: WorldEventLog;
+  /** Journal page writes in flight and watched, editor autosaves, pending warnings. */
+  private readonly journalWatch: JournalWatch;
+  /** Local copies of journal page bodies. */
+  private readonly journalHistory: JournalHistory;
+  /**
+   * Called once per detected journal overwrite, after it is logged, copied
+   * and queued as a warning. The owner uses it to whisper the GMs through
+   * the write queue.
+   */
+  onJournalConflict: ((conflict: JournalConflict) => void) | null = null;
 
   constructor(config: FoundryClientConfig) {
     if (!config.baseUrl || config.baseUrl.trim() === '') {
@@ -522,6 +585,10 @@ export class FoundryClient {
       ...config,
     };
     this.eventLog = new WorldEventLog(config.eventBufferSize ?? 500);
+    this.journalWatch = new JournalWatch();
+    this.journalHistory = new JournalHistory(
+      config.journalHistoryDir ?? pathJoin(defaultStateDir(), 'journal-history'),
+    );
 
     this.http = axios.create({
       baseURL: this.config.baseUrl,
@@ -669,6 +736,8 @@ export class FoundryClient {
           // Presence (#218): `activeUsers` is not a document collection, so it
           // only moves on this event.
           this.socket?.on('userActivity', this.onUserActivity);
+          // Collaborative-editor autosaves bypass `modifyDocument` entirely.
+          this.socket?.on('pm.autosave', this.onEditorAutosave);
           // Liveness (#217): a socket that drops on its own must stop reading
           // as connected, and one that socket.io reconnects must read as
           // connected again. Both are removed in `disconnect()`.
@@ -734,7 +803,189 @@ export class FoundryClient {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+
+    if (broadcast.type === 'JournalEntryPage' && broadcast.action === 'update') {
+      const journalId = /^JournalEntry\.([a-zA-Z0-9]{16})$/.exec(broadcast.parentUuid ?? '')?.[1];
+      const userId = broadcast.userId;
+      if (journalId && userId && !this.connectorUserIds().has(userId)) {
+        for (const doc of broadcast.result) {
+          if (!isRecord(doc) || typeof doc._id !== 'string') {
+            continue;
+          }
+          const text = isRecord(doc.text) ? doc.text : undefined;
+          this.observeJournalChange({
+            journalId,
+            pageId: doc._id,
+            content: typeof text?.content === 'string' ? text.content : undefined,
+            source: { kind: 'user', userId },
+          });
+        }
+      }
+    }
   };
+
+  /**
+   * Handles a collaborative-editor autosave (`pm.autosave`).
+   *
+   * While a text page is open in an editor, the FoundryVTT v14 server keeps
+   * its own copy of the page and saves it every `core.editorAutosaveSecs`,
+   * straight to the database: no `modifyDocument` broadcast, no author. This
+   * event, sent to every user, is the only trace. It feeds the overwrite
+   * watch, then the entry is re-read so the cache picks up the change.
+   *
+   * Bound field rather than a method so the same reference reaches `socket.off()`.
+   */
+  private onEditorAutosave = (uuid: unknown, html: unknown): void => {
+    if (typeof uuid !== 'string' || typeof html !== 'string') {
+      return;
+    }
+    const match =
+      /^JournalEntry\.([a-zA-Z0-9]{16})\.JournalEntryPage\.([a-zA-Z0-9]{16})#text\.content$/.exec(
+        uuid,
+      );
+    if (!match?.[1] || !match[2]) {
+      return;
+    }
+    const journalId = match[1];
+    this.observeJournalChange({
+      journalId,
+      pageId: match[2],
+      content: html,
+      source: { kind: 'autosave' },
+    });
+    this.fetchJournalEntry(journalId).catch((error: unknown) => {
+      logger.warn('Could not re-read a journal entry after an editor autosave', {
+        journalId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  };
+
+  /** The connected user plus the connector's other sessions (headless GM). */
+  private connectorUserIds(): Set<string> {
+    const ids = new Set<string>();
+    if (this.worldData?.userId) {
+      ids.add(this.worldData.userId);
+    }
+    const names = new Set(this.config.connectorUsernames ?? []);
+    for (const user of this.worldData?.users ?? []) {
+      if (names.has(user.name)) {
+        ids.add(user._id);
+      }
+    }
+    return ids;
+  }
+
+  private userName(userId: string): string {
+    return this.worldData?.users?.find((user) => user._id === userId)?.name ?? userId;
+  }
+
+  /** Feeds a foreign page change to the watch and reports an overwrite it reveals. */
+  private observeJournalChange(change: ForeignChange): void {
+    const seen = this.journalWatch.observe(change);
+    if (seen.kind !== 'lost') {
+      return;
+    }
+    const { watched } = seen;
+    const savedBy = change.source.kind === 'autosave' ? null : this.userName(change.source.userId);
+    this.reportJournalConflict({
+      journalId: watched.journalId,
+      pageId: watched.pageId,
+      journalName: watched.journalName,
+      pageName: watched.pageName,
+      reason: savedBy ? `overwritten-by-${savedBy}` : 'overwritten-by-editor-autosave',
+      savedBy,
+      // The version that was lost is the connector's.
+      copy: watched.after,
+      copyUser: this.worldData ? this.userName(this.worldData.userId) : 'connector',
+      detail: `${seen.lost.length} paragraph(s) the connector had written are gone`,
+    });
+  }
+
+  /**
+   * Records a detected overwrite: local copy of the lost version, a warn-level
+   * log line (ids and path only — never content), a pending warning for the
+   * next journal tool, the 24-hour list, and the GM whisper hook.
+   */
+  private reportJournalConflict(params: {
+    journalId: string;
+    pageId: string;
+    journalName: string;
+    pageName: string;
+    reason: string;
+    savedBy: string | null;
+    copy: string;
+    copyUser: string;
+    detail: string;
+  }): void {
+    let historyPath: string | null = null;
+    try {
+      historyPath = this.journalHistory.save({
+        journalId: params.journalId,
+        pageId: params.pageId,
+        journalName: params.journalName,
+        pageName: params.pageName,
+        reason: params.reason,
+        content: params.copy,
+        user: params.copyUser,
+      });
+    } catch (error) {
+      logger.warn('Could not save a local copy of an overwritten journal page', {
+        journalId: params.journalId,
+        pageId: params.pageId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    logger.warn('Journal page overwrite detected', {
+      journalId: params.journalId,
+      pageId: params.pageId,
+      reason: params.reason,
+      version: journalVersion(params.copy),
+      historyPath,
+    });
+
+    const conflict: JournalConflict = {
+      at: Date.now(),
+      journalId: params.journalId,
+      pageId: params.pageId,
+      journalName: params.journalName,
+      pageName: params.pageName,
+      reason: params.reason,
+      savedBy: params.savedBy,
+      historyPath,
+    };
+    this.journalWatch.recordConflict(conflict);
+    this.journalWatch.addWarning(
+      `⚠️ **Journal overwrite detected:** page "${params.pageName}" of "${params.journalName}" ` +
+        `(${params.journalId}/${params.pageId}) — saved by ${conflictAuthor(conflict)}; ${params.detail}. ` +
+        (historyPath
+          ? `The overwritten version is saved at ${historyPath}.`
+          : 'No local copy could be written.'),
+    );
+    try {
+      this.onJournalConflict?.(conflict);
+    } catch (error) {
+      logger.warn('Journal conflict notification failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /** Returns and clears the warnings waiting for the next journal tool response. */
+  drainJournalWarnings(): string[] {
+    return this.journalWatch.drainWarnings();
+  }
+
+  /** Journal overwrites detected in the last 24 hours, oldest first. */
+  getRecentJournalConflicts(): JournalConflict[] {
+    return this.journalWatch.recentConflicts();
+  }
+
+  /** Folder holding the local copies of journal pages. */
+  getJournalHistoryDir(): string {
+    return this.journalHistory.root;
+  }
 
   /**
    * Applies a FoundryVTT `userActivity` broadcast to cached presence (#218).
@@ -834,6 +1085,7 @@ export class FoundryClient {
     }
     this.socket.off('modifyDocument', this.onDocumentBroadcast);
     this.socket.off('userActivity', this.onUserActivity);
+    this.socket.off('pm.autosave', this.onEditorAutosave);
     this.socket.off('connect', this.onSocketConnect);
     this.socket.off('disconnect', this.onSocketDisconnect);
     this.socket.disconnect();
@@ -2285,6 +2537,68 @@ export class FoundryClient {
     return this.worldData?.journal.find((j) => j._id === journalId);
   }
 
+  /**
+   * Reads one journal entry, with all its pages, from the server rather than
+   * the cache, and stores it in the cache.
+   *
+   * Uses `modifyDocument` with `action: "get"` and `query: { _id }`: the v14
+   * server answers with the entry and its embedded pages, never broadcast.
+   * (A `get` on `JournalEntryPage` ignores `query` and returns every page of
+   * the parent, so one entry read covers every page need.) Only this entry is
+   * fresh afterwards, so `worldDataStale` is left as it was. When the `get`
+   * itself fails, a full `refreshWorldData()` stands in for it.
+   *
+   * @returns the entry, or `undefined` when the server has no such entry
+   */
+  async fetchJournalEntry(journalId: string): Promise<WorldJournal | undefined> {
+    if (!FOUNDRY_ID_PATTERN.test(journalId)) {
+      throw new Error(`Invalid journalId format: ${journalId}`);
+    }
+
+    let response: DocumentSocketResponse;
+    try {
+      response = await this.emitWithAck<DocumentSocketResponse>('modifyDocument', {
+        type: 'JournalEntry',
+        action: 'get',
+        operation: { query: { _id: journalId }, pack: null },
+      });
+      if (response?.error) {
+        throw new Error(response.error.message || 'unknown error');
+      }
+    } catch (error) {
+      logger.warn('Server read of a journal entry failed — refreshing the whole world instead', {
+        journalId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      await this.refreshWorldData();
+      return this.getJournal(journalId);
+    }
+
+    const raw = Array.isArray(response.result) ? response.result[0] : undefined;
+    if (raw === undefined) {
+      // Gone on the server: drop it from the cache too.
+      if (this.worldData) {
+        this.worldData.journal = this.worldData.journal.filter((j) => j._id !== journalId);
+      }
+      return undefined;
+    }
+    const parsed = FetchedJournalSchema.safeParse(raw);
+    if (!parsed.success || parsed.data._id !== journalId) {
+      throw new Error(`Unexpected server answer when reading journal ${journalId}`);
+    }
+    // Validated above; the cast only bridges `exactOptionalPropertyTypes`.
+    const journal = parsed.data as WorldJournal;
+    if (this.worldData) {
+      const index = this.worldData.journal.findIndex((j) => j._id === journalId);
+      if (index === -1) {
+        this.worldData.journal.push(journal);
+      } else {
+        this.worldData.journal[index] = journal;
+      }
+    }
+    return journal;
+  }
+
   // ==========================================================================
   // Journal mutation methods (WRITE — Socket.IO modifyDocument)
   // ==========================================================================
@@ -2354,19 +2668,20 @@ export class FoundryClient {
    *
    * `JournalEntryPage` is embedded in a `JournalEntry`, so the update carries
    * `parentUuid: "JournalEntry.<journalId>"` (mirrors {@link updateActorItem}).
-   * `content` replaces `text.content` wholesale — read the page with
-   * get_journal `raw: true` first when only part of it should change.
+   * `content` replaces `text.content` wholesale, so it requires
+   * `expectedVersion` — the token get_journal `raw: true` printed for the body
+   * the caller rewrote — and is refused when the page changed since.
+   * See {@link writeJournalPage} for the read-back, local copy and watch.
    *
    * @param journalId - 16-char alphanumeric JournalEntry document id
    * @param pageId - 16-char alphanumeric JournalEntryPage document id
    * @param patch - new name and/or HTML content; at least one required
-   * @returns the updated page data
    */
   async updateJournalPage(
     journalId: string,
     pageId: string,
     patch: JournalPageUpdate,
-  ): Promise<WorldJournalPage> {
+  ): Promise<JournalPageWriteResult> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(journalId)) {
       throw new Error(`Invalid journalId format: ${journalId}`);
@@ -2383,40 +2698,39 @@ export class FoundryClient {
     if (patch.content !== undefined && typeof patch.content !== 'string') {
       throw new Error('content must be a string');
     }
+    if (patch.content !== undefined && !patch.expectedVersion) {
+      throw new Error(
+        'Replacing a page body requires expectedVersion: read the page with get_journal raw: true first',
+      );
+    }
 
-    const update: Record<string, unknown> = { _id: pageId };
-    if (patch.name !== undefined) {
-      update.name = patch.name;
-    }
-    if (patch.content !== undefined) {
-      update['text.content'] = patch.content;
-    }
-    const result = await this.modifyDocument('JournalEntryPage', 'update', {
-      updates: [update],
-      parentUuid: `JournalEntry.${journalId}`,
-      diff: true,
+    return this.writeJournalPage(journalId, pageId, {
+      mode: 'replace',
+      ...(patch.name !== undefined ? { name: patch.name } : {}),
+      ...(patch.content !== undefined ? { content: patch.content } : {}),
+      ...(patch.expectedVersion ? { expectedVersion: patch.expectedVersion } : {}),
     });
-    return result[0] as WorldJournalPage;
   }
 
   /**
    * Appends HTML to the end of a journal page's body.
    *
-   * The current body is read from the cached worldData (kept live by the
-   * `modifyDocument` broadcast, see world-cache.ts), so the page must already
-   * be known locally — a missing journal or page fails here rather than
-   * overwriting the body with just the appended fragment.
+   * The body is read back from the server first ({@link fetchJournalEntry}),
+   * never taken from the cache, so text written since the last sync is kept.
+   * `expectedVersion` is optional here; when given, the append is refused if
+   * the page changed since that version was read.
    *
    * @param journalId - 16-char alphanumeric JournalEntry document id
    * @param pageId - 16-char alphanumeric JournalEntryPage document id
    * @param html - HTML fragment to add after the existing content
-   * @returns the updated page data
+   * @param expectedVersion - optional version token the caller last read
    */
   async appendJournalPage(
     journalId: string,
     pageId: string,
     html: string,
-  ): Promise<WorldJournalPage> {
+    expectedVersion?: string,
+  ): Promise<JournalPageWriteResult> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(journalId)) {
       throw new Error(`Invalid journalId format: ${journalId}`);
@@ -2427,7 +2741,39 @@ export class FoundryClient {
     if (!html || typeof html !== 'string') {
       throw new Error('html is required and must be a non-empty string');
     }
-    const journal = this.getJournal(journalId);
+    return this.writeJournalPage(journalId, pageId, {
+      mode: 'append',
+      content: html,
+      ...(expectedVersion ? { expectedVersion } : {}),
+    });
+  }
+
+  /**
+   * The safe page write behind {@link updateJournalPage} and
+   * {@link appendJournalPage}. Runs inside the tool call, so inside the write
+   * queue:
+   *
+   * 1. Reads the entry back from the server and checks `expectedVersion`
+   *    against the fresh body (refused, nothing written, on a mismatch).
+   * 2. Saves the fresh body to the local history — a failure aborts the write.
+   * 3. Writes, collecting any foreign change to the page that lands between
+   *    the read-back and the server's acknowledgement: the server applied it
+   *    first, so this write overwrote it. Each one is copied and reported.
+   * 4. Watches the page for an overwrite of what this write added.
+   */
+  private async writeJournalPage(
+    journalId: string,
+    pageId: string,
+    change: {
+      mode: 'replace' | 'append';
+      name?: string;
+      content?: string;
+      expectedVersion?: string;
+    },
+  ): Promise<JournalPageWriteResult> {
+    const cachedContent = this.getJournal(journalId)?.pages?.find((p) => p._id === pageId)?.text
+      ?.content;
+    const journal = await this.fetchJournalEntry(journalId);
     if (!journal) {
       throw new Error(`Journal not found: ${journalId}`);
     }
@@ -2435,17 +2781,157 @@ export class FoundryClient {
     if (!page) {
       throw new Error(`Journal page not found: ${pageId} in journal ${journalId}`);
     }
-    return this.updateJournalPage(journalId, pageId, {
-      content: `${page.text?.content ?? ''}${html}`,
+    const before = page.text?.content ?? '';
+    const currentVersion = journalVersion(before);
+    if (change.expectedVersion && change.expectedVersion !== currentVersion) {
+      throw new Error(
+        `Page "${page.name}" (${pageId}) has changed since it was read: expected version ` +
+          `${change.expectedVersion}, current version ${currentVersion}. Nothing was written. ` +
+          'Read it again with get_journal raw: true, then rewrite it from the current version.',
+      );
+    }
+
+    const notices: string[] = [];
+    if (change.mode === 'append' && cachedContent !== undefined && cachedContent !== before) {
+      notices.push(
+        'The page had changed since the last sync; the text was appended to its current version.',
+      );
+    }
+    if (this.journalWatch.hasRecentAutosave(journalId, pageId)) {
+      notices.push(
+        `⚠️ A FoundryVTT editor autosaved this page in the last ${RECENT_AUTOSAVE_MS / 60000} minutes: ` +
+          'it is probably open in an editor, whose autosave can overwrite this write. ' +
+          'Closing that editor is safer.',
+      );
+    }
+
+    const connectorName = this.worldData ? this.userName(this.worldData.userId) : 'connector';
+    let historyPath: string;
+    try {
+      historyPath = this.journalHistory.save({
+        journalId,
+        pageId,
+        journalName: journal.name,
+        pageName: page.name,
+        reason: change.mode === 'append' ? 'before-append' : 'before-replace',
+        content: before,
+        user: connectorName,
+      });
+    } catch (error) {
+      throw new Error(
+        `Could not save a local copy of the page before writing it ` +
+          `(${error instanceof Error ? error.message : String(error)}). Nothing was written.`,
+      );
+    }
+
+    const update: Record<string, unknown> = { _id: pageId };
+    if (change.name !== undefined) {
+      update.name = change.name;
+    }
+    const newContent =
+      change.content === undefined
+        ? undefined
+        : change.mode === 'append'
+          ? `${before}${change.content}`
+          : change.content;
+    if (newContent !== undefined) {
+      update['text.content'] = newContent;
+    }
+
+    // Only a body write can overwrite someone's body change: a rename leaves
+    // text.content alone, so it opens no race window.
+    if (newContent !== undefined) {
+      this.journalWatch.beginWrite(journalId, pageId);
+    }
+    let result: unknown[];
+    let raced: ForeignChange[] = [];
+    try {
+      result = await this.modifyDocument('JournalEntryPage', 'update', {
+        updates: [update],
+        parentUuid: `JournalEntry.${journalId}`,
+        diff: true,
+      });
+    } finally {
+      if (newContent !== undefined) {
+        raced = this.journalWatch.endWrite(journalId, pageId);
+      }
+    }
+
+    // The acknowledgement carries the body as the server cleaned and stored
+    // it, or no `text` at all when the stored body did not change — then the
+    // cache (the read-back plus any broadcast since) holds the current body.
+    const ack = isRecord(result[0]) ? result[0] : {};
+    const ackText = isRecord(ack.text) ? ack.text : undefined;
+    const stored =
+      typeof ackText?.content === 'string'
+        ? ackText.content
+        : (this.getJournal(journalId)?.pages?.find((p) => p._id === pageId)?.text?.content ??
+          before);
+    const pageName = change.name ?? page.name;
+
+    logger.info('Journal page written', {
+      journalId,
+      pageId,
+      mode: change.mode,
+      before: currentVersion,
+      after: journalVersion(stored),
+      historyPath,
     });
+
+    for (const foreign of raced) {
+      // Nothing of theirs was lost when they had saved exactly what we wrote.
+      if (foreign.content === undefined || foreign.content === stored) {
+        continue;
+      }
+      this.reportJournalConflict({
+        journalId,
+        pageId,
+        journalName: journal.name,
+        pageName,
+        reason: OVERWRITTEN_BY_CONNECTOR,
+        savedBy: foreign.source.kind === 'autosave' ? null : this.userName(foreign.source.userId),
+        copy: foreign.content,
+        copyUser:
+          foreign.source.kind === 'autosave'
+            ? 'editor-autosave'
+            : this.userName(foreign.source.userId),
+        detail:
+          'their change reached the server while the connector was writing the page and was overwritten',
+      });
+    }
+
+    if (newContent !== undefined) {
+      this.journalWatch.watch({
+        journalId,
+        pageId,
+        journalName: journal.name,
+        pageName,
+        after: stored,
+        contribution: journalContribution({
+          before,
+          after: stored,
+          ...(change.mode === 'append' ? { fragment: change.content } : {}),
+        }),
+      });
+    }
+
+    const cached = this.getJournal(journalId)?.pages?.find((p) => p._id === pageId);
+    return {
+      journalName: journal.name,
+      page: cached ?? { ...page, name: pageName },
+      version: journalVersion(stored),
+      notices,
+      historyPath,
+    };
   }
 
   /**
    * Adds a text page to an existing journal entry, after its last page.
    *
    * Uses the same text-page shape as {@link createJournalEntry}. The `sort`
-   * is one {@link SORT_INTEGER_DENSITY} step past the highest cached page sort,
-   * so the entry's pages are read from worldData and must be known locally.
+   * is one {@link SORT_INTEGER_DENSITY} step past the highest page sort of the
+   * entry as read back from the server ({@link fetchJournalEntry}), so a page
+   * added elsewhere since the last sync is not sorted over.
    *
    * @param journalId - 16-char alphanumeric JournalEntry document id
    * @param page - page title and HTML content
@@ -2465,7 +2951,7 @@ export class FoundryClient {
     if (typeof page.content !== 'string') {
       throw new Error('content is required and must be a string');
     }
-    const journal = this.getJournal(journalId);
+    const journal = await this.fetchJournalEntry(journalId);
     if (!journal) {
       throw new Error(`Journal not found: ${journalId}`);
     }
@@ -2584,6 +3070,32 @@ export class FoundryClient {
     }
     const result = await this.modifyDocument('ChatMessage', 'create', { data: [data] });
     return result[0] as WorldMessage;
+  }
+
+  /**
+   * Whispers a detected journal overwrite to the world's Gamemaster users,
+   * leaving out the connector's own accounts.
+   *
+   * French when the server's default language (`options.language` of the
+   * world snapshot) is French, English otherwise — `core.language` is a
+   * per-browser setting the server never sees.
+   *
+   * @returns the whispered user ids (none when there is no GM to tell)
+   */
+  async whisperJournalConflict(conflict: JournalConflict): Promise<string[]> {
+    const connectorIds = this.connectorUserIds();
+    const gms = (this.worldData?.users ?? [])
+      .filter((user) => user.role === USER_ROLES.gamemaster && !connectorIds.has(user._id))
+      .map((user) => user._id);
+    if (gms.length === 0) {
+      return [];
+    }
+    const options = isRecord(this.worldData?.options) ? this.worldData.options : {};
+    const language = typeof options.language === 'string' ? options.language : '';
+    await this.sendChatMessage(journalConflictMessage(conflict, language.startsWith('fr')), {
+      whisperTo: gms,
+    });
+    return gms;
   }
 
   // ==========================================================================
