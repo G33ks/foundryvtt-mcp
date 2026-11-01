@@ -9,6 +9,7 @@ import type { LogEntry, SystemHealth } from '../../../diagnostics/types.js';
 import { SystemHealthSchema } from '../../../diagnostics/types.js';
 import type { FoundryClient } from '../../../foundry/client.js';
 import type { HeadlessGmSession } from '../../../foundry/headless-gm-session.js';
+import type { JournalConflict } from '../../../foundry/journal-integrity.js';
 import type { ModuleBridge } from '../../../foundry/module-bridge.js';
 import {
   handleDiagnoseErrors,
@@ -333,10 +334,16 @@ describe('handleGetSystemHealth', () => {
 });
 
 describe('handleGetHealthStatus', () => {
-  function worldClient(connected: boolean, stale = false): FoundryClient {
+  function worldClient(
+    connected: boolean,
+    stale = false,
+    conflicts: JournalConflict[] = [],
+  ): FoundryClient {
     return {
       isConnected: () => connected,
       isWorldDataStale: () => stale,
+      getRecentJournalConflicts: () => conflicts,
+      getJournalHistoryDir: () => '/state/journal-history',
       getWorldInfo: vi.fn().mockResolvedValue({
         id: 'test-world',
         title: 'Test World',
@@ -393,6 +400,8 @@ describe('handleGetHealthStatus', () => {
     const failingWorld = {
       isConnected: () => false,
       isWorldDataStale: () => false,
+      getRecentJournalConflicts: () => [],
+      getJournalHistoryDir: () => '/state/journal-history',
       getWorldInfo: vi.fn().mockRejectedValue(new Error('not connected')),
     } as unknown as FoundryClient;
 
@@ -479,6 +488,39 @@ describe('handleGetHealthStatus', () => {
     expect(text).toContain('❌ Not connected');
     expect(text).toContain('FOUNDRY_HEADLESS_GM_ENABLED');
     expect(text).toContain('no longer supported');
+  });
+
+  it('reports no journal overwrite and where the local copies are', async () => {
+    const text = getText(
+      await handleGetHealthStatus({}, worldClient(true), healthClient(makeHealth())),
+    );
+    expect(text).toContain('**Journal Integrity:**');
+    expect(text).toContain('✅ No overwrite detected in the last 24 hours');
+    expect(text).toContain('**Local copies:** /state/journal-history');
+  });
+
+  it('lists the journal overwrites of the last 24 hours', async () => {
+    const conflict: JournalConflict = {
+      at: Date.parse('2026-11-01T20:00:00.000Z'),
+      journalId: '0123456789abcdef',
+      pageId: 'fedcba9876543210',
+      journalName: 'Session 11',
+      pageName: 'Recap',
+      reason: 'overwritten-by-editor-autosave',
+      savedBy: null,
+      historyPath: '/state/journal-history/a.html',
+    };
+    const text = getText(
+      await handleGetHealthStatus(
+        {},
+        worldClient(true, false, [conflict]),
+        healthClient(makeHealth()),
+      ),
+    );
+    expect(text).toContain('⚠️ 1 overwrite(s) detected in the last 24 hours:');
+    expect(text).toContain(
+      '- 2026-11-01T20:00:00.000Z — "Recap" of "Session 11" (0123456789abcdef/fedcba9876543210), overwritten-by-editor-autosave; copy: /state/journal-history/a.html',
+    );
   });
 });
 

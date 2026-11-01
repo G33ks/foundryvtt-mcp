@@ -427,6 +427,19 @@ export async function handleGetHealthStatus(
       }
     }
 
+    const conflicts = foundryClient.getRecentJournalConflicts();
+    const journalSection =
+      conflicts.length === 0
+        ? '✅ No overwrite detected in the last 24 hours'
+        : [
+            `⚠️ ${conflicts.length} overwrite(s) detected in the last 24 hours:`,
+            ...conflicts.map(
+              (c) =>
+                `- ${new Date(c.at).toISOString()} — "${c.pageName}" of "${c.journalName}" ` +
+                `(${c.journalId}/${c.pageId}), ${c.reason}; copy: ${c.historyPath ?? 'none'}`,
+            ),
+          ].join('\n');
+
     return {
       content: [
         {
@@ -440,7 +453,11 @@ ${foundryClient.isConnected() ? '✅ Connected' : '❌ Disconnected'}
 ${worldLines.join('\n')}
 
 **System Health:**
-${healthSection}${moduleBridgeSection ? `\n\n**Module Bridge:**\n${moduleBridgeSection}` : ''}`,
+${healthSection}${moduleBridgeSection ? `\n\n**Module Bridge:**\n${moduleBridgeSection}` : ''}
+
+**Journal Integrity:**
+${journalSection}
+- **Local copies:** ${foundryClient.getJournalHistoryDir()}`,
         },
       ],
     };

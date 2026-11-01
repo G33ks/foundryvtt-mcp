@@ -7,6 +7,7 @@
  * or by the shared process that relays forward calls to.
  */
 
+import path from 'node:path';
 import {
   type CallToolResult,
   ErrorCode,
@@ -18,6 +19,7 @@ import { DiagnosticsClient } from './diagnostics/client.js';
 import { FoundryClient, type FoundryClientConfig } from './foundry/client.js';
 import { HeadlessGmSession } from './foundry/headless-gm-session.js';
 import { BRIDGE_PROTOCOL_VERSION, ModuleBridge } from './foundry/module-bridge.js';
+import { defaultStateDir } from './shared/paths.js';
 import { routeResourceRequest, routeToolRequest } from './tools/index.js';
 import { isWriteTool } from './tools/write-tools.js';
 import { DiagnosticSystem } from './utils/diagnostics.js';
@@ -79,7 +81,25 @@ export class FoundryCore {
     if (config.assets.dataPath) {
       clientConfig.dataPath = config.assets.dataPath;
     }
+    // Same state directory as the shared process's daemon.json, in both modes.
+    clientConfig.journalHistoryDir = path.join(defaultStateDir(), 'journal-history');
+    if (config.headlessGm.username) {
+      clientConfig.connectorUsernames = [config.headlessGm.username];
+    }
     this.foundryClient = new FoundryClient(clientConfig);
+    // A detected journal overwrite is whispered to the GMs. The whisper is a
+    // write, so it waits its turn in the write queue like any tool write.
+    this.foundryClient.onJournalConflict = (conflict) => {
+      this.writeQueue
+        .run(() => this.foundryClient.whisperJournalConflict(conflict))
+        .catch((error: unknown) => {
+          logger.warn('Could not whisper a journal overwrite to the GMs', {
+            journalId: conflict.journalId,
+            pageId: conflict.pageId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+    };
 
     // Canvas-only tools (scene screenshots, etc.) relay through a companion
     // Foundry module over a plain WebSocket; disabled unless opted in, since
