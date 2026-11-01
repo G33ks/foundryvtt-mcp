@@ -203,6 +203,28 @@ describe('HeadlessGmSession', () => {
     expect(launchMock).toHaveBeenCalledTimes(3);
   });
 
+  it('recognizes the lowercase "executable doesn\'t exist" playwright also uses', async () => {
+    // Seen live (recette chantier 4): "browserType.launch: Failed to launch
+    // chromium because executable doesn't exist at …".
+    launchMock
+      .mockRejectedValueOnce(new Error("Chromium distribution 'chrome' is not found at C:\\x"))
+      .mockRejectedValueOnce(new Error("Chromium distribution 'msedge' is not found at C:\\y"))
+      .mockRejectedValueOnce(
+        new Error(
+          "browserType.launch: Failed to launch chromium because executable doesn't exist at C:\\ms-playwright\\chrome.exe",
+        ),
+      );
+
+    const session = new HeadlessGmSession({
+      foundryUrl: 'http://localhost:30000',
+      username: 'mcp-api',
+      password: 'mcp',
+    });
+
+    const error = await session.start().catch((e: unknown) => e);
+    expect(String(error)).toMatch(/No browser found/);
+  });
+
   it('shows the real launch error, without install advice, when a browser exists but fails', async () => {
     launchMock
       .mockRejectedValueOnce(

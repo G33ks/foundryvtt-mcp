@@ -53,10 +53,11 @@ const BROWSER_CHANNELS: Array<string | undefined> = ['chrome', 'msedge', undefin
 /**
  * playwright-core's wording for "this browser is not installed": a missing
  * channel ("Chromium distribution 'chrome' is not found at …") or a missing
- * executable ("Executable doesn't exist at …"). Anything else is a browser
- * that exists but failed to start.
+ * executable ("Executable doesn't exist at …", or "Failed to launch chromium
+ * because executable doesn't exist at …"). Anything else is a browser that
+ * exists but failed to start.
  */
-const BROWSER_NOT_FOUND = /Chromium distribution '[^']*' is not found|Executable doesn't exist/;
+const BROWSER_NOT_FOUND = /Chromium distribution '[^']*' is not found|executable doesn't exist/i;
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
