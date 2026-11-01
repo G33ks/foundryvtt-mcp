@@ -1025,6 +1025,9 @@ describe('FoundryClient', () => {
       // What socket.io does on an automatic reconnect of the same instance.
       socket.connected = true;
       fire('connect');
+      // Not connected yet: FoundryVTT has not said whose session this is.
+      expect(connected.isConnected()).toBe(false);
+      fire('session', { userId: 'test-user-id', sessionId: 'x' });
 
       expect(connected.isConnected()).toBe(true);
       // The gap was not replayed: broadcasts missed while the socket was down
@@ -1051,6 +1054,7 @@ describe('FoundryClient', () => {
       fire('disconnect', 'transport close');
       socket.connected = true;
       fire('connect');
+      fire('session', { userId: 'test-user-id', sessionId: 'x' });
 
       const after = (await handleGetHealthStatus({}, connected, diagnosticsClient)).content[0] as {
         text: string;

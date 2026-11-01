@@ -20,7 +20,7 @@ import { isRecord } from '../utils/guards.js';
 import { getImageSize, type ImageSize } from '../utils/image-size.js';
 import { logger } from '../utils/logger.js';
 import { RefusedError } from '../utils/refusal.js';
-import { authenticateFoundry, sessionSocketOptions } from './auth.js';
+import { authenticateFoundry, NoActiveWorldError, sessionSocketOptions } from './auth.js';
 import { evaluateDiceFormula } from './dice-formula.js';
 import type { EventFilter, EventReadResult } from './event-log.js';
 import { summarizeDocumentBroadcast, WorldEventLog } from './event-log.js';
@@ -152,8 +152,9 @@ export type WallType = 'wall' | 'door' | 'secretDoor' | 'terrain' | 'invisible' 
  * Wall field presets for {@link FoundryClient.createWall}'s `type` option.
  * A plain "wall" sets no fields, relying on Foundry's own Wall schema
  * defaults (blocks movement and sight). `WALL_SENSE_TYPES`/`WALL_MOVEMENT_TYPES`
- * NONE (0) and LIMITED (10) are hardcoded here — both are stable across every
- * Foundry version this project targets (v10+, confirmed against v12) — but no
+ * NONE (0) and LIMITED (10) are hardcoded here — both are stable across the
+ * Foundry versions this project supports (v13 and v14; v14 build 369 keeps
+ * them as `EDGE_SENSE_TYPES`, `WALL_SENSE_TYPES` being its deprecated alias) — but no
  * preset touches the exact "blocking" (NORMAL) value, which is left to the
  * server's own schema default rather than guessed.
  */
@@ -549,11 +550,100 @@ export interface WorldPlaylistEntry {
   }>;
 }
 
+/**
+ * State of the authenticated Socket.IO link (Socket.IO mode only).
+ *
+ * - `connected`: the socket is up and FoundryVTT knows its session's user.
+ * - `disconnected`: never connected yet, or the transport dropped and
+ *   socket.io-client is reconnecting on its own.
+ * - `reauthenticating`: a fresh `/join` authentication is in flight.
+ * - `waiting-for-world`: the last attempt found no active world; retrying.
+ * - `retrying`: the last attempt failed for another reason; retrying.
+ */
+export type ConnectionState =
+  | 'connected'
+  | 'disconnected'
+  | 'reauthenticating'
+  | 'waiting-for-world'
+  | 'retrying';
+
+/** {@link FoundryClient.connectionStatus}. */
+export interface ConnectionStatus {
+  state: ConnectionState;
+  /** Why the link is not connected, when known; `null` while connected. */
+  error: string | null;
+}
+
+/** First wait before retrying a failed reauthentication; doubles up to the cap. */
+export const REAUTH_BASE_RETRY_MS = 5000;
+/** Longest wait between two reauthentication attempts. */
+export const REAUTH_MAX_RETRY_MS = 120_000;
+
+/** States in which the current session is known to be unusable. */
+const SESSION_LOST_STATES: ReadonlySet<ConnectionState> = new Set([
+  'reauthenticating',
+  'waiting-for-world',
+  'retrying',
+]);
+
+/** FoundryVTT's labels for `CONST.USER_ROLES`. */
+const ROLE_LABELS: Record<number, string> = {
+  0: 'None',
+  1: 'Player',
+  2: 'Trusted Player',
+  3: 'Assistant GM',
+  4: 'Gamemaster',
+};
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/** Label of a FoundryVTT user role, e.g. `Assistant GM`. */
+export function roleLabel(role: number): string {
+  return ROLE_LABELS[role] ?? `role ${role}`;
+}
+
+/**
+ * Shared mode with a Gamemaster account: the page is a real browser client,
+ * so it can become `game.users.activeGM` instead of a human Gamemaster
+ * (equal roles fall back to the smaller user id) and run the system's
+ * automations. `null` when there is nothing to warn about.
+ */
+export function gamemasterAccountWarning(
+  shared: boolean,
+  account: { name: string; role: number | null } | null,
+): string | null {
+  if (!shared || account?.role !== USER_ROLES.gamemaster) {
+    return null;
+  }
+  return (
+    `The connector's account "${account.name}" is a Gamemaster and the headless GM page shares ` +
+    'it: that page may become the active GM instead of a human Gamemaster (equal roles go to ' +
+    'the smaller user id) and run the game system automations. Make this account an Assistant GM.'
+  );
+}
+
 export class FoundryClient {
   private http: AxiosInstance;
   private socket: Socket | null = null;
   private config: FoundryClientConfig;
   private _isConnected = false;
+  /** Cookie of the current FoundryVTT session. Never logged. */
+  private session: string | null = null;
+  private readonly sessionListeners = new Set<(session: string) => void>();
+  private connectionState: ConnectionState = 'disconnected';
+  private connectionError: string | null = null;
+  /** State and error last written to the log, so a retry loop logs once. */
+  private loggedConnection: string | null = null;
+  private readonly connectionWaiters = new Set<() => void>();
+  private reauthInFlight: Promise<void> | null = null;
+  private reauthTimer: NodeJS.Timeout | null = null;
+  private reauthDelayMs = REAUTH_BASE_RETRY_MS;
+  /** Set by `disconnect()`: no reauthentication may start after it. */
+  private stopped = false;
+  /** The transport reconnected; FoundryVTT's `session` answer is pending. */
+  private awaitingSession = false;
   private worldData: WorldData | null = null;
   /** Set when the socket drops with a cache still loaded (#217). */
   private worldDataStale = false;
@@ -686,19 +776,267 @@ export class FoundryClient {
     }
 
     if (user && password) {
-      const { session } = await authenticateFoundry(this.config.baseUrl, user, password);
-
-      // Connect authenticated socket and load world data
-      this.worldData = await this.connectAndLoadWorld(session);
-      this.worldDataStale = false;
-      logger.info('Connected to FoundryVTT via Socket.IO', {
-        actors: this.worldData.actors.length,
-        scenes: this.worldData.scenes.length,
-        items: this.worldData.items.length,
-      });
+      this.stopped = false;
+      try {
+        await this.establishSession(user, password);
+      } catch (error) {
+        this.connectionError = errorMessage(error);
+        throw error;
+      }
     }
 
     this._isConnected = true;
+  }
+
+  /**
+   * Authenticates (the `/join` flow), opens the authenticated socket, loads
+   * worldData, then hands the new session cookie to its listeners. Replaces
+   * the previous socket, if any.
+   */
+  private async establishSession(user: string, password: string): Promise<void> {
+    const { session } = await authenticateFoundry(this.config.baseUrl, user, password);
+
+    // Connect authenticated socket and load world data
+    this.worldData = await this.connectAndLoadWorld(session);
+    this.worldDataStale = false;
+    this.session = session;
+    this.awaitingSession = false;
+    this.setConnectionState('connected', null);
+    logger.info('Connected to FoundryVTT via Socket.IO', {
+      actors: this.worldData.actors.length,
+      scenes: this.worldData.scenes.length,
+      items: this.worldData.items.length,
+    });
+    for (const listener of this.sessionListeners) {
+      try {
+        listener(session);
+      } catch (error) {
+        logger.warn('A session listener failed', { error: errorMessage(error) });
+      }
+    }
+  }
+
+  /**
+   * Cookie of the current FoundryVTT session, for the headless GM page that
+   * shares it; `null` before the first authentication. Never log it.
+   */
+  currentSession(): string | null {
+    return this.session;
+  }
+
+  /**
+   * Called with the new cookie after every successful authentication.
+   *
+   * @returns a function that removes the listener
+   */
+  onSessionChanged(listener: (session: string) => void): () => void {
+    this.sessionListeners.add(listener);
+    return () => {
+      this.sessionListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Authenticates again and replaces the socket. One attempt at a time:
+   * concurrent callers share it. A failed attempt schedules the next one on
+   * its own, waiting {@link REAUTH_BASE_RETRY_MS} and doubling up to
+   * {@link REAUTH_MAX_RETRY_MS}, so the link comes back without any tool call.
+   *
+   * @param reason - why the session is no longer usable (logged)
+   * @throws the error of this attempt (the retries still go on)
+   */
+  reauthenticate(reason: string): Promise<void> {
+    if (this.reauthInFlight) {
+      return this.reauthInFlight;
+    }
+    const user = this.config.userId || this.config.username;
+    const password = this.config.password;
+    if (this.stopped || !(user && password)) {
+      return Promise.reject(new Error('No Socket.IO credentials to reauthenticate with'));
+    }
+    clearTimeout(this.reauthTimer ?? undefined);
+    this.reauthTimer = null;
+    this.setConnectionState('reauthenticating', reason);
+    const attempt = (async () => {
+      try {
+        await this.establishSession(user, password);
+        this.reauthDelayMs = REAUTH_BASE_RETRY_MS;
+      } catch (error) {
+        if (!this.stopped) {
+          this.setConnectionState(
+            error instanceof NoActiveWorldError ? 'waiting-for-world' : 'retrying',
+            errorMessage(error),
+          );
+          this.scheduleReauth();
+        }
+        throw error;
+      } finally {
+        this.reauthInFlight = null;
+      }
+    })();
+    this.reauthInFlight = attempt;
+    return attempt;
+  }
+
+  /**
+   * Starts the background reconnection after a failed {@link connect} (no
+   * active world yet, typically). The first attempt waits the base delay.
+   */
+  startReconnecting(error: unknown): void {
+    this.stopped = false;
+    this.setConnectionState(
+      error instanceof NoActiveWorldError ? 'waiting-for-world' : 'retrying',
+      errorMessage(error),
+    );
+    this.scheduleReauth();
+  }
+
+  private scheduleReauth(): void {
+    if (this.stopped) {
+      return;
+    }
+    clearTimeout(this.reauthTimer ?? undefined);
+    const delay = this.reauthDelayMs;
+    this.reauthDelayMs = Math.min(this.reauthDelayMs * 2, REAUTH_MAX_RETRY_MS);
+    this.reauthTimer = setTimeout(() => {
+      this.reauthTimer = null;
+      // A failure is already logged and rescheduled by reauthenticate().
+      this.reauthenticate('retrying the connection').catch(() => undefined);
+    }, delay);
+  }
+
+  /**
+   * Records a state change and logs it once: a retry loop that keeps
+   * failing the same way writes one line, not one per attempt.
+   */
+  private setConnectionState(state: ConnectionState, error: string | null): void {
+    const previous = this.connectionState;
+    this.connectionState = state;
+    this.connectionError = state === 'connected' ? null : error;
+    if (state === 'connected') {
+      if (previous !== 'connected' && this.loggedConnection !== null) {
+        logger.info('FoundryVTT connection restored');
+      }
+      this.loggedConnection = null;
+      for (const wake of this.connectionWaiters) {
+        wake();
+      }
+      this.connectionWaiters.clear();
+      return;
+    }
+    // A retry passes through `reauthenticating` on every attempt; only the
+    // first one after a working link is worth a line.
+    if (state === 'reauthenticating' && this.loggedConnection !== null) {
+      return;
+    }
+    const key = `${state}: ${error ?? ''}`;
+    if (key !== this.loggedConnection) {
+      this.loggedConnection = key;
+      logger.warn(`FoundryVTT connection: ${state}${error ? ` — ${error}` : ''}`);
+    }
+  }
+
+  /** State of the Socket.IO link and why it is down, if it is. */
+  connectionStatus(): ConnectionStatus {
+    return { state: this.connectionState, error: this.connectionError };
+  }
+
+  /**
+   * True when Socket.IO credentials are configured and the link is not
+   * usable right now — a tool call should wait for it rather than read a
+   * cache nobody keeps live or write on an anonymous socket.
+   */
+  isReconnecting(): boolean {
+    const hasCredentials = Boolean(
+      (this.config.userId || this.config.username) && this.config.password,
+    );
+    return hasCredentials && !this.stopped && !this.isSocketAuthenticated();
+  }
+
+  /**
+   * Waits until the link is authenticated again.
+   *
+   * @returns true once connected, false when `timeoutMs` ran out first
+   */
+  waitUntilConnected(timeoutMs: number): Promise<boolean> {
+    if (this.isSocketAuthenticated()) {
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      const wake = () => {
+        clearTimeout(timer);
+        resolve(true);
+      };
+      const timer = setTimeout(() => {
+        this.connectionWaiters.delete(wake);
+        resolve(false);
+      }, timeoutMs);
+      this.connectionWaiters.add(wake);
+    });
+  }
+
+  /** The socket is up and FoundryVTT knows the user of its session. */
+  private isSocketAuthenticated(): boolean {
+    return this.connectionState === 'connected' && this.canSendOnSocket();
+  }
+
+  /**
+   * False while the socket may be anonymous: its transport just came back
+   * and FoundryVTT has not said whose session it carries yet, or the
+   * session is known to be lost (a reauthentication is pending).
+   */
+  private canSendOnSocket(): boolean {
+    return (
+      this.socket?.connected === true &&
+      !this.awaitingSession &&
+      !SESSION_LOST_STATES.has(this.connectionState)
+    );
+  }
+
+  /** Name and role of the account this client is logged in with. */
+  accountInfo(): { userId: string; name: string; role: number | null } | null {
+    if (!this.worldData) {
+      return null;
+    }
+    const { userId } = this.worldData;
+    const user = this.worldData.users?.find((u) => u._id === userId);
+    return {
+      userId,
+      name: user?.name ?? userId,
+      role: typeof user?.role === 'number' ? user.role : null,
+    };
+  }
+
+  /**
+   * The user FoundryVTT's browser clients elect as active GM: among the
+   * active users with at least the Assistant GM role, the highest role, then
+   * the smallest id (`game.users.activeGM`, v14
+   * client/documents/collections/users.mjs `getDesignatedUser`). Computed
+   * from the cache: `null` when nobody qualifies or no world is loaded.
+   */
+  activeGameMaster(): { userId: string; name: string; role: number } | null {
+    if (!this.worldData) {
+      return null;
+    }
+    const active = new Set(this.worldData.activeUsers);
+    let designated: { userId: string; name: string; role: number } | null = null;
+    for (const user of this.worldData.users ?? []) {
+      if (
+        !active.has(user._id) ||
+        typeof user.role !== 'number' ||
+        user.role < USER_ROLES.assistant
+      ) {
+        continue;
+      }
+      if (
+        !designated ||
+        user.role > designated.role ||
+        (user.role === designated.role && user._id < designated.userId)
+      ) {
+        designated = { userId: user._id, name: user.name, role: user.role };
+      }
+    }
+    return designated;
   }
 
   /**
@@ -755,6 +1093,13 @@ export class FoundryClient {
           // connected again. Both are removed in `disconnect()`.
           this.socket?.on('connect', this.onSocketConnect);
           this.socket?.on('disconnect', this.onSocketDisconnect);
+          // Authentication (01.11 zombie socket): FoundryVTT answers every
+          // (re)connection with `session`; one without a user means the
+          // server forgot the session (restart) or no world is running.
+          this.socket?.on('session', this.onSessionEvent);
+          // The world was shut down: its sessions outlive it, its sockets
+          // do not (a socket is only bound to a user when it connects).
+          this.socket?.on('shutdown', this.onWorldShutdown);
           resolve(worldData);
         });
       };
@@ -1074,7 +1419,7 @@ export class FoundryClient {
    * Reacts to the socket dropping on its own — server restart, network loss,
    * an idle timeout (#217).
    *
-   * Clears the connected flag so `isConnected()` and `get_health_status` stop
+   * Moves the link to `disconnected` so `isConnected()` and `get_health_status` stop
    * claiming a live link, and marks the cached snapshot stale: nothing is
    * applying `modifyDocument` broadcasts while the socket is down, so whatever
    * is in `worldData` from here on is a point-in-time copy, not live state.
@@ -1092,9 +1437,9 @@ export class FoundryClient {
    * `reconnection: true` in place, so after a transient drop the manager
    * re-handshakes the SAME socket instance (the session cookie rides along in
    * `extraHeaders`) and the persistent `modifyDocument`/`userActivity`
-   * listeners resume firing. Without this the connected flag would stay
-   * latched off for the rest of the process while writes and broadcasts were
-   * demonstrably working again.
+   * listeners resume firing. The link reads as connected again only once
+   * FoundryVTT's `session` event names a user ({@link onSessionEvent}): after
+   * a server restart the same reconnect yields an anonymous socket.
    *
    * `worldDataStale` is deliberately *not* cleared: broadcasts emitted while
    * the socket was down were never delivered and are not replayed, so the
@@ -1103,13 +1448,52 @@ export class FoundryClient {
    * Bound field rather than a method so the same reference reaches `socket.off()`.
    */
   private onSocketConnect = (): void => {
-    this._isConnected = true;
-    logger.info('FoundryVTT socket reconnected — cached world data is still stale until refreshed');
+    // Only the transport is back: FoundryVTT may not know the session any
+    // more (a server restart forgets every session). `onSessionEvent` decides.
+    this.awaitingSession = true;
+    logger.debug('FoundryVTT socket transport reconnected — waiting for its session');
+  };
+
+  /**
+   * Handles the `session` event FoundryVTT sends on every (re)connection of
+   * the socket. With a user, the reconnected socket is authenticated again;
+   * without one (server restarted, world not running), it is anonymous and
+   * the client authenticates anew.
+   *
+   * Bound field rather than a method so the same reference reaches `socket.off()`.
+   */
+  private onSessionEvent = (data: unknown): void => {
+    this.awaitingSession = false;
+    if (this.reauthInFlight) {
+      return;
+    }
+    const userId = isRecord(data) && typeof data.userId === 'string' ? data.userId : null;
+    if (userId) {
+      if (this.connectionState !== 'connected') {
+        this.setConnectionState('connected', null);
+        logger.info(
+          'FoundryVTT socket reconnected — cached world data is still stale until refreshed',
+        );
+      }
+      return;
+    }
+    this.reauthenticate('FoundryVTT no longer recognises the session (server restart?)').catch(
+      () => undefined,
+    );
+  };
+
+  /** Bound field rather than a method so the same reference reaches `socket.off()`. */
+  private onWorldShutdown = (): void => {
+    this.worldDataStale = this.worldData !== null;
+    this.reauthenticate('the world was shut down').catch(() => undefined);
   };
 
   private onSocketDisconnect = (reason?: unknown): void => {
-    this._isConnected = false;
     this.worldDataStale = this.worldData !== null;
+    if (this.reauthInFlight || this.connectionState !== 'connected') {
+      return;
+    }
+    this.setConnectionState('disconnected', 'the socket dropped');
     logger.warn('FoundryVTT socket disconnected — cached world data is now stale', {
       reason: typeof reason === 'string' ? reason : undefined,
     });
@@ -1133,15 +1517,25 @@ export class FoundryClient {
     this.socket.off('pm.autosave', this.onEditorAutosave);
     this.socket.off('connect', this.onSocketConnect);
     this.socket.off('disconnect', this.onSocketDisconnect);
+    this.socket.off('session', this.onSessionEvent);
+    this.socket.off('shutdown', this.onWorldShutdown);
     this.socket.disconnect();
     this.socket = null;
   }
 
   async disconnect(): Promise<void> {
+    this.stopped = true;
+    clearTimeout(this.reauthTimer ?? undefined);
+    this.reauthTimer = null;
     this.detachSocket();
     this.worldData = null;
     this.worldDataStale = false;
     this._isConnected = false;
+    this.session = null;
+    this.connectionState = 'disconnected';
+    this.connectionError = null;
+    this.loggedConnection = null;
+    this.awaitingSession = false;
     this.restLinkLive = true;
     logger.info('FoundryVTT client disconnected');
   }
@@ -1174,8 +1568,10 @@ export class FoundryClient {
     // A socket, once established, is the more informative signal (reacts to
     // drops/reconnects immediately — see #217) — prefer it even when an
     // apiKey is also configured (REST is additive; see `connect()`).
+    // A connected but anonymous socket (FoundryVTT forgot the session) does
+    // not count: nothing it sends is executed as the connector's user.
     if (this.socket) {
-      return this._isConnected && this.socket.connected === true;
+      return this.isSocketAuthenticated();
     }
     if (this.config.apiKey) {
       return this._isConnected && this.restLinkLive;
@@ -1307,6 +1703,7 @@ export class FoundryClient {
     if (!this.socket?.connected) {
       throw new Error('Not connected — cannot refresh world data');
     }
+    this.assertAuthenticated();
 
     this.worldData = await new Promise<WorldData>((resolve, reject) => {
       const cleanup = () => {
@@ -1788,6 +2185,17 @@ export class FoundryClient {
         'Write operations require an active Socket.IO connection to FoundryVTT (username/password mode).',
       );
     }
+    this.assertAuthenticated();
+  }
+
+  /** Never send on an anonymous socket: FoundryVTT would not run it as our user. */
+  private assertAuthenticated(): void {
+    if (!this.canSendOnSocket()) {
+      const { state, error } = this.connectionStatus();
+      throw new RefusedError(
+        `Reconnecting to FoundryVTT… (${state}${error ? `: ${error}` : ''}). Try again in a moment.`,
+      );
+    }
   }
 
   /**
@@ -1800,6 +2208,12 @@ export class FoundryClient {
       const socket = this.socket;
       if (!socket?.connected) {
         reject(new Error('Socket.IO is not connected'));
+        return;
+      }
+      try {
+        this.assertAuthenticated();
+      } catch (error) {
+        reject(error);
         return;
       }
       const timeoutMs = this.config.timeout || 10000;
@@ -2567,6 +2981,16 @@ export class FoundryClient {
     if (userId === this.worldData?.userId && numericRole < USER_ROLES.assistant) {
       throw new Error(
         `Cannot demote the connected user (${userId}) below assistant role: self-demotion would lock the MCP server out of GM permissions.`,
+      );
+    }
+    // FoundryVTT only lets a user grant roles up to its own
+    // (common/documents/user.mjs `#canUpdate`): refuse before asking it.
+    const account = this.accountInfo();
+    if (account?.role != null && numericRole > account.role) {
+      throw new RefusedError(
+        `The connector's account "${account.name}" is ${roleLabel(account.role)}: FoundryVTT only ` +
+          `lets a user grant roles up to its own, so it cannot grant ${roleLabel(numericRole)}. ` +
+          'Change this role in FoundryVTT as a Gamemaster.',
       );
     }
     const result = await this.modifyDocument('User', 'update', {
@@ -3860,6 +4284,17 @@ export class FoundryClient {
     if (parts.length < 2 || parts.some((p) => p.length === 0)) {
       throw new Error(
         `Invalid setting key: "${key}" — must have format {scope}.{field} (e.g. "system-name.settingKey")`,
+      );
+    }
+    const account = this.accountInfo();
+    if (
+      key === 'core.permissions' &&
+      account?.role != null &&
+      account.role < USER_ROLES.gamemaster
+    ) {
+      throw new RefusedError(
+        `The connector's account "${account.name}" is ${roleLabel(account.role)}: only a ` +
+          'Gamemaster may change core.permissions. Change it in FoundryVTT as a Gamemaster.',
       );
     }
     if (parts[0] === 'core') {
