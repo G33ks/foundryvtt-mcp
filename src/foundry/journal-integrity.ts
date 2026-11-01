@@ -10,11 +10,14 @@
  *   author's `userId`.
  * - **A collaborative-editor autosave** — while a text page is open in an
  *   editor, the server holds its own in-memory copy of the page and writes it
- *   back every `core.editorAutosaveSecs` (60 s by default), even when nobody
- *   typed. A `modifyDocument` write never reaches that copy, so the autosave
- *   reverts it. The server saves the document directly (no `modifyDocument`
- *   broadcast) and only emits `pm.autosave(uuid, html)` — to every user,
- *   without saying who is editing.
+ *   back every `core.editorAutosaveSecs` (60 s by default). A
+ *   `modifyDocument` write never reaches that copy. An editor with typed text
+ *   keeps its sheet from re-rendering, so the autosave reverts the write; an
+ *   untouched editor re-renders on the update and, in a browser, picked the
+ *   write up (verified in acceptance — the copy is only reloaded when the
+ *   session restarts, so that case is watched too). The server saves the
+ *   document directly (no `modifyDocument` broadcast) and only emits
+ *   `pm.autosave(uuid, html)` — to every user, without saying who is editing.
  *
  * This module holds only pure logic and in-memory state; `FoundryClient`
  * feeds it socket events and performs the side effects (local copies,
