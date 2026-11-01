@@ -19,6 +19,7 @@ import { defaultStateDir } from '../shared/paths.js';
 import { isRecord } from '../utils/guards.js';
 import { getImageSize, type ImageSize } from '../utils/image-size.js';
 import { logger } from '../utils/logger.js';
+import { RefusedError } from '../utils/refusal.js';
 import { authenticateFoundry, sessionSocketOptions } from './auth.js';
 import { evaluateDiceFormula } from './dice-formula.js';
 import type { EventFilter, EventReadResult } from './event-log.js';
@@ -2699,7 +2700,7 @@ export class FoundryClient {
       throw new Error('content must be a string');
     }
     if (patch.content !== undefined && !patch.expectedVersion) {
-      throw new Error(
+      throw new RefusedError(
         'Replacing a page body requires expectedVersion: read the page with get_journal raw: true first',
       );
     }
@@ -2784,7 +2785,7 @@ export class FoundryClient {
     const before = page.text?.content ?? '';
     const currentVersion = journalVersion(before);
     if (change.expectedVersion && change.expectedVersion !== currentVersion) {
-      throw new Error(
+      throw new RefusedError(
         `Page "${page.name}" (${pageId}) has changed since it was read: expected version ` +
           `${change.expectedVersion}, current version ${currentVersion}. Nothing was written. ` +
           'Read it again with get_journal raw: true, then rewrite it from the current version.',

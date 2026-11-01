@@ -18,6 +18,7 @@ import type {
   JournalPageWriteResult,
 } from '../../foundry/types.js';
 import { VISIBILITY_LEVELS } from '../../foundry/types.js';
+import { refusalError } from '../../utils/refusal.js';
 import { withJournalWarnings, withToolError } from './utils.js';
 
 /** Version token of a page body as returned by the server. */
@@ -153,7 +154,7 @@ export async function handleUpdateJournalPage(
     throw new McpError(ErrorCode.InvalidParams, 'expectedVersion must be a non-empty string');
   }
   if (mode === 'replace' && content !== undefined && !expectedVersion) {
-    throw new McpError(
+    throw refusalError(
       ErrorCode.InvalidParams,
       'Replacing a page body requires expectedVersion: call get_journal with raw: true, ' +
         'rewrite the page from that HTML, and pass the version printed for the page.',

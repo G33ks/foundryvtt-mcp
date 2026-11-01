@@ -25,6 +25,7 @@ import { isWriteTool } from './tools/write-tools.js';
 import { DiagnosticSystem } from './utils/diagnostics.js';
 import { redactToolArgs } from './utils/log-args.js';
 import { logger } from './utils/logger.js';
+import { isRefusal } from './utils/refusal.js';
 import { SerialQueue } from './utils/serial-queue.js';
 
 /** Snapshot reported by `foundryvtt-mcp status`. */
@@ -255,7 +256,16 @@ export class FoundryCore {
         this.headlessGmSession,
       )) as CallToolResult;
     } catch (error) {
-      logger.error('Tool execution failed:', error);
+      if (isRefusal(error)) {
+        // Turned down by design (e.g. an outdated journal page version): the
+        // caller is told why; the log needs one line, not a stack.
+        logger.warn('Tool call refused', {
+          name,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      } else {
+        logger.error('Tool execution failed:', error);
+      }
 
       if (error instanceof McpError) {
         throw error;

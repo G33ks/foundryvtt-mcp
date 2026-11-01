@@ -5,6 +5,7 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import { logger } from '../../utils/logger.js';
+import { RefusedError, refusalError } from '../../utils/refusal.js';
 
 /**
  * Puts the pending journal overwrite warnings (see journal-integrity.ts) at
@@ -40,6 +41,10 @@ export async function withToolError<T>(toolName: string, fn: () => Promise<T>): 
   } catch (error) {
     if (error instanceof McpError) {
       throw error;
+    }
+    // Expected refusals are logged once, as a warning, by FoundryCore.
+    if (error instanceof RefusedError) {
+      throw refusalError(ErrorCode.InvalidRequest, `Failed to ${toolName}: ${error.message}`);
     }
     logger.error(`Failed to ${toolName}:`, error);
     throw new McpError(
