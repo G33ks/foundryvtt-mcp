@@ -341,6 +341,10 @@ describe('handleGetHealthStatus', () => {
   ): FoundryClient {
     return {
       isConnected: () => connected,
+      isReconnecting: () => false,
+      connectionStatus: () => ({ state: connected ? 'connected' : 'disconnected', error: null }),
+      accountInfo: () => null,
+      activeGameMaster: () => null,
       isWorldDataStale: () => stale,
       getRecentJournalConflicts: () => conflicts,
       getJournalHistoryDir: () => '/state/journal-history',
@@ -414,9 +418,48 @@ describe('handleGetHealthStatus', () => {
     );
   });
 
+  it('shows the connector account, the active GM and the Gamemaster warning', async () => {
+    const client = {
+      ...worldClient(true),
+      accountInfo: () => ({ userId: 'u', name: 'mcp-api', role: 4 }),
+      activeGameMaster: () => ({ userId: 'u', name: 'mcp-api', role: 4 }),
+    } as unknown as FoundryClient;
+
+    const text = getText(
+      await handleGetHealthStatus({}, client, healthClient(makeHealth()), null, null, {
+        sharedAccount: true,
+      }),
+    );
+
+    expect(text).toContain('**Connector Account:**');
+    expect(text).toContain('- **Name:** mcp-api (Gamemaster)');
+    expect(text).toContain(
+      "- **Active GM (as FoundryVTT's clients elect it):** mcp-api (Gamemaster)",
+    );
+    expect(text).toMatch(/⚠️ The connector's account "mcp-api" is a Gamemaster/);
+  });
+
+  it('says the connection is being restored and why', async () => {
+    const client = {
+      ...worldClient(false),
+      isReconnecting: () => true,
+      connectionStatus: () => ({ state: 'waiting-for-world', error: 'No active world' }),
+    } as unknown as FoundryClient;
+
+    const text = getText(await handleGetHealthStatus({}, client, healthClient(makeHealth())));
+
+    expect(text).toContain(
+      '❌ Disconnected — waiting-for-world: No active world (retrying on its own)',
+    );
+  });
+
   it('degrades gracefully when world info is unavailable', async () => {
     const failingWorld = {
       isConnected: () => false,
+      isReconnecting: () => false,
+      connectionStatus: () => ({ state: 'disconnected', error: null }),
+      accountInfo: () => null,
+      activeGameMaster: () => null,
       isWorldDataStale: () => false,
       getRecentJournalConflicts: () => [],
       getJournalHistoryDir: () => '/state/journal-history',
@@ -510,7 +553,7 @@ describe('handleGetHealthStatus', () => {
     );
 
     expect(text).toContain('❌ Not connected');
-    expect(text).toContain('**Headless GM session:**');
+    expect(text).toContain('**Headless GM Session:**');
     expect(text).toContain('no user named "mcp-api"');
   });
 

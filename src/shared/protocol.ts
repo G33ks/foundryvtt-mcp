@@ -100,6 +100,23 @@ export const DaemonStatusSchema = z.object({
   writeQueue: z.number().optional(),
   startupError: z.string().nullable(),
   foundryConnected: z.boolean().optional(),
+  // Absent from shared processes older than single-account mode.
+  foundryConnection: z
+    .object({
+      state: z.enum([
+        'connected',
+        'disconnected',
+        'reauthenticating',
+        'waiting-for-world',
+        'retrying',
+      ]),
+      error: z.string().nullable(),
+    })
+    .optional(),
+  account: z
+    .object({ name: z.string(), role: z.string().nullable(), warning: z.string().nullable() })
+    .nullable()
+    .optional(),
   bridge: z
     .object({
       enabled: z.boolean(),
@@ -124,6 +141,12 @@ export const DaemonStatusSchema = z.object({
       // Absent from shared processes older than these fields.
       launchError: z.string().nullable().optional(),
       state: z.enum(['running', 'not-started', 'launch-failed', 'disabled']).optional(),
+      mode: z.enum(['shared', 'separate']).nullable().optional(),
+      modeText: z.string().nullable().optional(),
+      sessionState: z
+        .enum(['waiting-for-session', 'logging-in', 'logged-in', 'reauthenticating'])
+        .nullable()
+        .optional(),
     })
     .optional(),
 });

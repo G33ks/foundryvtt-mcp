@@ -121,4 +121,56 @@ describe('formatStatus', () => {
       "  Headless GM:    browser launch failed — Could not launch the browser at FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH=C:\\b.exe: Executable doesn't exist",
     );
   });
+
+  it('shows the shared session mode and its state', () => {
+    const headlessGm = {
+      enabled: true,
+      status: 'x',
+      state: 'running' as const,
+      mode: 'shared' as const,
+      modeText: "sharing the connector's session (mcp-api)",
+    };
+    expect(
+      line(
+        { ...BASE, headlessGm: { ...headlessGm, active: true, sessionState: 'logged-in' } },
+        'Headless GM',
+      ),
+    ).toBe("  Headless GM:    logged in — sharing the connector's session (mcp-api)");
+    expect(
+      line(
+        {
+          ...BASE,
+          headlessGm: { ...headlessGm, active: false, sessionState: 'waiting-for-session' },
+        },
+        'Headless GM',
+      ),
+    ).toBe("  Headless GM:    waiting-for-session — sharing the connector's session (mcp-api)");
+  });
+
+  it('says why FoundryVTT is not connected and that it retries', () => {
+    const status: DaemonStatus = {
+      ...BASE,
+      foundryConnected: false,
+      foundryConnection: {
+        state: 'waiting-for-world',
+        error: 'No active world on FoundryVTT: launch it from the Setup screen.',
+      },
+    };
+    expect(line(status, 'FoundryVTT')).toBe(
+      '  FoundryVTT:     not connected (waiting-for-world — No active world on FoundryVTT: launch it from the Setup screen.)',
+    );
+  });
+
+  it('shows the account and a Gamemaster warning', () => {
+    const status: DaemonStatus = {
+      ...BASE,
+      account: {
+        name: 'mcp-api',
+        role: 'Gamemaster',
+        warning: 'Make this account an Assistant GM.',
+      },
+    };
+    expect(line(status, 'Account')).toBe('  Account:        mcp-api (Gamemaster)');
+    expect(line(status, 'Warning')).toBe('  Warning:        Make this account an Assistant GM.');
+  });
 });

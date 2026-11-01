@@ -8,7 +8,7 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { type DiagnosticsClient, RestApiRequiredError } from '../../diagnostics/client.js';
 import type { LogEntry } from '../../diagnostics/types.js';
 import { LogEntrySchema } from '../../diagnostics/types.js';
-import type { FoundryClient } from '../../foundry/client.js';
+import { type FoundryClient, gamemasterAccountWarning, roleLabel } from '../../foundry/client.js';
 import type { HeadlessGmSession } from '../../foundry/headless-gm-session.js';
 import { BRIDGE_PROTOCOL_VERSION, type ModuleBridge } from '../../foundry/module-bridge.js';
 import { withToolError } from './utils.js';
@@ -41,6 +41,8 @@ export interface HealthRuntime {
   bridgeState?: 'listening' | 'not-started' | 'failed' | 'disabled';
   /** Why the module bridge failed to start. */
   bridgeError?: string;
+  /** The headless GM page shares the connector's account (single-account mode). */
+  sharedAccount?: boolean;
 }
 
 function sharedProcessSection(relays: NonNullable<HealthRuntime['relays']>): string {
@@ -455,7 +457,7 @@ export async function handleGetHealthStatus(
       if (moduleBridge.isConnected()) {
         moduleBridgeSection = `✅ Connected — authenticated module (protocol v${BRIDGE_PROTOCOL_VERSION})`;
       } else if (headlessGmSession) {
-        moduleBridgeSection = `❌ Not connected — no authenticated module (protocol v${BRIDGE_PROTOCOL_VERSION})\n- **Headless GM session:** ${headlessGmSession.statusText()}`;
+        moduleBridgeSection = `❌ Not connected — no authenticated module (protocol v${BRIDGE_PROTOCOL_VERSION}); see the headless GM session below`;
       } else if (runtime.headlessLaunchError) {
         moduleBridgeSection =
           '❌ Not connected — the companion module only connects from the headless GM session, ' +
@@ -466,6 +468,36 @@ export async function handleGetHealthStatus(
           'which is not running. Set FOUNDRY_HEADLESS_GM_ENABLED=true with ' +
           'FOUNDRY_USERNAME/FOUNDRY_PASSWORD (a manually opened GM tab is no longer supported).';
       }
+    }
+
+    const headlessSection = headlessGmSession
+      ? `\n\n**Headless GM Session:**\n${headlessGmSession.statusText()}`
+      : '';
+
+    const account = foundryClient.accountInfo();
+    let accountSection = '';
+    if (account) {
+      const activeGm = foundryClient.activeGameMaster();
+      const accountLines = [
+        `- **Name:** ${account.name}${account.role === null ? '' : ` (${roleLabel(account.role)})`}`,
+        `- **Active GM (as FoundryVTT's clients elect it):** ${
+          activeGm ? `${activeGm.name} (${roleLabel(activeGm.role)})` : 'none connected'
+        }`,
+      ];
+      const warning = gamemasterAccountWarning(runtime.sharedAccount === true, account);
+      if (warning) {
+        accountLines.push(`⚠️ ${warning}`);
+      }
+      accountSection = `\n\n**Connector Account:**\n${accountLines.join('\n')}`;
+    }
+
+    let connectionLine = '✅ Connected';
+    if (!foundryClient.isConnected()) {
+      const { state, error } = foundryClient.connectionStatus();
+      connectionLine =
+        foundryClient.isReconnecting() && state !== 'disconnected'
+          ? `❌ Disconnected — ${state}${error ? `: ${error}` : ''} (retrying on its own)`
+          : `❌ Disconnected${error ? ` — ${error}` : ''}`;
     }
 
     const conflicts = foundryClient.getRecentJournalConflicts();
@@ -488,13 +520,13 @@ export async function handleGetHealthStatus(
           text: `\u{1FA7A} **Comprehensive Health Status**
 
 **FoundryVTT Connection:**
-${foundryClient.isConnected() ? '✅ Connected' : '❌ Disconnected'}
+${connectionLine}${accountSection}
 
 **World Information:**
 ${worldLines.join('\n')}
 
 **System Health:**
-${healthSection}${moduleBridgeSection ? `\n\n**Module Bridge:**\n${moduleBridgeSection}` : ''}${
+${healthSection}${moduleBridgeSection ? `\n\n**Module Bridge:**\n${moduleBridgeSection}` : ''}${headlessSection}${
   runtime.relays ? `\n\n**Shared Process:**\n${sharedProcessSection(runtime.relays)}` : ''
 }
 

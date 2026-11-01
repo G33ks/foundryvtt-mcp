@@ -16,8 +16,15 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { config } from './config/index.js';
 import { DiagnosticsClient } from './diagnostics/client.js';
-import { FoundryClient, type FoundryClientConfig } from './foundry/client.js';
-import { HeadlessGmSession } from './foundry/headless-gm-session.js';
+import { NoActiveWorldError } from './foundry/auth.js';
+import {
+  type ConnectionStatus,
+  FoundryClient,
+  type FoundryClientConfig,
+  gamemasterAccountWarning,
+  roleLabel,
+} from './foundry/client.js';
+import { HeadlessGmSession, type HeadlessSessionState } from './foundry/headless-gm-session.js';
 import { BRIDGE_PROTOCOL_VERSION, ModuleBridge } from './foundry/module-bridge.js';
 import { defaultStateDir } from './shared/paths.js';
 import type { HealthRuntime } from './tools/handlers/diagnostics.js';
@@ -26,15 +33,41 @@ import { isWriteTool } from './tools/write-tools.js';
 import { DiagnosticSystem } from './utils/diagnostics.js';
 import { redactToolArgs } from './utils/log-args.js';
 import { logger } from './utils/logger.js';
-import { isRefusal } from './utils/refusal.js';
+import { isRefusal, refusalError } from './utils/refusal.js';
 import { SerialQueue } from './utils/serial-queue.js';
 
 export type BridgeState = 'listening' | 'not-started' | 'failed' | 'disabled';
 export type HeadlessGmState = 'running' | 'not-started' | 'launch-failed' | 'disabled';
 
+/**
+ * How long a tool call waits for a FoundryVTT reconnection in progress
+ * before it is refused. A reauthentication takes about a second; a
+ * socket.io transport reconnection a few.
+ */
+export const TOOL_RECONNECT_WAIT_MS = 15_000;
+
+/** Tools that report the connection itself, and so must not wait for it. */
+const NO_RECONNECT_WAIT_TOOLS = new Set(['get_health_status']);
+
+/**
+ * True when the headless GM page shares the connector's account (and
+ * session): no FOUNDRY_HEADLESS_GM_USERNAME, or the same name as
+ * FOUNDRY_USERNAME.
+ */
+export function isSharedAccount(
+  headlessUsername: string | undefined,
+  foundryUsername: string | undefined,
+): boolean {
+  return !headlessUsername || headlessUsername === foundryUsername;
+}
+
 /** Snapshot reported by `foundryvtt-mcp status`. */
 export interface CoreStatus {
   foundryConnected: boolean;
+  /** State of the Socket.IO link, and why it is down. */
+  foundryConnection: ConnectionStatus;
+  /** The connector's account, its role, and a warning about it if any. */
+  account: { name: string; role: string | null; warning: string | null } | null;
   bridge: {
     enabled: boolean;
     port: number;
@@ -58,6 +91,11 @@ export interface CoreStatus {
     /** The real error when the browser could not be launched; `null` otherwise. */
     launchError: string | null;
     state: HeadlessGmState;
+    /** `shared`: the page reuses the connector's session; `separate`: its own account. */
+    mode: 'shared' | 'separate' | null;
+    /** e.g. "sharing the connector's session (mcp-api)". */
+    modeText: string | null;
+    sessionState: HeadlessSessionState | null;
   };
   /** Write calls queued or running. */
   writeQueue: number;
@@ -80,6 +118,8 @@ export class FoundryCore {
   private bridgeError: string | null = null;
   /** A headless GM session was configured (it may since have been dropped). */
   private readonly headlessGmConfigured: boolean;
+  /** The headless GM page shares the connector's account; see {@link isSharedAccount}. */
+  private readonly sharedAccount: boolean;
   /** Serialises every write tool, in arrival order; reads bypass it. */
   private readonly writeQueue = new SerialQueue();
 
@@ -111,10 +151,15 @@ export class FoundryCore {
     }
     // Same state directory as the shared process's daemon.json, in both modes.
     clientConfig.journalHistoryDir = path.join(defaultStateDir(), 'journal-history');
-    if (config.headlessGm.username) {
+    // Shared account: the page reuses the connector's own session, so the
+    // connector's user id already covers it. Separate account: its changes
+    // are the connector's own too.
+    this.sharedAccount = isSharedAccount(config.headlessGm.username, config.foundry.username);
+    if (!this.sharedAccount && config.headlessGm.username) {
       clientConfig.connectorUsernames = [config.headlessGm.username];
     }
     this.foundryClient = new FoundryClient(clientConfig);
+    this.foundryClient.onSessionChanged(() => this.warnIfGamemaster());
     // A detected journal overwrite is whispered to the GMs. The whisper is a
     // write, so it waits its turn in the write queue like any tool write.
     this.foundryClient.onJournalConflict = (conflict) => {
@@ -149,15 +194,29 @@ export class FoundryCore {
     // no human has to manually open and log into a second Foundry tab.
     // Only worth building when there's a bridge for it to connect to, and
     // only possible with username/password credentials (an apiKey-only
-    // setup has nothing to log a browser in with).
-    const headlessUsername = config.headlessGm.username ?? config.foundry.username;
-    const headlessPassword = config.headlessGm.password ?? config.foundry.password;
+    // setup has nothing to log a browser in with). By default it shares the
+    // connector's session; FOUNDRY_HEADLESS_GM_USERNAME naming another
+    // account gives it a login of its own.
+    const socketUser = config.foundry.username ?? config.foundry.userId;
+    const headlessUsername = this.sharedAccount ? socketUser : config.headlessGm.username;
+    const headlessPassword = this.sharedAccount
+      ? config.foundry.password
+      : (config.headlessGm.password ?? config.foundry.password);
     if (this.moduleBridge && config.headlessGm.enabled && headlessUsername && headlessPassword) {
       const bridge = this.moduleBridge;
+      const client = this.foundryClient;
       this.headlessGmSession = new HeadlessGmSession({
         foundryUrl: config.foundry.url,
         username: headlessUsername,
-        password: headlessPassword,
+        ...(this.sharedAccount
+          ? {
+              sessionSource: {
+                currentSession: () => client.currentSession(),
+                onSessionChanged: (listener) => client.onSessionChanged(listener),
+                reauthenticate: (reason) => client.reauthenticate(reason),
+              },
+            }
+          : { password: headlessPassword }),
         isBridgeConnected: () => this.moduleBridge?.isConnected() ?? false,
         // The module authenticates through the page; the secret stays in the bridge.
         bridgeCredentials: {
@@ -198,9 +257,21 @@ export class FoundryCore {
    */
   async start(): Promise<void> {
     try {
-      // Connect to FoundryVTT
-      await this.foundryClient.connect();
-      logger.info('Connected to FoundryVTT successfully');
+      // Connect to FoundryVTT. With no world launched yet, keep starting:
+      // the client reconnects in the background once one is, and the
+      // headless page waits for its session meanwhile.
+      try {
+        await this.foundryClient.connect();
+        logger.info('Connected to FoundryVTT successfully');
+      } catch (error) {
+        if (!(error instanceof NoActiveWorldError)) {
+          throw error;
+        }
+        logger.warn(
+          `Could not connect to FoundryVTT yet: ${error.message} Retrying in the background.`,
+        );
+        this.foundryClient.startReconnecting(error);
+      }
 
       // The module bridge is optional, best-effort infrastructure for a
       // handful of canvas-only tools (capture_scene, etc.) — a failure here
@@ -283,6 +354,7 @@ export class FoundryCore {
     logger.info('Executing tool', { name, args: redactToolArgs(args) });
 
     try {
+      await this.waitForReconnection(name);
       return (await routeToolRequest(
         name,
         args,
@@ -316,11 +388,41 @@ export class FoundryCore {
     }
   }
 
+  /**
+   * A call made while the connection is being restored waits for it (a write
+   * keeps its place in the write queue meanwhile), then is refused with the
+   * reason if it is still down: reads would answer from a cache nobody keeps
+   * live, and nothing may be sent on an anonymous socket.
+   */
+  private async waitForReconnection(name: string): Promise<void> {
+    if (NO_RECONNECT_WAIT_TOOLS.has(name) || !this.foundryClient.isReconnecting()) {
+      return;
+    }
+    if (await this.foundryClient.waitUntilConnected(TOOL_RECONNECT_WAIT_MS)) {
+      return;
+    }
+    const { state, error } = this.foundryClient.connectionStatus();
+    throw refusalError(
+      ErrorCode.InvalidRequest,
+      `Reconnecting to FoundryVTT… (${state}${error ? `: ${error}` : ''}). ` +
+        'The connector retries on its own; try again in a moment.',
+    );
+  }
+
+  /** Logs {@link gamemasterAccountWarning} after each authentication. */
+  private warnIfGamemaster(): void {
+    const warning = gamemasterAccountWarning(this.sharedAccount, this.foundryClient.accountInfo());
+    if (warning) {
+      logger.warn(warning);
+    }
+  }
+
   private healthRuntime(): HealthRuntime {
     return {
       ...(this.options.relays ? { relays: this.options.relays() } : {}),
       ...(this.headlessLaunchError ? { headlessLaunchError: this.headlessLaunchError } : {}),
       bridgeState: this.bridgeState(),
+      sharedAccount: this.headlessGmSession?.mode() === 'shared',
       ...(this.bridgeError ? { bridgeError: this.bridgeError } : {}),
     };
   }
@@ -372,8 +474,17 @@ export class FoundryCore {
   status(): CoreStatus {
     const bridgeState = this.bridgeState();
     const headlessGmState = this.headlessGmState();
+    const account = this.foundryClient.accountInfo();
     return {
       foundryConnected: this.foundryClient.isConnected(),
+      foundryConnection: this.foundryClient.connectionStatus(),
+      account: account
+        ? {
+            name: account.name,
+            role: account.role === null ? null : roleLabel(account.role),
+            warning: gamemasterAccountWarning(this.sharedAccount, account),
+          }
+        : null,
       bridge: {
         // Kept for `status` commands older than `state`: true only while listening.
         enabled: bridgeState === 'listening',
@@ -391,6 +502,9 @@ export class FoundryCore {
         status: this.headlessGmSession?.statusText() ?? null,
         launchError: this.headlessLaunchError,
         state: headlessGmState,
+        mode: this.headlessGmSession?.mode() ?? null,
+        modeText: this.headlessGmSession?.modeText() ?? null,
+        sessionState: this.headlessGmSession?.sessionState() ?? null,
       },
       writeQueue: this.writeQueue.pending,
     };

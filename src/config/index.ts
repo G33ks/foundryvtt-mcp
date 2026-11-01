@@ -77,13 +77,16 @@ const ConfigSchema = z.object({
   }),
 
   /**
-   * Invisible, auto-logging-in GM/Assistant-GM browser session that hosts
-   * the module bridge without a human needing to manually open and log
-   * into a second Foundry browser tab. Only launched when `moduleBridge` is
-   * also enabled — it exists purely to give the companion module somewhere
-   * GM-tier to run. Defaults to `foundry.username`/`foundry.password`
-   * (the same account `FoundryClient`'s Socket.IO connection already uses)
-   * when not explicitly overridden.
+   * Invisible GM/Assistant-GM browser session that hosts the module bridge
+   * without a human needing to manually open and log into a second Foundry
+   * browser tab. Only launched when `moduleBridge` is also enabled — it
+   * exists purely to give the companion module somewhere GM-tier to run.
+   *
+   * By default (no `username`, or the same one as `foundry.username`) the
+   * page shares `FoundryClient`'s own session: one account, one cookie, no
+   * `/join` of its own. A different `username` (with its `password`, which
+   * falls back to `foundry.password`) is the advanced two-account mode: the
+   * page logs that account in through the `/join` form.
    */
   headlessGm: z.object({
     enabled: z.boolean().default(true),

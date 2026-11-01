@@ -81,7 +81,14 @@ export function formatStatus(status: DaemonStatus): string[] {
   if (status.writeQueue !== undefined) {
     lines.push(`  Write queue:    ${status.writeQueue} pending`);
   }
-  lines.push(`  FoundryVTT:     ${status.foundryConnected ? 'connected' : 'not connected'}`);
+  lines.push(`  FoundryVTT:     ${formatFoundryConnection(status)}`);
+  if (status.account) {
+    const role = status.account.role ? ` (${status.account.role})` : '';
+    lines.push(`  Account:        ${status.account.name}${role}`);
+    if (status.account.warning) {
+      lines.push(`  Warning:        ${status.account.warning}`);
+    }
+  }
   if (status.startupError) {
     lines.push(`  Startup error:  ${status.startupError}`);
   }
@@ -97,6 +104,18 @@ export function formatStatus(status: DaemonStatus): string[] {
   lines.push(`  Headless GM:    ${formatHeadlessGm(headlessGm, bridgeState, notStarted)}`);
   lines.push(`  Endpoint:       ${status.endpoint}`, `  Log:            ${status.logFile}`);
   return lines;
+}
+
+function formatFoundryConnection(status: DaemonStatus): string {
+  if (status.foundryConnected) {
+    return 'connected';
+  }
+  const connection = status.foundryConnection;
+  // A shared process older than `foundryConnection`, or one never connected.
+  if (!connection || connection.state === 'disconnected') {
+    return connection?.error ? `not connected — ${connection.error}` : 'not connected';
+  }
+  return `not connected (${connection.state}${connection.error ? ` — ${connection.error}` : ''})`;
 }
 
 function formatBridge(
@@ -141,6 +160,10 @@ function formatHeadlessGm(
     return bridgeState === 'failed'
       ? 'not started (the module bridge failed to start)'
       : notStarted;
+  }
+  if (headlessGm.modeText && headlessGm.sessionState) {
+    const state = headlessGm.active ? 'logged in' : headlessGm.sessionState;
+    return `${state} — ${headlessGm.modeText}`;
   }
   return `${headlessGm.active ? 'logged in' : 'not logged in'} (${headlessGm.status})`;
 }
