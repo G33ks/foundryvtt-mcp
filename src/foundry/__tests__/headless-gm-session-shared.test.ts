@@ -301,6 +301,44 @@ describe('HeadlessGmSession shared mode', () => {
     await session.stop();
   });
 
+  it('retries /game with the same cookie when FoundryVTT cannot be reached', async () => {
+    const env = fakeEnvironment();
+    launchMock.mockResolvedValue(env.browser);
+    const src = fakeSource('cookie-1');
+    const session = new HeadlessGmSession({
+      foundryUrl: FOUNDRY_URL,
+      username: 'mcp-api',
+      sessionSource: src.source,
+    });
+    await session.start();
+    await settle();
+    expect(session.isActive()).toBe(true);
+
+    vi.useFakeTimers();
+    const offline = new Error(
+      'page.goto: net::ERR_INTERNET_DISCONNECTED at https://foundry.example:30000/game\nCall log:\n  - navigating',
+    );
+    env.page.goto.mockRejectedValueOnce(offline).mockRejectedValueOnce(offline);
+    // The page's own client gives up reconnecting and heads for /no.
+    await env.pageNavigates('/no');
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(session.sessionState()).toBe('reconnecting');
+    expect(session.statusText()).toBe(
+      "⏳ Cannot reach FoundryVTT, retrying — sharing the connector's session (mcp-api) (page.goto: net::ERR_INTERNET_DISCONNECTED at https://foundry.example:30000/game)",
+    );
+    expect(src.source.reauthenticate).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(5000); // second failure, next wait 10 s
+    expect(gotoPaths(env.page)).toEqual(['/game', '/game', '/game']);
+    await vi.advanceTimersByTimeAsync(10000); // back online
+    expect(gotoPaths(env.page)).toHaveLength(4);
+    expect(session.isActive()).toBe(true);
+    expect(src.source.reauthenticate).not.toHaveBeenCalled();
+    expect(env.context.addCookies).toHaveBeenCalledTimes(1);
+    await session.stop();
+  });
+
   it('blocks a navigation to /join and reloads /game instead, without reauthenticating', async () => {
     const { session, env, src } = await startShared('cookie-1');
 

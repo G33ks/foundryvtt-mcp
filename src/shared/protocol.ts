@@ -144,7 +144,13 @@ export const DaemonStatusSchema = z.object({
       mode: z.enum(['shared', 'separate']).nullable().optional(),
       modeText: z.string().nullable().optional(),
       sessionState: z
-        .enum(['waiting-for-session', 'logging-in', 'logged-in', 'reauthenticating'])
+        .enum([
+          'waiting-for-session',
+          'logging-in',
+          'logged-in',
+          'reauthenticating',
+          'reconnecting',
+        ])
         .nullable()
         .optional(),
     })

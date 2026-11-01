@@ -70,6 +70,11 @@ function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** First line of an error: Playwright appends a multi-line call log. */
+function firstLine(text: string): string {
+  return text.split('\n')[0]?.trim() ?? text;
+}
+
 /**
  * Chromium features that stop the companion module from reaching
  * {@link ModuleBridge}. The page is served from `FOUNDRY_URL` (often a public
@@ -173,13 +178,15 @@ export interface SessionSource {
 /**
  * Where a session stands. Shared mode: `waiting-for-session` (no cookie
  * yet), `logged-in`, `reauthenticating` (the cookie was refused; a new one
- * was asked for). Separate account: `logging-in` or `logged-in`.
+ * was asked for), `reconnecting` (FoundryVTT could not be reached; the page
+ * retries with the same cookie). Separate account: `logging-in` or `logged-in`.
  */
 export type HeadlessSessionState =
   | 'waiting-for-session'
   | 'logging-in'
   | 'logged-in'
-  | 'reauthenticating';
+  | 'reauthenticating'
+  | 'reconnecting';
 
 export interface HeadlessGmSessionOptions {
   foundryUrl: string;
@@ -389,6 +396,9 @@ export class HeadlessGmSession {
     if (state === 'reauthenticating') {
       return `⏳ Reauthenticating — ${mode}${this.lastError ? ` (${this.lastError})` : ''}`;
     }
+    if (state === 'reconnecting') {
+      return `⏳ Cannot reach FoundryVTT, retrying — ${mode}${this.lastError ? ` (${this.lastError})` : ''}`;
+    }
     return this.lastError
       ? `⏳ Not connected yet — ${mode} — ${this.lastError}`
       : `⏳ Logging in — ${mode}`;
@@ -431,6 +441,8 @@ export class HeadlessGmSession {
   /** Shared mode: installs a new session cookie, then (re)loads `/game`. */
   private useSession(session: string): void {
     this.reauthRequested = false;
+    clearTimeout(this.retryTimer ?? undefined);
+    this.retryTimer = null;
     this.sessionQueued = true;
     this.enqueuePageTask(async () => {
       this.sessionQueued = false;
@@ -500,12 +512,41 @@ export class HeadlessGmSession {
       this.active = true;
       this.sharedState = 'logged-in';
       this.lastError = null;
+      this.retryDelayMs = BASE_RETRY_MS;
       logger.info(`Headless GM session logged in — ${this.modeText()}`);
     } catch (error) {
-      this.onSessionRefused(errorText(error));
+      // The page could not load at all (network down, server restarting):
+      // nothing says the cookie is bad, so keep it and try again.
+      this.retryLoadGame(firstLine(errorText(error)));
     } finally {
       this.loadingGame = false;
     }
+  }
+
+  /**
+   * Shared mode: `/game` could not be loaded. Tries again with the same
+   * cookie, waiting {@link BASE_RETRY_MS} and doubling up to
+   * {@link MAX_RETRY_MS}; one warning per outage, not per attempt.
+   */
+  private retryLoadGame(reason: string): void {
+    if (this.stopped) {
+      return;
+    }
+    if (this.sharedState !== 'reconnecting') {
+      logger.warn(
+        `Headless GM session could not load /game (${reason}) — retrying with the same session`,
+      );
+    }
+    this.active = false;
+    this.sharedState = 'reconnecting';
+    this.lastError = reason;
+    clearTimeout(this.retryTimer ?? undefined);
+    const delay = this.retryDelayMs;
+    this.retryDelayMs = Math.min(this.retryDelayMs * 2, MAX_RETRY_MS);
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
+      this.enqueuePageTask(() => this.loadGame());
+    }, delay);
   }
 
   /**
