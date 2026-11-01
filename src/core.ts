@@ -19,14 +19,18 @@ import { FoundryClient, type FoundryClientConfig } from './foundry/client.js';
 import { HeadlessGmSession } from './foundry/headless-gm-session.js';
 import { ModuleBridge } from './foundry/module-bridge.js';
 import { routeResourceRequest, routeToolRequest } from './tools/index.js';
+import { isWriteTool } from './tools/write-tools.js';
 import { DiagnosticSystem } from './utils/diagnostics.js';
 import { logger } from './utils/logger.js';
+import { SerialQueue } from './utils/serial-queue.js';
 
 /** Snapshot reported by `foundryvtt-mcp status`. */
 export interface CoreStatus {
   foundryConnected: boolean;
   bridge: { enabled: boolean; port: number; moduleConnected: boolean };
   headlessGm: { enabled: boolean; active: boolean; status: string | null };
+  /** Write calls queued or running. */
+  writeQueue: number;
 }
 
 export class FoundryCore {
@@ -35,6 +39,8 @@ export class FoundryCore {
   private readonly diagnosticSystem: DiagnosticSystem;
   private moduleBridge: ModuleBridge | null;
   private headlessGmSession: HeadlessGmSession | null;
+  /** Serialises every write tool, in arrival order; reads bypass it. */
+  private readonly writeQueue = new SerialQueue();
 
   constructor() {
     // Initialize FoundryVTT client with configuration
@@ -179,8 +185,18 @@ export class FoundryCore {
     }
   }
 
-  /** Runs one tool; failures surface as {@link McpError}. */
-  async callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+  /**
+   * Runs one tool; failures surface as {@link McpError}. Write tools wait
+   * for the writes submitted before them to finish.
+   */
+  callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
+    if (isWriteTool(name)) {
+      return this.writeQueue.run(() => this.executeTool(name, args));
+    }
+    return this.executeTool(name, args);
+  }
+
+  private async executeTool(name: string, args: Record<string, unknown>): Promise<CallToolResult> {
     logger.info('Executing tool', { name, args });
 
     try {
@@ -244,6 +260,7 @@ export class FoundryCore {
         active: this.headlessGmSession?.isActive() ?? false,
         status: this.headlessGmSession?.statusText() ?? null,
       },
+      writeQueue: this.writeQueue.pending,
     };
   }
 }

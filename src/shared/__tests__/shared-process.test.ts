@@ -33,6 +33,7 @@ const STATUS: CoreStatus = {
   foundryConnected: true,
   bridge: { enabled: true, port: 31415, moduleConnected: true },
   headlessGm: { enabled: true, active: true, status: 'ok' },
+  writeQueue: 0,
 };
 
 function fakeCore(overrides: Partial<SharedCore> = {}): SharedCore {
