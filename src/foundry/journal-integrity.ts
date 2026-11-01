@@ -222,6 +222,9 @@ function escapeHtml(text: string): string {
     .replace(/"/g, '&quot;');
 }
 
+/** Speaker alias of the conflict whisper, so the chat names an author. */
+export const JOURNAL_CONFLICT_SPEAKER = 'MCP connector';
+
 /**
  * The chat message whispered to the GMs about a conflict: entry, page, who
  * saved, and where the local copy is. French or English.
@@ -234,7 +237,8 @@ export function journalConflictMessage(conflict: JournalConflict, french: boolea
       (french ? 'un éditeur ouvert (sauvegarde automatique)' : 'an open editor (autosave)'),
   );
   const copy = conflict.historyPath
-    ? `<code>${escapeHtml(conflict.historyPath)}</code>`
+    ? // Not a <code> block: a long path must wrap inside the chat card.
+      `<span style="font-family: monospace; word-break: break-all">${escapeHtml(conflict.historyPath)}</span>`
     : french
       ? 'aucune copie n’a pu être écrite'
       : 'no copy could be written';

@@ -1314,12 +1314,17 @@ describe('FoundryClient journal page editing (modifyDocument)', () => {
       expect(message?.operation.data?.[0]).toMatchObject({
         whisper: [GM_ID],
         author: CONNECTOR_ID,
+        speaker: { alias: 'MCP connector' },
       });
       const content = String(message?.operation.data?.[0]?.content);
       expect(content).toContain('journal overwrite detected');
       expect(content).toContain('Session &lt;11&gt;');
       expect(content).toContain('Alice');
-      expect(content).toContain('C:\\state\\journal-history\\x.html');
+      // The path wraps in the chat card: no <code> block, break-all on its element.
+      expect(content).toContain(
+        '<span style="font-family: monospace; word-break: break-all">C:\\state\\journal-history\\x.html</span>',
+      );
+      expect(content).not.toContain('<code>');
     });
 
     it('writes in French when the server language is French', async () => {

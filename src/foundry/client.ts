@@ -28,6 +28,7 @@ import { JournalHistory } from './journal-history.js';
 import {
   conflictAuthor,
   type ForeignChange,
+  JOURNAL_CONFLICT_SPEAKER,
   type JournalConflict,
   JournalWatch,
   journalConflictMessage,
@@ -3096,6 +3097,7 @@ export class FoundryClient {
     const language = typeof options.language === 'string' ? options.language : '';
     await this.sendChatMessage(journalConflictMessage(conflict, language.startsWith('fr')), {
       whisperTo: gms,
+      speaker: JOURNAL_CONFLICT_SPEAKER,
     });
     return gms;
   }
