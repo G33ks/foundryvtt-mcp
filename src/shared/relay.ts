@@ -66,7 +66,10 @@ export async function runRelay(entry: string): Promise<void> {
     callTool: async (name, args) => {
       const result = CallToolResultSchema.parse(await link.call('tool', name, args));
       const text = notice.take();
-      return text ? { ...result, content: [...result.content, { type: 'text', text }] } : result;
+      // Some clients join text blocks without a separator: start on its own paragraph.
+      return text
+        ? { ...result, content: [...result.content, { type: 'text', text: `\n\n${text}` }] }
+        : result;
     },
     readResource: async (uri) => ReadResourceResultSchema.parse(await link.call('resource', uri)),
   });
