@@ -100,20 +100,13 @@ In FoundryVTT:
 
 ### 3. Install the Companion Module (Recommended)
 
-Copy the `foundry-module` folder from this repo to your FoundryVTT `Data/modules/` directory:
+In Foundry's **Setup** screen, open **Add-on Modules** → **Install Module** and paste this manifest URL into the **Manifest URL** field:
 
-```bash
-# Windows
-cp -r foundry-module "%LOCALAPPDATA%/FoundryVTT/Data/modules/foundryvtt-mcp-bridge"
-
-# macOS
-cp -r foundry-module "~/Library/Application Support/FoundryVTT/Data/modules/foundryvtt-mcp-bridge"
-
-# Linux
-cp -r foundry-module "~/.local/share/FoundryVTT/Data/modules/foundryvtt-mcp-bridge"
+```
+https://raw.githubusercontent.com/G33ks/foundryvtt-mcp/main/foundry-module/module.json
 ```
 
-In FoundryVTT, go to **Manage Modules** and enable **FoundryVTT MCP Bridge**.
+Then launch your world, open **Manage Modules** and enable **FoundryVTT MCP Bridge**. Later releases are offered by **Check for Updates** on the same screen. Copying the module folder by hand still works; see [SETUP_GUIDE.md](SETUP_GUIDE.md#manual-installation-advanced).
 
 ---
 

@@ -1,6 +1,6 @@
 # FoundryVTT MCP Bridge (Companion Module)
 
-This is the companion FoundryVTT module for the [FoundryVTT MCP Server](https://github.com/RN0000/foundryvtt-mcp).
+This is the companion FoundryVTT module for the [FoundryVTT MCP Server](https://github.com/G33ks/foundryvtt-mcp).
 
 While the MCP server handles game-state reads and document mutations over Socket.IO, some features require access to the live browser runtime, PIXI canvas, or Foundry's internal JavaScript APIs:
 
@@ -18,22 +18,42 @@ This module only activates its bridge connection for a **GM or Assistant-GM** us
 
 ## 📦 Installation in FoundryVTT
 
-1. Copy the `foundry-module` directory into your FoundryVTT `Data/modules/` folder:
+Requires FoundryVTT 13 or later (verified on 14).
 
-   ```bash
-   # Windows
-   cp -r foundry-module "%LOCALAPPDATA%/FoundryVTT/Data/modules/foundryvtt-mcp-bridge"
+1. In the **Setup** screen, open **Add-on Modules** → **Install Module**.
+2. Paste the manifest URL into the **Manifest URL** field and click **Install**:
 
-   # macOS
-   cp -r foundry-module "~/Library/Application Support/FoundryVTT/Data/modules/foundryvtt-mcp-bridge"
-
-   # Linux
-   cp -r foundry-module "~/.local/share/FoundryVTT/Data/modules/foundryvtt-mcp-bridge"
+   ```
+   https://raw.githubusercontent.com/G33ks/foundryvtt-mcp/main/foundry-module/module.json
    ```
 
-2. Launch your FoundryVTT world.
-3. Open **Game Settings** → **Manage Modules**.
-4. Enable **FoundryVTT MCP Bridge**.
+3. Launch your FoundryVTT world.
+4. Open **Game Settings** → **Manage Modules** and enable **FoundryVTT MCP Bridge**.
+
+This manifest URL always describes the latest release; each release on GitHub (tag `bridge-vX.Y.Z`) also attaches its own `module.json` for installing that exact version.
+
+### Updating
+
+In the **Setup** screen, **Add-on Modules** → **Check for Updates** compares the installed version with the manifest URL and installs the newer release. Reload the world afterwards.
+
+**A final release never replaces its own pre-release through Check for Updates.** Foundry compares versions part by part and ranks `0.5.1-rc.1` above `0.5.1`, so a world running `0.5.1-rc.1` reports the module as current when `0.5.1` is out. Use **Install Module** with the manifest URL above instead: installing by URL replaces the installed version whatever it is, and the world keeps the module enabled.
+
+### Manual installation (advanced)
+
+Copying this directory into FoundryVTT's `Data/modules/` folder, under the module id, still works — but Foundry can then neither check for updates nor reinstall the module, since the repository copy only gains a usable manifest through a release:
+
+```bash
+# Windows
+cp -r foundry-module "%LOCALAPPDATA%/FoundryVTT/Data/modules/foundryvtt-mcp-bridge"
+
+# macOS
+cp -r foundry-module "~/Library/Application Support/FoundryVTT/Data/modules/foundryvtt-mcp-bridge"
+
+# Linux
+cp -r foundry-module "~/.local/share/FoundryVTT/Data/modules/foundryvtt-mcp-bridge"
+```
+
+To move from a manual copy to a release, move the copied folder out of `Data/modules` with the world shut down, then install by manifest URL.
 
 ---
 
@@ -52,3 +72,24 @@ In FoundryVTT under **Configure Settings** → **Module Settings** → **Foundry
 - **Mutual authentication (protocol v1, module 0.5.0+)**: the server only accepts the WebSocket from a page whose `Origin` is the Foundry URL, then sends a random challenge. The module answers with an HMAC-SHA256 proof computed by `window.foundryMcpBridge.prove()`, and executes no command and sends no event until the server's `auth_ok` carries the proof `prove()` predicted. The HMAC secret is random per server run and never leaves the server process: the page only ever sees nonces and proofs. On any mismatch the module closes the socket and retries with its usual reconnect backoff.
 - Modules older than 0.5.0 are refused by current servers (they never answer the challenge; the server logs `likely an outdated foundryvtt-mcp-bridge module (< 0.5.0), redeploy it`). There is no compatibility mode.
 - Commands are scoped to safe, pre-defined handlers (`capture-scene`, `roll-and-post`, `search-compendium-content`, `get-compendium-document`, `get-schema`, `set-target`, `get-targets`, `ping-canvas`, `set-pause`, `upload-asset`). No arbitrary `eval` is permitted.
+
+---
+
+## 🚀 Releasing (maintainers)
+
+The module is released on its own tags, `bridge-vX.Y.Z`, independent of the server's `foundryvtt-mcp-vX.Y.Z` releases:
+
+1. Bump `version` in `module.json` and set `download` to `https://github.com/G33ks/foundryvtt-mcp/releases/download/bridge-vX.Y.Z/foundryvtt-mcp-bridge.zip`. Keep `manifest` on the stable URL above; never point anything at `releases/latest`.
+2. Optionally test a pre-release first: tag `bridge-vX.Y.Z-rc.N` and install it with the `module.json` attached to its release.
+3. Merge to `main`, then tag `bridge-vX.Y.Z` on `main` and push the tag.
+
+`.github/workflows/bridge-release.yml` then runs `scripts/package-bridge.js`. It checks that the tag's base version (without `-rc.N`) equals `module.json`'s version, and for a final tag that the committed `download` points at that tag. It writes the release `module.json` (exact tag version, that tag's `download`), builds `foundryvtt-mcp-bridge.zip` (`module.json` at the root, `scripts/`, `README.md`, `LICENSE`) and creates the GitHub release, as a pre-release when the tag contains `-`.
+
+If the workflow cannot run, build the same attachments locally and create the release with `gh` (or attach both files by hand in GitHub's release form):
+
+```bash
+npm run bridge:package -- --tag bridge-vX.Y.Z-rc.N
+gh release create bridge-vX.Y.Z-rc.N build/bridge-release/module.json build/bridge-release/foundryvtt-mcp-bridge.zip --repo G33ks/foundryvtt-mcp --verify-tag --latest=false --prerelease --title "FoundryVTT MCP Bridge X.Y.Z-rc.N"
+```
+
+Drop `--prerelease` for a final tag.

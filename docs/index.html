@@ -89,8 +89,7 @@ FOUNDRY_PASSWORD=your_password
 <h3 id="optional-diagnostics-tools" class="tsd-anchor-link">Optional: Diagnostics Tools<a href="#optional-diagnostics-tools" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <p>Installing the <strong>Foundry Local REST API</strong> module adds 5 server monitoring tools (<code>get_recent_logs</code>, <code>search_logs</code>, <code>get_system_health</code>, <code>diagnose_errors</code>, <code>get_health_status</code>):</p>
 <ol>
-<li>In FoundryVTT: <strong>Setup</strong> &gt; <strong>Add-on Modules</strong> &gt; <strong>Install Module</strong></li>
-<li>Paste: <code>https://github.com/laurigates/foundryvtt-mcp/releases/latest/download/module.json</code></li>
+<li>Install the Foundry Local REST API module in FoundryVTT (<strong>Setup</strong> &gt; <strong>Add-on Modules</strong> &gt; <strong>Install Module</strong>). It is a separate project, not distributed by this repository: the upstream <code>releases/latest</code> manifest URL formerly given here no longer serves it. This is not the companion module <strong>FoundryVTT MCP Bridge</strong>, whose installation is in the Setup Guide.</li>
 <li>Enable the module in your world and copy the generated API key</li>
 <li>Add to <code>.env</code>:<pre><code class="env">FOUNDRY_API_KEY=your_api_key_here
 </code><button type="button">Copy</button></pre>

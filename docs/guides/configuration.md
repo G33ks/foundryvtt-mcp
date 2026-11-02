@@ -79,10 +79,9 @@ Your FoundryVTT user needs:
 
 Installing the **Foundry Local REST API** module adds 5 server monitoring tools (`get_recent_logs`, `search_logs`, `get_system_health`, `diagnose_errors`, `get_health_status`):
 
-1. In FoundryVTT: **Setup** > **Add-on Modules** > **Install Module**
-2. Paste: `https://github.com/laurigates/foundryvtt-mcp/releases/latest/download/module.json`
-3. Enable the module in your world and copy the generated API key
-4. Add to `.env`:
+1. Install the Foundry Local REST API module in FoundryVTT (**Setup** > **Add-on Modules** > **Install Module**). It is a separate project, not distributed by this repository: the upstream `releases/latest` manifest URL formerly given here no longer serves it. This is not the companion module **FoundryVTT MCP Bridge**, whose installation is in the [Setup Guide](../../SETUP_GUIDE.md#3-install-companion-module-foundryvtt-mcp-bridge).
+2. Enable the module in your world and copy the generated API key
+3. Add to `.env`:
    ```env
    FOUNDRY_API_KEY=your_api_key_here
    ```
