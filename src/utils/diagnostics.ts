@@ -10,6 +10,8 @@ import { ApiStatusResponseSchema } from '../diagnostics/types.js';
 import type { FoundryClient } from '../foundry/client.js';
 import { logger } from './logger.js';
 
+const REPO_URL = 'https://github.com/G33ks/foundryvtt-mcp';
+
 /**
  * Diagnostic result containing problem analysis and suggestions
  */
@@ -197,13 +199,14 @@ export class DiagnosticSystem {
       output += '💡 **Unlock Full Features**:\n';
       output += '  → Install the "Foundry Local REST API" module in FoundryVTT\n';
       output += '  → Enable the module and configure API key\n';
-      output += '  → See setup guide: https://github.com/laurigates/foundryvtt-mcp#setup\n\n';
+      output += `  → See setup guide: ${REPO_URL}/blob/main/docs/guides/configuration.md#optional-diagnostics-tools\n\n`;
     }
 
     if (report.connectivity.status === 'offline') {
       output += '🔧 **Troubleshooting Steps**:\n';
       output += '  1. Ensure FoundryVTT is running and accessible\n';
-      output += '  2. Check FOUNDRY_URL in your .env file\n';
+      output +=
+        '  2. Check FOUNDRY_URL in the configuration file (`foundryvtt-mcp status` shows it)\n';
       output += '  3. Verify network connectivity\n';
       output += '  4. Check the configuration with: `foundryvtt-mcp init --check`\n';
     }
@@ -224,8 +227,7 @@ export class DiagnosticSystem {
         '• **Check firewall** - Ensure no firewall is blocking the connection',
       severity: 'critical',
       canContinue: false,
-      documentationUrl:
-        'https://github.com/laurigates/foundryvtt-mcp/blob/main/TROUBLESHOOTING.md#connectivity-issues',
+      documentationUrl: `${REPO_URL}/blob/main/TROUBLESHOOTING.md#connection-issues`,
     };
   }
 
@@ -239,12 +241,11 @@ export class DiagnosticSystem {
         '• **Install REST API module** - Get it from the FoundryVTT module browser\n' +
         "• **Enable the module** - Activate it in your world's module settings\n" +
         '• **Configure API key** - Generate and copy the API key from module settings\n' +
-        '• **Update .env file** - Set FOUNDRY_API_KEY with your generated key\n' +
-        '• **Restart MCP server** - Restart to pick up the new configuration',
+        '• **Set the key** - Set FOUNDRY_API_KEY in the configuration file\n' +
+        '• **Restart the connector** - Run `foundryvtt-mcp stop`; the next call uses the new configuration',
       severity: 'warning',
       canContinue: true,
-      documentationUrl:
-        'https://github.com/laurigates/foundryvtt-mcp/blob/main/SETUP_GUIDE.md#rest-api-setup',
+      documentationUrl: `${REPO_URL}/blob/main/docs/guides/configuration.md#optional-diagnostics-tools`,
     };
   }
 
@@ -270,8 +271,7 @@ export class DiagnosticSystem {
           '• **User status** - Make sure the user account is active',
       severity: 'error',
       canContinue: false,
-      documentationUrl:
-        'https://github.com/laurigates/foundryvtt-mcp/blob/main/TROUBLESHOOTING.md#authentication-issues',
+      documentationUrl: `${REPO_URL}/blob/main/TROUBLESHOOTING.md#authentication-issues`,
     };
   }
 
@@ -288,8 +288,7 @@ export class DiagnosticSystem {
         `• **Direct test** - Try accessing ${feature} directly in FoundryVTT`,
       severity: 'info',
       canContinue: true,
-      documentationUrl:
-        'https://github.com/laurigates/foundryvtt-mcp/blob/main/TROUBLESHOOTING.md#empty-results',
+      documentationUrl: `${REPO_URL}/blob/main/TROUBLESHOOTING.md#empty-search-results`,
     };
   }
 
@@ -306,7 +305,7 @@ export class DiagnosticSystem {
         '• **Report issue** - If problem persists, report it on GitHub',
       severity: 'error',
       canContinue: false,
-      documentationUrl: 'https://github.com/laurigates/foundryvtt-mcp/issues',
+      documentationUrl: `${REPO_URL}/issues`,
     };
   }
 
