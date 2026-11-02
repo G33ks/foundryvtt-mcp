@@ -51,7 +51,7 @@ Launch your world and log in as its Gamemaster.
 
 **Create the user:**
 1. Open **Game Settings** → **User Management**.
-2. Click **Create User**.
+2. Click **Create Additional User**.
 3. Set the user name (e.g. `mcp-api`) and a long password used nowhere else.
 4. Set the role to **Assistant GM**.
 5. Save.

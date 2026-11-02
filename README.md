@@ -110,7 +110,7 @@ Updates and the manual copy: see [SETUP_GUIDE.md](SETUP_GUIDE.md#2-install-compa
 
 Launch your world and log in as its Gamemaster.
 
-1. **Create a dedicated user**: **Game Settings** → **User Management** → **Create User**. Name it `mcp-api` (or any name), give it a **long password used nowhere else**, set its role to **Assistant GM**, then save.
+1. **Create a dedicated user**: **Game Settings** → **User Management** → **Create Additional User**. Name it `mcp-api` (or any name), give it a **long password used nowhere else**, set its role to **Assistant GM**, then save.
 2. **Enable the module**: **Game Settings** → **Manage Modules**, check **FoundryVTT MCP Bridge**, then click **Save Module Settings**. The world reloads; log in again if Foundry asks.
 
 This one account is all the server needs. Prefer **Assistant GM** to **Gamemaster**: as a Gamemaster, the server's invisible session could take the *active GM* role from you — see [SETUP_GUIDE.md](SETUP_GUIDE.md#3-in-the-world-create-a-dedicated-user-and-enable-the-module).
