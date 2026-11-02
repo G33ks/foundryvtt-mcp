@@ -91,20 +91,9 @@ Seven steps, in this order. [SETUP_GUIDE.md](SETUP_GUIDE.md) gives the details o
 - **A Chromium-based browser** on this computer: Google Chrome, Microsoft Edge, Brave, Vivaldi or Chromium. The server finds it by itself; you will never see it open.
 - **Claude desktop** or **Claude Code**.
 
-### 2. Create a dedicated user in Foundry
+### 2. Install the companion module
 
-Launch your world and log in as its Gamemaster, then:
-
-1. Open **Game Settings** → **User Management**.
-2. Click **Create User**.
-3. Name it `mcp-api` (or any name) and give it a **long password used nowhere else**.
-4. Set its role to **Assistant GM**, then save.
-
-This one account is all the server needs. Prefer **Assistant GM** to **Gamemaster**: as a Gamemaster, the server's invisible session could take the *active GM* role from you — see [SETUP_GUIDE.md](SETUP_GUIDE.md#2-set-up-a-dedicated-foundry-user).
-
-### 3. Install the companion module, then enable it
-
-The module is installed from Foundry's **Setup** screen (in the world: **Game Settings** → **Return to Setup**).
+On Foundry's **Setup** screen (the one listing your worlds; from a running world, **Game Settings** → **Return to Setup**):
 
 1. Open **Add-on Modules** → **Install Module**.
 2. Paste this URL into the **Manifest URL** field at the bottom, then click **Install**:
@@ -113,9 +102,16 @@ The module is installed from Foundry's **Setup** screen (in the world: **Game Se
    https://raw.githubusercontent.com/G33ks/foundryvtt-mcp/main/foundry-module/module.json
    ```
 
-3. Launch your world again, log in as its Gamemaster, open **Game Settings** → **Manage Modules**, check **FoundryVTT MCP Bridge** and click **Save Module Settings**.
+Updates and the manual copy: see [SETUP_GUIDE.md](SETUP_GUIDE.md#2-install-companion-module-foundryvtt-mcp-bridge).
 
-Updates and the manual copy: see [SETUP_GUIDE.md](SETUP_GUIDE.md#3-install-companion-module-foundryvtt-mcp-bridge).
+### 3. In the world: create the user, then enable the module
+
+Launch your world and log in as its Gamemaster.
+
+1. **Create a dedicated user**: **Game Settings** → **User Management** → **Create User**. Name it `mcp-api` (or any name), give it a **long password used nowhere else**, set its role to **Assistant GM**, then save.
+2. **Enable the module**: **Game Settings** → **Manage Modules**, check **FoundryVTT MCP Bridge**, then click **Save Module Settings**. The world reloads; log in again if Foundry asks.
+
+This one account is all the server needs. Prefer **Assistant GM** to **Gamemaster**: as a Gamemaster, the server's invisible session could take the *active GM* role from you — see [SETUP_GUIDE.md](SETUP_GUIDE.md#3-in-the-world-create-a-dedicated-user-and-enable-the-module).
 
 ### 4. Download and build the server
 
@@ -136,7 +132,7 @@ Keep this terminal open in the `foundryvtt-mcp` folder for the next steps.
 node dist/index.js init
 ```
 
-It asks for Foundry's address, the account from step 2 and whether the assistant may change the game (no by default), checking each answer against your Foundry: world running, account role, module enabled, browser. Then it writes the [configuration file](#configuration-file), the only place your settings live, and prints what to give your AI client. Details: [SETUP_GUIDE.md](SETUP_GUIDE.md#5-run-init).
+It asks for Foundry's address, the account from step 3 and whether the assistant may change the game (no by default), checking each answer against your Foundry: world running, account role, module enabled, browser. Then it writes the [configuration file](#configuration-file), the only place your settings live, and prints what to give your AI client. Details: [SETUP_GUIDE.md](SETUP_GUIDE.md#5-run-init).
 
 ### 6. Add the server to Claude
 

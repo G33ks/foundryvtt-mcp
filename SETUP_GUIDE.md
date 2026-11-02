@@ -13,18 +13,8 @@ This guide walks you through setting up and configuring the FoundryVTT Model Con
 - An MCP client: Claude desktop or Claude Code (others such as Oh My Pi, VS Code or Cursor work the same way).
 - **A Chromium-based browser installed** on the computer that runs the server, for the automatic headless GM browser session (step 4): Google Chrome, Microsoft Edge, Brave, Vivaldi and Chromium are detected automatically. Another Chromium-based browser, or one installed elsewhere, can be named in the configuration (see step 4).
 
-### 2. Set Up a Dedicated Foundry User
-In FoundryVTT, with the world launched and logged in as its Gamemaster:
-1. Open **Game Settings** → **User Management**.
-2. Click **Create User**.
-3. Set the user name (e.g. `mcp-api`) and a long password used nowhere else.
-4. Set the role to **Assistant GM**.
-5. Save.
-
-This one account is all the server needs: its Socket.IO connection and its invisible browser session (step 4) share the same login. Prefer **Assistant GM** to **Gamemaster**: the invisible session is a real Foundry client, and as a Gamemaster it could become the *active GM* in place of your own Gamemaster login (equal roles go to the smaller user id) and run the game system's automations — `status` and `get_health_status` warn about it. As an Assistant GM the server cannot grant the Gamemaster role or change `core.permissions` (it refuses both with a clear message); do those yourself as a Gamemaster.
-
-### 3. Install Companion Module (FoundryVTT MCP Bridge)
-Install it from Foundry's **Setup** screen (FoundryVTT 13 or later). From a running world, **Game Settings** → **Return to Setup** gets there.
+### 2. Install Companion Module (FoundryVTT MCP Bridge)
+Install it from Foundry's **Setup** screen (FoundryVTT 13 or later), the one listing your worlds. From a running world, **Game Settings** → **Return to Setup** gets there.
 
 1. Open **Add-on Modules** → **Install Module**.
 2. Paste the manifest URL into the **Manifest URL** field at the bottom and click **Install**:
@@ -33,7 +23,7 @@ Install it from Foundry's **Setup** screen (FoundryVTT 13 or later). From a runn
    https://raw.githubusercontent.com/G33ks/foundryvtt-mcp/main/foundry-module/module.json
    ```
 
-3. Launch your world, log in as its Gamemaster, open **Game Settings** → **Manage Modules**, check **FoundryVTT MCP Bridge** and click **Save Module Settings**.
+The module is enabled in the world, at step 3.
 
 This URL always describes the latest release. Each release also attaches its own `module.json` on GitHub (tags `bridge-vX.Y.Z`), for installing one exact version.
 
@@ -56,8 +46,25 @@ cp -r foundry-module "~/.local/share/FoundryVTT/Data/modules/foundryvtt-mcp-brid
 
 To switch from a manual copy to a release, move the copied folder out of `Data/modules` (with the world shut down) and install by manifest URL as above: the module keeps the same id, so the world keeps it enabled.
 
+### 3. In the World: Create a Dedicated User and Enable the Module
+Launch your world and log in as its Gamemaster.
+
+**Create the user:**
+1. Open **Game Settings** → **User Management**.
+2. Click **Create User**.
+3. Set the user name (e.g. `mcp-api`) and a long password used nowhere else.
+4. Set the role to **Assistant GM**.
+5. Save.
+
+This one account is all the server needs: its Socket.IO connection and its invisible browser session (step 4) share the same login. Prefer **Assistant GM** to **Gamemaster**: the invisible session is a real Foundry client, and as a Gamemaster it could become the *active GM* in place of your own Gamemaster login (equal roles go to the smaller user id) and run the game system's automations — `status` and `get_health_status` warn about it. As an Assistant GM the server cannot grant the Gamemaster role or change `core.permissions` (it refuses both with a clear message); do those yourself as a Gamemaster.
+
+**Enable the module:**
+1. Open **Game Settings** → **Manage Modules**.
+2. Check **FoundryVTT MCP Bridge**.
+3. Click **Save Module Settings**. The world reloads for everyone connected; log in again if Foundry asks.
+
 ### 4. Automatic Headless GM Session (no manual browser tab needed)
-With the module installed and `FOUNDRY_MODULE_BRIDGE_ENABLED=true` (`init`, step 5, always writes it; off by default otherwise), the server automatically launches its own invisible background browser tab, opens the game in it with the session of `mcp-api` (the account from step 2 — the server logs in once and both connections share that login), and hosts the companion module there. This gives the AI full GM-tier canvas access (screenshots, dice rolls, pausing, file uploads) while a **human can log into their own visible Foundry client** — as a Player (no fog-of-war spoilers), or as the Gamemaster. Only `mcp-api` appears in Foundry's player list for the server.
+With the module installed and `FOUNDRY_MODULE_BRIDGE_ENABLED=true` (`init`, step 5, always writes it; off by default otherwise), the server automatically launches its own invisible background browser tab, opens the game in it with the session of `mcp-api` (the account from step 3 — the server logs in once and both connections share that login), and hosts the companion module there. This gives the AI full GM-tier canvas access (screenshots, dice rolls, pausing, file uploads) while a **human can log into their own visible Foundry client** — as a Player (no fog-of-war spoilers), or as the Gamemaster. Only `mcp-api` appears in Foundry's player list for the server.
 
 The tab stays on the game page: a navigation elsewhere — **Log Out**, or Foundry reloading the client after `mcp-api`'s role changes — is blocked and the tab reloads the game instead, because leaving it would log the shared session out. When Foundry forgets the session (server restart, world shut down and relaunched, sessions last 24 hours), the server logs in again by itself and hands the new session to the tab.
 
@@ -98,7 +105,7 @@ node dist/index.js init        # or `foundryvtt-mcp init` when installed as a pa
 
 1. It shows where the file is. If it exists, its values are the defaults — passwords show as `<set>`, and Enter keeps them.
 2. **Address**: it checks that the server answers with a world running (a clear message, and Enter to try again, when it is unreachable, its certificate is refused, or no world is launched).
-3. **Account**: the user from step 2 and its password (typing stays hidden). A Player or Trusted Player is refused (the module and the headless session need a GM role); a Gamemaster gets the warning above. A wrong password asks again.
+3. **Account**: the user from step 3 and its password (typing stays hidden). A Player or Trusted Player is refused (the module and the headless session need a GM role); a Gamemaster gets the warning above. A wrong password asks again.
 4. **Module**: it checks that `foundryvtt-mcp-bridge` is installed and enabled in the world, or says how to.
 5. **Browser**: it shows the browser found and starts it headless once.
 6. **Writes**: whether the assistant may change the game (`FOUNDRY_WRITE_ENABLED`; no by default).
@@ -121,7 +128,7 @@ The entry holds only the command: no `env` block, since the settings are in the 
 
 1. `node dist/index.js init --check` in the terminal, from the `foundryvtt-mcp` folder: it should end with `All checks passed.`
 2. In Claude, ask for the connector's health status (*"Show the FoundryVTT connector's health status"*). Claude calls `get_health_status`; the first call can take a few seconds while the shared process connects. Expect:
-   - **FoundryVTT Connection**: ✅ Connected, with the account from step 2 (Assistant GM);
+   - **FoundryVTT Connection**: ✅ Connected, with the account from step 3 (Assistant GM);
    - **Module Bridge**: ✅ Connected — authenticated module (protocol v1);
    - **Headless GM Session**: ✅ Logged in — sharing the connector's session, and the **Browser** line with the browser found (`detected`);
    - **Configuration**: the configuration file, and the settings coming `from file`.

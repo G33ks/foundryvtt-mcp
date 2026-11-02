@@ -41,7 +41,7 @@ The settings most setups use (`FOUNDRY_WRITE_ENABLED`, `FOUNDRY_MODULE_BRIDGE_EN
 
 ## FoundryVTT Authentication
 
-The MCP server connects to FoundryVTT via Socket.IO using a standard user account, which gives it full game data access. The companion module **FoundryVTT MCP Bridge** adds the tools that need a real Foundry page (canvas capture, native dice rolls, compendium documents, uploads); see the [Setup Guide](../../SETUP_GUIDE.md#3-install-companion-module-foundryvtt-mcp-bridge).
+The MCP server connects to FoundryVTT via Socket.IO using a standard user account, which gives it full game data access. The companion module **FoundryVTT MCP Bridge** adds the tools that need a real Foundry page (canvas capture, native dice rolls, compendium documents, uploads); see the [Setup Guide](../../SETUP_GUIDE.md#2-install-companion-module-foundryvtt-mcp-bridge).
 
 ### Setup
 
@@ -70,7 +70,7 @@ Your FoundryVTT user needs:
 
 Installing the **Foundry Local REST API** module adds server monitoring: `get_recent_logs`, `search_logs`, `get_system_health` and `diagnose_errors` need it, and `get_health_status` (which works without it) then adds the server's health:
 
-1. Install the Foundry Local REST API module in FoundryVTT (**Setup** > **Add-on Modules** > **Install Module**). It is a separate project, not distributed by this repository: the upstream `releases/latest` manifest URL formerly given here no longer serves it. This is not the companion module **FoundryVTT MCP Bridge**, whose installation is in the [Setup Guide](../../SETUP_GUIDE.md#3-install-companion-module-foundryvtt-mcp-bridge).
+1. Install the Foundry Local REST API module in FoundryVTT (**Setup** > **Add-on Modules** > **Install Module**). It is a separate project, not distributed by this repository: the upstream `releases/latest` manifest URL formerly given here no longer serves it. This is not the companion module **FoundryVTT MCP Bridge**, whose installation is in the [Setup Guide](../../SETUP_GUIDE.md#2-install-companion-module-foundryvtt-mcp-bridge).
 2. Enable the module in your world and copy the generated API key
 3. Add it to the configuration file, then run `node dist/index.js stop`:
    ```env
