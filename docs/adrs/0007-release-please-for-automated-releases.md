@@ -1,5 +1,8 @@
 # ADR-007: release-please for Automated Release Management
 
+> **Status: Superseded.** This decision belongs to the previous maintainer and no
+> longer applies to this fork. It is kept as a historical record.
+
 **Status**: Accepted
 **Date**: 2025-03-01 (commit 3146c38)
 **Confidence**: 9/10

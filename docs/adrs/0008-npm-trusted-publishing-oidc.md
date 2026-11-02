@@ -1,5 +1,8 @@
 # ADR-008: npm Trusted Publishing via OIDC
 
+> **Status: Superseded.** This decision belongs to the previous maintainer and no
+> longer applies to this fork. It is kept as a historical record.
+
 **Status**: Accepted
 **Date**: 2026-03-07 (commit cf64b93, PR #113)
 **Confidence**: 9/10

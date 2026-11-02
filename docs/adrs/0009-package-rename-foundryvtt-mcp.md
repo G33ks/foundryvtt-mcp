@@ -1,5 +1,8 @@
 # ADR-009: Package Rename to foundryvtt-mcp
 
+> **Status: Superseded.** This decision belongs to the previous maintainer and no
+> longer applies to this fork. It is kept as a historical record.
+
 **Status**: Accepted
 **Date**: 2026-03-07 (commit fdc5b60, PR #114)
 **Confidence**: 9/10
