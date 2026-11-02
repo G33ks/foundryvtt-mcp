@@ -10,6 +10,8 @@ A comprehensive, production-grade [Model Context Protocol](https://modelcontextp
 
 This server empowers AI assistants (Claude Desktop, Claude Code, Oh My Pi, VS Code, Cursor, etc.) to act as fully capable, autonomous **Co-GMs and GM assistants** inside FoundryVTT. It provides complete read and write access across game mechanics, actors, items, tokens, combat encounters, canvas placeables (walls, lights, sounds, templates, drawings, notes, tiles), playlists, macros, roll tables, compendiums, world settings, and live canvas rendering.
 
+**To install it, follow the [Quick Start](#-quick-start)** — seven steps, from Foundry to a working connector in Claude.
+
 ---
 
 ## 🧭 How it works
@@ -93,7 +95,7 @@ Seven steps, in this order. [SETUP_GUIDE.md](SETUP_GUIDE.md) gives the details o
 
 ### 2. Install the companion module
 
-On Foundry's **Setup** screen (the one listing your worlds; from a running world, **Game Settings** → **Return to Setup**):
+On Foundry's **Setup** screen (the one listing your worlds; from a running world, **Game Settings** → **Return to Setup**). Foundry may first ask for its administrator password, the one set when Foundry was installed, not a user's password:
 
 1. Open **Add-on Modules** → **Install Module**.
 2. Paste this URL into the **Manifest URL** field at the bottom, then click **Install**:
@@ -124,6 +126,8 @@ npm ci
 npm run build
 ```
 
+In Windows PowerShell, if `npm` is refused with *running scripts is disabled on this system*, type `npm.cmd` instead of `npm` (`npm.cmd ci`, `npm.cmd run build`). `npm ci` may print warnings (vulnerability counts, a blocked install script); they do not stop the install. What matters is that `npm run build` ends without an error.
+
 Keep this terminal open in the `foundryvtt-mcp` folder for the next steps.
 
 ### 5. Run `init`
@@ -132,7 +136,7 @@ Keep this terminal open in the `foundryvtt-mcp` folder for the next steps.
 node dist/index.js init
 ```
 
-It asks for Foundry's address, the account from step 3 and whether the assistant may change the game (no by default), checking each answer against your Foundry: world running, account role, module enabled, browser. Then it writes the [configuration file](#configuration-file), the only place your settings live, and prints what to give your AI client. Details: [SETUP_GUIDE.md](SETUP_GUIDE.md#5-run-init).
+It asks for Foundry's address (the URL you open Foundry with in your browser, such as `http://localhost:30000` or `https://foundry.example.com`), the account from step 3 and whether the assistant may change the game (no by default), checking each answer against your Foundry: world running, account role, module enabled, browser. Then it writes the [configuration file](#configuration-file), the only place your settings live, and prints what to give your AI client. Details: [SETUP_GUIDE.md](SETUP_GUIDE.md#5-run-init).
 
 ### 6. Add the server to Claude
 
@@ -146,7 +150,7 @@ No `env` block is needed: the settings are in the configuration file.
 ### 7. Check that it works
 
 1. In the terminal: `node dist/index.js init --check`. It should end with `All checks passed.`; a ✖ line says what to fix.
-2. In Claude, ask: *"Show the FoundryVTT connector's health status."* Claude calls `get_health_status`, which should show the FoundryVTT connection ✅, the module bridge ✅ connected with an authenticated module, the headless GM session logged in with its browser, and the configuration file the settings come from.
+2. In Claude, ask: *"Show the FoundryVTT connector's health status."* Claude calls `get_health_status` (allow the tool when Claude asks), which should show the FoundryVTT connection ✅, the module bridge ✅ connected with an authenticated module, the headless GM session logged in with its browser, and the configuration file the settings come from.
 
 The first call can take a few seconds while the server connects. If something is ❌, the message says why; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 

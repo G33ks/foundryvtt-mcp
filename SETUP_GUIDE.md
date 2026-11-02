@@ -14,7 +14,7 @@ This guide walks you through setting up and configuring the FoundryVTT Model Con
 - **A Chromium-based browser installed** on the computer that runs the server, for the automatic headless GM browser session (step 4): Google Chrome, Microsoft Edge, Brave, Vivaldi and Chromium are detected automatically. Another Chromium-based browser, or one installed elsewhere, can be named in the configuration (see step 4).
 
 ### 2. Install Companion Module (FoundryVTT MCP Bridge)
-Install it from Foundry's **Setup** screen (FoundryVTT 13 or later), the one listing your worlds. From a running world, **Game Settings** → **Return to Setup** gets there.
+Install it from Foundry's **Setup** screen (FoundryVTT 13 or later), the one listing your worlds. From a running world, **Game Settings** → **Return to Setup** gets there. Foundry may first ask for its administrator password (set when Foundry was installed, not a user's password).
 
 1. Open **Add-on Modules** → **Install Module**.
 2. Paste the manifest URL into the **Manifest URL** field at the bottom and click **Install**:
@@ -94,6 +94,8 @@ cd foundryvtt-mcp
 npm ci            # installs exactly the locked dependency versions
 npm run build
 ```
+
+In Windows PowerShell, if `npm` is refused with *running scripts is disabled on this system*, type `npm.cmd` instead of `npm` (`npm.cmd ci`, `npm.cmd run build`). `npm ci` may print warnings (vulnerability counts, a blocked install script); they do not stop the install. What matters is that `npm run build` ends without an error.
 
 Then, in the same folder:
 
