@@ -23,8 +23,6 @@
  * @see {@link https://foundryvtt.com/} FoundryVTT Virtual Tabletop
  */
 
-// Must precede every other import: see src/load-env.ts (#206).
-import './load-env.js';
 import { realpathSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -54,8 +52,10 @@ async function main(role: string | undefined): Promise<void> {
       break;
     }
     case undefined: {
-      const { config } = await import('./config/index.js');
-      if (config.shared.enabled) {
+      // Read without validating: with no usable configuration yet the relay
+      // (or the all-in-one server) still starts and explains it on each call.
+      const { resolveSettings } = await import('./config/sources.js');
+      if (resolveSettings().values.FOUNDRY_MCP_SHARED !== 'false') {
         const { runRelay } = await import('./shared/relay.js');
         await runRelay(ENTRY);
       } else {

@@ -2,9 +2,20 @@
  * @fileoverview All-in-one mode (`FOUNDRY_MCP_SHARED=false`): this stdio
  * process owns its own FoundryVTT connection, module bridge and headless GM
  * session, and exits when its MCP client closes stdin.
+ *
+ * Like the relay, it answers `initialize` and `tools/list` with no usable
+ * configuration; each tool call then says what is missing and re-reads it,
+ * and the first call that finds one starts the FoundryVTT connection.
  */
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import {
+  type CallToolResult,
+  ErrorCode,
+  McpError,
+  type ReadResourceResult,
+} from '@modelcontextprotocol/sdk/types.js';
+import { resetConfig, tryGetConfig } from './config/index.js';
 import { FoundryCore } from './core.js';
 import { createMcpServer, STARTUP_BANNER } from './mcp-server.js';
 import { logger } from './utils/logger.js';
@@ -14,8 +25,55 @@ import { logger } from './utils/logger.js';
  * between AI models and FoundryVTT instances.
  */
 class FoundryMCPServer {
-  private readonly core = new FoundryCore();
-  private readonly server = createMcpServer(this.core);
+  private core: FoundryCore | null = null;
+  private booting: Promise<FoundryCore> | null = null;
+  private readonly server = createMcpServer({
+    callTool: async (name, args): Promise<CallToolResult> => {
+      const core = await this.coreOrProblem();
+      if (typeof core === 'string') {
+        return { isError: true, content: [{ type: 'text', text: core }] };
+      }
+      return core.callTool(name, args);
+    },
+    readResource: async (uri): Promise<ReadResourceResult> => {
+      const core = await this.coreOrProblem();
+      if (typeof core === 'string') {
+        throw new McpError(ErrorCode.InvalidRequest, core);
+      }
+      return core.readResource(uri);
+    },
+  });
+
+  /** The started core, or what keeps it from starting (the configuration is re-read). */
+  private async coreOrProblem(): Promise<FoundryCore | string> {
+    if (this.core) {
+      return this.core;
+    }
+    if (!this.booting) {
+      resetConfig();
+      const loaded = tryGetConfig();
+      if ('error' in loaded) {
+        logger.warn(loaded.error.message);
+        return loaded.error.message;
+      }
+      this.booting = this.bootCore();
+    }
+    return this.booting;
+  }
+
+  private async bootCore(): Promise<FoundryCore> {
+    const core = new FoundryCore();
+    try {
+      await core.start();
+    } catch (error) {
+      // The next call builds a fresh core.
+      this.booting = null;
+      await core.shutdown();
+      throw error;
+    }
+    this.core = core;
+    return core;
+  }
 
   /**
    * Connects to FoundryVTT and starts the MCP server.
@@ -37,7 +95,11 @@ class FoundryMCPServer {
     await this.server.connect(transport);
     logger.info('FoundryVTT MCP Server started successfully');
 
-    await this.core.start();
+    // With no usable configuration yet, stay up: tool calls explain it.
+    const core = await this.coreOrProblem();
+    if (typeof core === 'string') {
+      logger.warn('Waiting for a configuration; tool calls will say what is missing');
+    }
   }
 
   /**
@@ -45,7 +107,7 @@ class FoundryMCPServer {
    * @returns Promise that resolves when shutdown is complete
    */
   async shutdown(): Promise<void> {
-    await this.core.shutdown();
+    await this.core?.shutdown();
   }
 }
 

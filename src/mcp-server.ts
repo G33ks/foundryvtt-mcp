@@ -17,7 +17,7 @@ import {
   ReadResourceRequestSchema,
   type ReadResourceResult,
 } from '@modelcontextprotocol/sdk/types.js';
-import { config } from './config/index.js';
+import { tryGetConfig } from './config/index.js';
 import { getAllTools } from './tools/definitions.js';
 import { getAllResources } from './tools/resources.js';
 import { logger } from './utils/logger.js';
@@ -28,10 +28,13 @@ export interface McpBackend {
 }
 
 export function createMcpServer(backend: McpBackend): Server {
+  // Answers `initialize` even with no usable configuration yet: tool calls
+  // then say what is missing (see the relay and the all-in-one server).
+  const loaded = tryGetConfig();
   const server = new Server(
     {
-      name: config.serverName,
-      version: config.serverVersion,
+      name: 'config' in loaded ? loaded.config.serverName : 'foundryvtt-mcp',
+      version: 'config' in loaded ? loaded.config.serverVersion : '0.1.0',
     },
     {
       capabilities: {

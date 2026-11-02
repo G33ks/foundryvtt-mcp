@@ -1,7 +1,8 @@
 ---
 paths:
   - "src/index.ts"
-  - "src/load-env.ts"
+  - "src/config/sources.ts"
+  - "src/config/env-layers.ts"
   - "src/config/**"
   - "src/utils/logger.ts"
   - "scripts/**"
@@ -38,27 +39,29 @@ tarball. **The symptom of "env file not loaded" is identical whether the
 loader is absent or merely late** — which is why the wrong cause is the
 natural guess.
 
-## The rule
+## The rule (since the configuration file, chantier 5 phase 2)
 
-- **Load env via a side-effect import placed first**, not a call in the body:
+- **Nothing loads `.env` into `process.env` any more.** `src/config/sources.ts`
+  resolves every setting on demand, per setting: environment, then `.env` in
+  the working directory (parsed by `src/config/env-layers.ts`), then the
+  configuration file, then the default — and keeps where each came from.
+  `src/load-env.ts` is gone. With no injection there is no import order to
+  get wrong: a module that resolves configuration at any time sees `.env`.
 
-  ```ts
-  // Must precede every other import: see src/load-env.ts (#206).
-  import './load-env.js';
-  import { config } from './config/index.js';
-  ```
+- **Read settings through the resolver**, never `process.env.FOUNDRY_*`
+  directly: `config`/`getConfig()` for validated values, `resolveSettings()`
+  (or `processSettings()` for `FOUNDRY_MCP_STATE_DIR`/`FOUNDRY_MCP_CONFIG`)
+  for raw ones. A direct read misses `.env` and the file — the same symptom
+  as #206. Known exceptions left for later: `scripts/diagnose-api.ts`,
+  `scripts/run-e2e-tests.ts`.
 
-  `src/load-env.ts` exists solely to call `dotenv.config()` at module scope.
-  Imports are evaluated in source order, so anything below it sees a populated
-  `process.env`.
+- **Never inject.** The relay hands its own environment to the shared process
+  it starts; injected `.env` or file values would arrive there as
+  "environment" and defeat the "file is authoritative" rule (`daemon.ts`).
 
-- **Every entrypoint needs it** — `src/index.ts` and any runnable file under
-  `scripts/`. A new script that reads config and forgets the import is the
-  same bug again.
-
-- **Be wary of module-scope config reads.** `logger.ts` is the one here; a new
-  one re-arms the trap for any future entrypoint. Prefer resolving config
-  inside a function.
+- **Be wary of module-scope config reads.** `logger.ts` resolves its level on
+  first use and falls back to `info` while there is no usable configuration;
+  it must never throw or exit.
 
 ## Verify it, and verify it the only way that works
 
@@ -67,7 +70,10 @@ real process**, and any test that imports the modules has already perturbed
 that order. The gate is `bun run smoke:dotenv` (`scripts/smoke-dotenv.js`,
 wired into `test.yml`), which spawns the built server from a scratch directory
 whose only configuration is a `.env` file, with every `FOUNDRY_*` variable
-stripped from the inherited environment.
+stripped from the inherited environment and `FOUNDRY_MCP_CONFIG` pointing at a
+missing file (the user's own configuration file must not answer for it). The
+server now starts without any configuration, so the test waits for the
+FoundryVTT client to be built, not for the banner.
 
 **Strip the inherited variables, or the test passes for free** — an inherited
 `FOUNDRY_URL` makes the server start whether or not the file was ever read,

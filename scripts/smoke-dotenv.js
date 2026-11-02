@@ -33,7 +33,11 @@ const repoRoot = join(__dirname, '..');
 const serverPath = join(repoRoot, 'dist', 'index.js');
 
 const BANNER = '🎲 FoundryVTT MCP Server starting...';
-const CONFIG_FAILURE = 'Configuration validation failed';
+// The server starts and answers without a configuration (tool calls explain
+// what is missing), so the banner alone proves nothing: a configured server
+// goes on to build its FoundryVTT client.
+const CONFIG_FAILURE = 'FoundryVTT MCP is not configured';
+const CONFIGURED = 'FoundryVTT client initialized';
 const STARTUP_TIMEOUT_MS = 5000;
 const SIGKILL_GRACE_MS = 2000;
 
@@ -53,7 +57,8 @@ writeFileSync(
     'FOUNDRY_URL=http://127.0.0.1:1',
     'FOUNDRY_USERNAME=dotenv-smoke',
     'FOUNDRY_PASSWORD=dotenv-smoke',
-    'LOG_LEVEL=error',
+    // `info`: the CONFIGURED line below is logged at that level.
+    'LOG_LEVEL=info',
     // All-in-one mode: the default relay would start a background shared
     // process that outlives this test.
     'FOUNDRY_MCP_SHARED=false',
@@ -69,6 +74,8 @@ const childEnv = Object.fromEntries(
     ([key]) => !key.startsWith('FOUNDRY_') && key !== 'LOG_LEVEL',
   ),
 );
+// Nor may the user's configuration file supply it: point at a missing one.
+childEnv.FOUNDRY_MCP_CONFIG = join(workDir, 'no-config.env');
 
 const child = spawn('node', [serverPath], {
   cwd: workDir,
@@ -92,7 +99,7 @@ child.stderr.on('data', (chunk) => {
     finish(false, 'configuration validation failed — the .env file was not loaded in time');
     return;
   }
-  if (stderr.includes(BANNER)) {
+  if (stderr.includes(BANNER) && stderr.includes(CONFIGURED)) {
     finish(true, 'server started with configuration sourced from .env');
   }
 });

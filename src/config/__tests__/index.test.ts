@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from 'vitest';
 
+// Never the developer's own configuration file (see vitest.config.ts).
+const HERMETIC = { FOUNDRY_MCP_CONFIG: '__vitest_no_config_file__.env' };
+
 // Mock process.env before importing the config
 const mockEnv = {
   MCP_SERVER_NAME: 'test-server',
@@ -46,7 +49,7 @@ describe('Config', () => {
 
   describe('valid configuration', () => {
     it('should load configuration from environment variables', async () => {
-      process.env = { ...mockEnv };
+      process.env = { ...HERMETIC, ...mockEnv };
 
       const { config, resetConfig } = await import('../index.js');
       resetConfig(); // Reset any cached config
@@ -69,7 +72,7 @@ describe('Config', () => {
     });
 
     it('should use default values when environment variables are not set', async () => {
-      process.env = { FOUNDRY_URL: 'http://localhost:30000' };
+      process.env = { ...HERMETIC, FOUNDRY_URL: 'http://localhost:30000' };
 
       const { config, resetConfig } = await import('../index.js');
       resetConfig(); // Reset any cached config
@@ -90,7 +93,7 @@ describe('Config', () => {
 
   describe('configuration validation', () => {
     it('should throw error when FOUNDRY_URL is missing in test environment', async () => {
-      process.env = { NODE_ENV: 'test' };
+      process.env = { ...HERMETIC, NODE_ENV: 'test' };
 
       const { config, resetConfig } = await import('../index.js');
       resetConfig(); // Reset any cached config
@@ -98,18 +101,20 @@ describe('Config', () => {
       expect(() => config.foundry.url).toThrow();
     });
 
-    it('should exit process when FOUNDRY_URL is missing in non-test environment', async () => {
-      process.env = { NODE_ENV: 'production' };
+    it('explains a missing FOUNDRY_URL without exiting, in any environment', async () => {
+      process.env = { ...HERMETIC, NODE_ENV: 'production' };
 
-      const { config, resetConfig } = await import('../index.js');
+      const { config, ConfigError, resetConfig } = await import('../index.js');
       resetConfig(); // Reset any cached config
 
-      expect(() => config.foundry.url).toThrow('process.exit called');
-      expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(() => config.foundry.url).toThrow(ConfigError);
+      expect(() => config.foundry.url).toThrow(/__vitest_no_config_file__.env/);
+      expect(exitSpy).not.toHaveBeenCalled();
     });
 
     it('should throw error when FOUNDRY_URL is invalid in test environment', async () => {
       process.env = {
+        ...HERMETIC,
         FOUNDRY_URL: 'invalid-url',
         NODE_ENV: 'test',
       };
@@ -122,6 +127,7 @@ describe('Config', () => {
 
     it('should throw error when LOG_LEVEL is invalid in test environment', async () => {
       process.env = {
+        ...HERMETIC,
         FOUNDRY_URL: 'http://localhost:30000',
         LOG_LEVEL: 'invalid-level',
         NODE_ENV: 'test',
@@ -135,6 +141,7 @@ describe('Config', () => {
 
     it('should throw error when NODE_ENV is invalid in test environment', async () => {
       process.env = {
+        ...HERMETIC,
         FOUNDRY_URL: 'http://localhost:30000',
         NODE_ENV: 'invalid-env',
       };
@@ -148,7 +155,7 @@ describe('Config', () => {
 
   describe('headlessGm', () => {
     it('defaults to enabled with no explicit credentials', async () => {
-      process.env = { FOUNDRY_URL: 'http://localhost:30000' };
+      process.env = { ...HERMETIC, FOUNDRY_URL: 'http://localhost:30000' };
 
       const { config, resetConfig } = await import('../index.js');
       resetConfig();
@@ -161,6 +168,7 @@ describe('Config', () => {
 
     it('reads explicit overrides distinct from foundry.username/password', async () => {
       process.env = {
+        ...HERMETIC,
         FOUNDRY_URL: 'http://localhost:30000',
         FOUNDRY_USERNAME: 'mcp-api',
         FOUNDRY_PASSWORD: 'mcp',
@@ -180,6 +188,7 @@ describe('Config', () => {
 
     it('can be disabled explicitly', async () => {
       process.env = {
+        ...HERMETIC,
         FOUNDRY_URL: 'http://localhost:30000',
         FOUNDRY_HEADLESS_GM_ENABLED: 'false',
       };
@@ -194,6 +203,7 @@ describe('Config', () => {
   describe('type conversion', () => {
     it('should convert string numbers to numbers', async () => {
       process.env = {
+        ...HERMETIC,
         FOUNDRY_URL: 'http://localhost:30000',
         FOUNDRY_TIMEOUT: '15000',
         FOUNDRY_RETRY_ATTEMPTS: '10',
@@ -214,6 +224,7 @@ describe('Config', () => {
 
     it('should convert string booleans to booleans', async () => {
       process.env = {
+        ...HERMETIC,
         FOUNDRY_URL: 'http://localhost:30000',
         CACHE_ENABLED: 'false',
       };

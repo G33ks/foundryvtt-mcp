@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { processSettings } from '../config/env-layers.js';
 
 /** Longest Unix socket path we bind to; `sun_path` is 104 bytes on macOS, 108 on Linux. */
 const MAX_UNIX_SOCKET_PATH = 100;
@@ -44,11 +45,12 @@ function userTag(): string {
  * `%LOCALAPPDATA%\foundryvtt-mcp` on Windows, `$XDG_STATE_HOME/foundryvtt-mcp`
  * or `~/.local/state/foundryvtt-mcp` elsewhere. `FOUNDRY_MCP_STATE_DIR`
  * overrides it, which also gives that directory its own endpoint (an
- * isolated shared process, e.g. for tests).
+ * isolated shared process, e.g. for tests) — from the environment or a
+ * development `.env`, never from the configuration file it locates.
  */
 export function defaultStateDir(
   platform: NodeJS.Platform = process.platform,
-  env: NodeJS.ProcessEnv = process.env,
+  env: NodeJS.ProcessEnv = processSettings(),
 ): string {
   if (env.FOUNDRY_MCP_STATE_DIR) {
     return path.resolve(env.FOUNDRY_MCP_STATE_DIR);
@@ -93,7 +95,7 @@ export function resolveSharedPaths(stateDir: string = defaultStateDir()): Shared
     stateDir,
     process.platform,
     userTag(),
-    !process.env.FOUNDRY_MCP_STATE_DIR,
+    !processSettings().FOUNDRY_MCP_STATE_DIR,
   );
   if (process.platform !== 'win32') {
     mkdirSync(path.dirname(endpoint), { recursive: true, mode: 0o700 });

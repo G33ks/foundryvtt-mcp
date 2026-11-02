@@ -1,14 +1,21 @@
 /**
  * @fileoverview Configuration management for FoundryVTT MCP Server
  *
- * This module handles loading and validating configuration from environment variables
- * using Zod schemas for type safety and runtime validation.
+ * This module validates the configuration resolved by `sources.ts` (environment,
+ * `.env`, configuration file, defaults) using Zod schemas.
  *
  * @version 0.1.0
  * @author FoundryVTT MCP Team
  */
 
 import { z } from 'zod';
+import {
+  describeSource,
+  missingConfigMessage,
+  type ResolvedSettings,
+  resolveSettings,
+  type SettingName,
+} from './sources.js';
 
 /**
  * Zod schema for validating server configuration
@@ -129,7 +136,7 @@ const ConfigSchema = z.object({
   shared: z.object({
     enabled: z.boolean().default(true),
     /** Minutes with no relay connected before the shared process exits; 0 = never. */
-    idleTimeoutMinutes: z.number().min(0).default(30),
+    idleTimeoutMinutes: z.number().min(0).default(5),
   }),
 });
 
@@ -142,144 +149,138 @@ const ConfigSchema = z.object({
 type Config = z.infer<typeof ConfigSchema>;
 
 /**
- * Loads and validates configuration from environment variables
- *
- * Reads configuration from process.env, applies defaults where appropriate,
- * and validates the result against the ConfigSchema. In test environments,
- * throws errors instead of exiting the process to allow proper test handling.
- *
- * @returns Validated configuration object
- * @throws Error in test environment, process exits with code 1 in production
- * @example
- * ```typescript
- * const config = loadConfig();
- * console.log(`Server: ${config.serverName} v${config.serverVersion}`);
- * console.log(`FoundryVTT URL: ${config.foundry.url}`);
- * ```
+ * No usable configuration: no FOUNDRY_URL anywhere, or a value that does not
+ * validate. The message says where the configuration file is expected and
+ * what it needs (see {@link missingConfigMessage}).
  */
-function loadConfig(): Config {
-  const rawConfig = {
-    serverName: process.env.MCP_SERVER_NAME,
-    serverVersion: process.env.MCP_SERVER_VERSION,
-    logLevel: process.env.LOG_LEVEL,
-    nodeEnv: process.env.NODE_ENV,
+export class ConfigError extends Error {
+  override name = 'ConfigError';
+}
+
+function int(value: string | undefined): number | undefined {
+  return value ? parseInt(value, 10) : undefined;
+}
+
+function bool(value: string | undefined): boolean | undefined {
+  return value !== undefined ? value === 'true' : undefined;
+}
+
+/** The raw configuration object the schema validates, from resolved settings. */
+function rawConfig(v: ResolvedSettings['values']) {
+  return {
+    serverName: v.MCP_SERVER_NAME,
+    serverVersion: v.MCP_SERVER_VERSION,
+    logLevel: v.LOG_LEVEL,
+    nodeEnv: v.NODE_ENV,
 
     foundry: {
-      url: process.env.FOUNDRY_URL,
-      apiKey: process.env.FOUNDRY_API_KEY,
-      username: process.env.FOUNDRY_USERNAME,
-      password: process.env.FOUNDRY_PASSWORD,
-      userId: process.env.FOUNDRY_USER_ID,
-      socketPath: process.env.FOUNDRY_SOCKET_PATH,
-      timeout: process.env.FOUNDRY_TIMEOUT ? parseInt(process.env.FOUNDRY_TIMEOUT, 10) : undefined,
-      retryAttempts: process.env.FOUNDRY_RETRY_ATTEMPTS
-        ? parseInt(process.env.FOUNDRY_RETRY_ATTEMPTS, 10)
-        : undefined,
-      retryDelay: process.env.FOUNDRY_RETRY_DELAY
-        ? parseInt(process.env.FOUNDRY_RETRY_DELAY, 10)
-        : undefined,
-      writeEnabled:
-        process.env.FOUNDRY_WRITE_ENABLED !== undefined
-          ? process.env.FOUNDRY_WRITE_ENABLED === 'true'
-          : undefined,
+      url: v.FOUNDRY_URL,
+      apiKey: v.FOUNDRY_API_KEY,
+      username: v.FOUNDRY_USERNAME,
+      password: v.FOUNDRY_PASSWORD,
+      userId: v.FOUNDRY_USER_ID,
+      socketPath: v.FOUNDRY_SOCKET_PATH,
+      timeout: int(v.FOUNDRY_TIMEOUT),
+      retryAttempts: int(v.FOUNDRY_RETRY_ATTEMPTS),
+      retryDelay: int(v.FOUNDRY_RETRY_DELAY),
+      writeEnabled: bool(v.FOUNDRY_WRITE_ENABLED),
     },
 
     cache: {
-      enabled:
-        process.env.CACHE_ENABLED !== undefined ? process.env.CACHE_ENABLED === 'true' : undefined,
-      ttlSeconds: process.env.CACHE_TTL_SECONDS
-        ? parseInt(process.env.CACHE_TTL_SECONDS, 10)
-        : undefined,
-      maxSize: process.env.CACHE_MAX_SIZE ? parseInt(process.env.CACHE_MAX_SIZE, 10) : undefined,
+      enabled: bool(v.CACHE_ENABLED),
+      ttlSeconds: int(v.CACHE_TTL_SECONDS),
+      maxSize: int(v.CACHE_MAX_SIZE),
     },
 
     moduleBridge: {
-      enabled:
-        process.env.FOUNDRY_MODULE_BRIDGE_ENABLED !== undefined
-          ? process.env.FOUNDRY_MODULE_BRIDGE_ENABLED === 'true'
-          : undefined,
-      port: process.env.FOUNDRY_MODULE_BRIDGE_PORT
-        ? parseInt(process.env.FOUNDRY_MODULE_BRIDGE_PORT, 10)
-        : undefined,
+      enabled: bool(v.FOUNDRY_MODULE_BRIDGE_ENABLED),
+      port: int(v.FOUNDRY_MODULE_BRIDGE_PORT),
     },
 
     headlessGm: {
-      enabled:
-        process.env.FOUNDRY_HEADLESS_GM_ENABLED !== undefined
-          ? process.env.FOUNDRY_HEADLESS_GM_ENABLED === 'true'
-          : undefined,
-      username: process.env.FOUNDRY_HEADLESS_GM_USERNAME,
-      password: process.env.FOUNDRY_HEADLESS_GM_PASSWORD,
-      executablePath: process.env.FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH,
+      enabled: bool(v.FOUNDRY_HEADLESS_GM_ENABLED),
+      username: v.FOUNDRY_HEADLESS_GM_USERNAME,
+      password: v.FOUNDRY_HEADLESS_GM_PASSWORD,
+      executablePath: v.FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH,
     },
 
     assets: {
-      dataPath: process.env.FOUNDRY_DATA_PATH,
+      dataPath: v.FOUNDRY_DATA_PATH,
     },
 
     events: {
-      bufferSize: process.env.FOUNDRY_EVENT_BUFFER_SIZE
-        ? parseInt(process.env.FOUNDRY_EVENT_BUFFER_SIZE, 10)
-        : undefined,
-      defaultWaitMs: process.env.FOUNDRY_EVENT_WAIT_MS
-        ? parseInt(process.env.FOUNDRY_EVENT_WAIT_MS, 10)
-        : undefined,
+      bufferSize: int(v.FOUNDRY_EVENT_BUFFER_SIZE),
+      defaultWaitMs: int(v.FOUNDRY_EVENT_WAIT_MS),
     },
 
     shared: {
-      enabled:
-        process.env.FOUNDRY_MCP_SHARED !== undefined
-          ? process.env.FOUNDRY_MCP_SHARED !== 'false'
-          : undefined,
-      idleTimeoutMinutes: process.env.FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES
-        ? Number(process.env.FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES)
+      enabled: v.FOUNDRY_MCP_SHARED !== undefined ? v.FOUNDRY_MCP_SHARED !== 'false' : undefined,
+      idleTimeoutMinutes: v.FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES
+        ? Number(v.FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES)
         : undefined,
     },
   };
+}
 
-  try {
-    return ConfigSchema.parse(rawConfig);
-  } catch (error) {
-    if (error instanceof z.ZodError) {
-      console.error('❌ Configuration validation failed:');
-      error.issues.forEach((err) => {
-        console.error(`  ${err.path.join('.')}: ${err.message}`);
+/** Schema path → environment variable, to name the setting in an error. */
+const PATH_TO_SETTING: Record<string, string> = {
+  'foundry.url': 'FOUNDRY_URL',
+  logLevel: 'LOG_LEVEL',
+  nodeEnv: 'NODE_ENV',
+  'shared.idleTimeoutMinutes': 'FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES',
+};
 
-        // Provide specific guidance for common URL errors
-        if (err.path.includes('url')) {
-          console.error('  💡 URL Examples:');
-          console.error('     • Local: http://localhost:30000');
-          console.error('     • Reverse Proxy: https://foundry.example.com');
-          console.error('     • Network IP: http://192.168.1.100:30000');
-          console.error('     • Custom Port: https://foundry.example.com:8443');
-        }
-      });
-      console.error('\n📋 Configuration Help:');
-      console.error('  • Check your environment variables and .env file');
-      console.error('  • Ensure FOUNDRY_URL includes protocol (http:// or https://)');
-      console.error('  • For setup guidance, see: SETUP_GUIDE.md');
-      console.error('  • Run the setup wizard: npm run setup');
-    }
-
-    // In test environment, throw error instead of exiting process
-    if (process.env.NODE_ENV === 'test') {
-      throw error;
-    }
-
-    process.exit(1);
+/**
+ * Validates resolved settings into a configuration.
+ *
+ * @throws {ConfigError} with the full explanation when there is none usable
+ */
+export function configFromSettings(settings: ResolvedSettings): Config {
+  if (!settings.values.FOUNDRY_URL) {
+    throw new ConfigError(missingConfigMessage(settings, 'FOUNDRY_URL is not set.'));
   }
+  const parsed = ConfigSchema.safeParse(rawConfig(settings.values));
+  if (parsed.success) {
+    return parsed.data;
+  }
+  const problems = parsed.error.issues.map((issue) => {
+    const where = issue.path.join('.');
+    const name = PATH_TO_SETTING[where];
+    const source = name
+      ? ` (${name}, from ${describeSource(settings.sources[name as SettingName], settings)})`
+      : '';
+    return `${where}: ${issue.message}${source}`;
+  });
+  throw new ConfigError(
+    missingConfigMessage(settings, `invalid settings — ${problems.join('; ')}.`),
+  );
+}
+
+/**
+ * Resolves and validates the configuration of this process.
+ *
+ * @throws {ConfigError} when there is none usable
+ */
+function loadConfig(): Config {
+  const settings = resolveSettings();
+  _settings = settings;
+  return configFromSettings(settings);
 }
 
 /**
  * Cached configuration instance
  */
 let _config: Config | null = null;
+/** The settings the cached configuration was built from. */
+let _settings: ResolvedSettings | null = null;
 
 /**
  * Gets the global configuration instance
  *
  * This loads and caches the configuration on first access, allowing tests
  * to set environment variables before triggering configuration validation.
+ * Throws {@link ConfigError} on access while no usable configuration exists;
+ * the next access tries again.
  *
  * @returns Validated configuration object
  * @example
@@ -287,11 +288,6 @@ let _config: Config | null = null;
  * import { config } from './config/index.js';
  *
  * console.log(`Connecting to ${config.foundry.url}`);
- * if (config.foundry.apiKey) {
- *   console.log('Using local REST API module with API key');
- * } else {
- *   console.log('Using WebSocket connection with username/password');
- * }
  * ```
  */
 export const config = new Proxy({} as Config, {
@@ -306,6 +302,8 @@ export const config = new Proxy({} as Config, {
 /**
  * Returns the whole validated configuration as a plain object. Unlike the
  * {@link config} proxy it can be enumerated (e.g. to fingerprint it).
+ *
+ * @throws {ConfigError} when there is none usable (not cached: the next call retries)
  */
 export function getConfig(): Config {
   if (_config === null) {
@@ -314,12 +312,34 @@ export function getConfig(): Config {
   return _config;
 }
 
+/** The configuration, or the error that explains why there is none. */
+export function tryGetConfig(): { config: Config } | { error: ConfigError } {
+  try {
+    return { config: getConfig() };
+  } catch (error) {
+    if (error instanceof ConfigError) {
+      return { error };
+    }
+    throw error;
+  }
+}
+
+/** Settings the current configuration was resolved from (resolving them if needed). */
+export function configSettings(): ResolvedSettings {
+  if (_settings === null) {
+    _settings = resolveSettings();
+  }
+  return _settings;
+}
+
 /**
- * Resets the cached configuration - used for testing
+ * Resets the cached configuration - used for testing, and by a relay that
+ * re-reads its settings before each handshake
  * @internal
  */
 export function resetConfig(): void {
   _config = null;
+  _settings = null;
 }
 
 /**

@@ -37,7 +37,7 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error';
  * ```
  */
 export class Logger {
-  private logLevel: LogLevel | (() => LogLevel);
+  private logLevel: LogLevel | (() => LogLevel | null);
   private sinks: Array<(line: string) => void> = [];
   private levels: Record<LogLevel, number> = {
     debug: 0,
@@ -50,9 +50,10 @@ export class Logger {
    * Creates a new Logger instance
    *
    * @param logLevel - Minimum log level to display (default: 'info'), or a
-   *   function resolving it on first use
+   *   function resolving it on first use; while it returns `null` (no usable
+   *   configuration yet) messages are filtered at `info` and it is asked again
    */
-  constructor(logLevel: LogLevel | (() => LogLevel) = 'info') {
+  constructor(logLevel: LogLevel | (() => LogLevel | null) = 'info') {
     this.logLevel = logLevel;
   }
 
@@ -73,7 +74,11 @@ export class Logger {
 
   private level(): LogLevel {
     if (typeof this.logLevel === 'function') {
-      this.logLevel = this.logLevel();
+      const resolved = this.logLevel();
+      if (resolved === null) {
+        return 'info';
+      }
+      this.logLevel = resolved;
     }
     return this.logLevel;
   }
@@ -205,5 +210,12 @@ export class Logger {
  * ```
  */
 // The level is resolved on first use, not at import: importing the logger must
-// not validate the whole configuration (`status`/`stop` run without one).
-export const logger = new Logger(() => config.logLevel);
+// not validate the whole configuration (`status`/`stop` run without one), and
+// logging must never fail or exit while there is none (`info` meanwhile).
+export const logger = new Logger(() => {
+  try {
+    return config.logLevel;
+  } catch {
+    return null;
+  }
+});

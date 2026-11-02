@@ -9,6 +9,8 @@ export default defineConfig({
       NODE_ENV: 'test',
       FOUNDRY_URL: 'http://localhost:30000',
       LOG_LEVEL: 'error', // Reduce log noise in tests
+      // Never read the developer's own configuration file (config/sources.ts).
+      FOUNDRY_MCP_CONFIG: '__vitest_no_config_file__.env',
     },
     coverage: {
       provider: 'v8',
