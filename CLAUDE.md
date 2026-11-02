@@ -104,7 +104,6 @@ See `.claude/rules/` for detailed guidelines:
 - `development.md` — TDD workflow, commit conventions, build commands
 - `testing.md` — Test tiers (unit, integration, E2E) and requirements
 - `foundry-write-protocol.md` — transport (Socket.IO vs REST) and the `modifyDocument` write protocol
-- `document-management.md` — Document detection and organization
 
 ## Reference
 
