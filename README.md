@@ -3,7 +3,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue.svg)](https://www.typescriptlang.org/)
-[![Vitest](https://img.shields.io/badge/Tests-1066%20passing-brightgreen.svg)](https://vitest.dev/)
+[![Vitest](https://img.shields.io/badge/Tests-1108%20passing-brightgreen.svg)](https://vitest.dev/)
 [![Tools](https://img.shields.io/badge/MCP%20Tools-114-purple.svg)](https://modelcontextprotocol.io/)
 
 A comprehensive, production-grade [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for **Foundry Virtual Tabletop (FoundryVTT)**.
@@ -119,7 +119,37 @@ In FoundryVTT, go to **Manage Modules** and enable **FoundryVTT MCP Bridge**.
 
 ## ⚙️ Configuration & Client Setup
 
+### Configuration File
+
+Every MCP client on the machine shares **one configuration file**, so a client entry needs only the command and its arguments — no `env` block:
+
+| System | Location |
+| :--- | :--- |
+| Windows | `%LOCALAPPDATA%\foundryvtt-mcp\config.env` (next to the shared process's state) |
+| macOS, Linux | `$XDG_CONFIG_HOME/foundryvtt-mcp/config.env`, or `~/.config/foundryvtt-mcp/config.env` |
+
+`FOUNDRY_MCP_CONFIG` names another file and wins over everything; with `FOUNDRY_MCP_STATE_DIR` set, the file is `<that directory>/config.env` (a fully isolated setup, for tests).
+
+One `KEY=value` per line, with exactly the names of the variables below; `#` starts a comment:
+
+```env
+FOUNDRY_URL=https://foundry.example.com
+FOUNDRY_USERNAME=mcp-api
+FOUNDRY_PASSWORD='your password'
+FOUNDRY_WRITE_ENABLED=true
+FOUNDRY_MODULE_BRIDGE_ENABLED=true
+```
+
+- **Quote values**: put each value between `'…'`; if it contains an apostrophe, between `` `…` ``. Unquoted, a `#` cuts the value (the rest is a comment) and surrounding spaces are dropped. Nothing is escaped inside quotes.
+- **Passwords** are stored in clear: the file is for your user only. On macOS and Linux the server warns when others may read it (`chmod 600` it). They never appear in logs or in `status` (shown as `<set>`).
+- **Priority, setting by setting**: an environment variable (the client's `env` block, or the system) wins, then a `.env` in the working directory (for development), then the file, then the default. `node dist/index.js status` shows where each setting comes from.
+- **After editing the file**, run `node dist/index.js stop`: the next call starts the shared process with the new settings. A client whose relay was waiting for a configuration needs nothing: its next call reads the file.
+- **The file is authoritative**: a client that still passes its own `env` block is served with the configuration the shared process runs, and its first tool result says which of its settings are ignored and where they come from (see [Shared Process Mode](#shared-process-mode)).
+- **No configuration at all**: the server still starts and lists its tools; each call says where the file is expected and what it needs (`FOUNDRY_URL`, `FOUNDRY_USERNAME`, `FOUNDRY_PASSWORD`) — see [SETUP_GUIDE.md](SETUP_GUIDE.md#configuration).
+
 ### Environment Variables
+
+The same names work in the configuration file, in an `env` block, in the system environment or in a development `.env`.
 
 | Variable | Required | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -139,27 +169,26 @@ In FoundryVTT, go to **Manage Modules** and enable **FoundryVTT MCP Bridge**.
 | `FOUNDRY_EVENT_WAIT_MS` | No | `25000` | Default long-polling timeout for `watch_events` |
 | `LOG_LEVEL` | No | `info` | Logging verbosity (`debug`, `info`, `warn`, `error`) |
 | `FOUNDRY_MCP_SHARED` | No | `true` | Shared-process mode; `false` makes every instance own its own connection, bridge and browser (all-in-one) |
-| `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` | No | `30` | Minutes the shared process stays up with **no relay connected** before exiting; `0` = never |
-| `FOUNDRY_MCP_STATE_DIR` | No | see below | Directory for the shared process's token, state file and logs; a non-default directory also gets its own pipe (an isolated shared process) |
+| `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` | No | `5` | Minutes the shared process stays up with **no relay connected** before exiting (it disconnects from FoundryVTT then); `0` = never |
+| `FOUNDRY_MCP_STATE_DIR` | No | see below | Directory for the shared process's token, state file and logs; a non-default directory also gets its own pipe (an isolated shared process) and its own `config.env`. Environment or `.env` only |
+| `FOUNDRY_MCP_CONFIG` | No | see [Configuration File](#configuration-file) | Path of the configuration file. Environment or `.env` only |
 
 #### Choosing the Headless GM Browser
 
-Without `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`, the server tries Google Chrome, then Microsoft Edge, then Playwright's own Chromium (only present after `npx playwright install chromium`). To use another Chromium-based browser such as Brave or Vivaldi, point the variable at its executable. In a JSON client configuration, Windows backslashes must be doubled:
+Without `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`, the server tries Google Chrome, then Microsoft Edge, then Playwright's own Chromium (only present after `npx playwright install chromium`). To use another Chromium-based browser such as Brave or Vivaldi, point the variable at its executable, in the configuration file:
 
-```json
-"env": {
-  "FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH": "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
-}
+```env
+FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH='C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe'
 ```
 
-Forward slashes (`C:/Program Files/...`) also work and need no escaping. The headless browser is launched with Chromium's local network access checks disabled so the module can reach `ws://localhost` from the Foundry page — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#module-bridge-never-connects--websocket--failed).
+In a JSON `env` block instead, Windows backslashes must be doubled; forward slashes (`C:/Program Files/...`) work everywhere and need no escaping. The headless browser is launched with Chromium's local network access checks disabled so the module can reach `ws://localhost` from the Foundry page — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#module-bridge-never-connects--websocket--failed).
 
 ### Shared Process Mode
 
 By default `node dist/index.js` is a **relay**: it answers `initialize` and `tools/list` immediately and forwards `tools/call` and `resources/read` to a **shared process** (`node dist/index.js daemon`) that holds the FoundryVTT connection, the module bridge and the headless GM session.
 
 - **Automatic start**: the first relay that finds no shared process starts one in the background (detached, so it survives the client closing or restarting the relay) and waits for it — up to ~30 s. Relays started at the same time end up sharing a single process. Relays connect as soon as they start, so the FoundryVTT connection and the GM session are ready before the first tool call.
-- **Lifetime**: the shared process stays up while at least one relay is connected, however long it goes without calls. It exits after `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` with no relay connected, on `stop`, or when a relay with a different version (a rebuild counts) or configuration connects — it then lets running calls finish and the relay starts a fresh one. A call that was already running always completes, even if the client that asked for it went away.
+- **Lifetime**: the shared process stays up while at least one relay is connected, however long it goes without calls. It exits `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` (5 by default) after the last client closes, on `stop`, when a relay from a newer build connects (a rebuild counts), or when a relay whose settings match a changed configuration file connects — it then lets running calls finish and the relay starts a fresh one. Closing and reopening a client within that delay keeps the same process and the same FoundryVTT connection. A call that was already running always completes, even if the client that asked for it went away.
 - **FoundryVTT not reachable yet**: the shared process stays up, returns the connection error to the call, and retries on the next call — start FoundryVTT before or after your AI client, in any order. With FoundryVTT up but no world launched, it retries by itself in the background (every 5 s at first, at most every 2 min) and connects as soon as the world is launched.
 - **Writes**: tools that change game state run one at a time, in arrival order; reads run in parallel.
 - **Commands**:
@@ -171,8 +200,11 @@ By default `node dist/index.js` is a **relay**: it answers `initialize` and `too
 
   They only read the state directory, so they work from any terminal — no FoundryVTT configuration needed.
 - **State directory**: `%LOCALAPPDATA%\foundryvtt-mcp\` on Windows, `$XDG_STATE_HOME/foundryvtt-mcp/` (or `~/.local/state/foundryvtt-mcp/`) elsewhere. It holds the access token relays must present (`token`), the state file (`daemon.json`) and the logs (`daemon.log`, `relay.log`, rotated at 5 MB × 3). Relays reach the shared process through the named pipe `\\.\pipe\foundryvtt-mcp-<user>` (Windows) or a Unix socket in the state directory.
-- **One configuration for every client**: the shared process runs with the configuration of the relay that started it. If two clients (say Claude Desktop and Claude Code) pass different settings, each one restarts the shared process with its own — use the same `env` block everywhere, or set `FOUNDRY_MCP_SHARED=false` for one of them (only one process can own the bridge port).
-- **Configuration source**: Claude Desktop starts MCP servers with `C:\Windows\System32` as working directory, where no `.env` file is looked up — put the configuration in the `env` block of the client configuration. The shared process inherits the environment and working directory of the relay that starts it.
+- **One configuration for every client**: put the settings in the [configuration file](#configuration-file) and leave the clients' `env` blocks out. The connection settings (URL, account, passwords, API key, socket path, writes, bridge, headless GM session, data path) decide which shared process serves a client:
+  - a relay with the file's settings as it is now, while the running process was started differently (the file changed, or another client's `env` block started it), restarts the process once with the file's settings;
+  - any other difference — a client still passing its own `env` block — is served with the running configuration, never restarted: the client's first tool result names its ignored settings, and `status` lists them;
+  - other settings (`LOG_LEVEL`, timeouts, idle delay…) never matter: the shared process's own apply.
+- **Configuration source**: Claude Desktop starts MCP servers with `C:\Windows\System32` as working directory, where no `.env` file is looked up, and passes only a few Windows variables besides the `env` block; Claude Code passes its whole environment. The shared process inherits the environment and working directory of the relay that starts it, and reads the configuration file itself.
 - **Module bridge**: listens on loopback only (`127.0.0.1` and `::1`); the module reaches it at `ws://localhost:<port>` from the headless browser on the same machine, and authenticates — see [Module Bridge Security](#module-bridge-security).
 
 ### Module Bridge Security
@@ -187,26 +219,36 @@ The bridge drives a GM session, and its loopback port is reachable by every loca
 
 ### Claude Desktop Configuration
 
-Add to `claude_desktop_config.json`:
+With the settings in the [configuration file](#configuration-file), add to `claude_desktop_config.json`:
 
 ```json
 {
   "mcpServers": {
     "foundryvtt": {
       "command": "node",
-      "args": ["<PATH_TO_REPO>/dist/index.js"],
-      "env": {
-        "FOUNDRY_URL": "http://localhost:30000",
-        "FOUNDRY_USERNAME": "mcp-api",
-        "FOUNDRY_PASSWORD": "mcp",
-        "FOUNDRY_WRITE_ENABLED": "true",
-        "FOUNDRY_MODULE_BRIDGE_ENABLED": "true",
-        "FOUNDRY_MODULE_BRIDGE_PORT": "31415"
-      }
+      "args": ["<PATH_TO_REPO>/dist/index.js"]
     }
   }
 }
 ```
+
+### Claude Code Configuration
+
+`claude mcp add foundryvtt -- node <PATH_TO_REPO>/dist/index.js`, or in `~/.claude.json` (or a project's `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "foundryvtt": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["<PATH_TO_REPO>/dist/index.js"]
+    }
+  }
+}
+```
+
+An `env` block still works in any client (its values win over the file for that client), but the shared process serves every client with one configuration — see [Shared Process Mode](#shared-process-mode).
 
 ### Oh My Pi Configuration
 
@@ -219,14 +261,6 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
       "type": "stdio",
       "command": "node",
       "args": ["<PATH_TO_REPO>/dist/index.js"],
-      "env": {
-        "FOUNDRY_URL": "http://localhost:30000",
-        "FOUNDRY_USERNAME": "mcp-api",
-        "FOUNDRY_PASSWORD": "mcp",
-        "FOUNDRY_WRITE_ENABLED": "true",
-        "FOUNDRY_MODULE_BRIDGE_ENABLED": "true",
-        "FOUNDRY_MODULE_BRIDGE_PORT": "31415"
-      },
       "timeout": 60000
     }
   }
@@ -331,7 +365,7 @@ npm install
 # Compile TypeScript
 npm run build
 
-# Run complete unit test suite (1066 tests)
+# Run complete unit test suite (1108 tests)
 npm test
 
 # Run linter and formatting checks

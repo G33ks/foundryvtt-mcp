@@ -47,11 +47,13 @@ The tab stays on the game page: a navigation elsewhere — **Log Out**, or Found
 
 The session is self-healing: a watchdog polls the bridge's own connectivity every 20s (independently of whether the Foundry login itself is still active) and force-reloads the tab if it stays disconnected for ~60s. This recovers the module's WebSocket even when the browser session never actually logs out — the module's own client-side reconnect logic gives up permanently after ~85 minutes of failed attempts, and a full page reload gives it a fresh start rather than requiring a server restart.
 
-This step needs nothing from you beyond a browser being available. The server tries Google Chrome, then Microsoft Edge, then Playwright's own Chromium — the latter is not bundled and must be downloaded once with `npx playwright install chromium`. To use another Chromium-based browser (Brave, Vivaldi…), set `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` to its executable; in a JSON client configuration, double the Windows backslashes:
+This step needs nothing from you beyond a browser being available. The server tries Google Chrome, then Microsoft Edge, then Playwright's own Chromium — the latter is not bundled and must be downloaded once with `npx playwright install chromium`. To use another Chromium-based browser (Brave, Vivaldi…), set `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` to its executable in the [configuration file](#configuration):
 
-```json
-"FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH": "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe"
+```env
+FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH='C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe'
 ```
+
+(In a JSON `env` block instead, double the Windows backslashes.)
 
 The headless browser is launched with Chromium's local network access checks disabled, so the module can reach the bridge on `ws://localhost` even when Foundry is served from a public address (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#module-bridge-never-connects--websocket--failed)).
 
@@ -59,13 +61,39 @@ Keep `FOUNDRY_HEADLESS_GM_ENABLED` at its default `true`: since module 0.5.0, th
 
 ---
 
-## ⚙️ Environment Variables
+## ⚙️ Configuration
 
-Copy `.env.example` to `.env` in the server root and configure:
+### The configuration file
+
+All MCP clients share one file, so no client needs its own copy of the settings:
+
+- **Windows**: `%LOCALAPPDATA%\foundryvtt-mcp\config.env`
+- **macOS, Linux**: `$XDG_CONFIG_HOME/foundryvtt-mcp/config.env`, or `~/.config/foundryvtt-mcp/config.env`
+
+Create it with your settings, one `KEY=value` per line:
+
+```env
+# FoundryVTT MCP — shared by every MCP client
+FOUNDRY_URL=http://localhost:30000
+FOUNDRY_USERNAME=mcp-api
+FOUNDRY_PASSWORD='mcp'
+FOUNDRY_WRITE_ENABLED=true
+FOUNDRY_MODULE_BRIDGE_ENABLED=true
+```
+
+- Put each value between `'…'`; if the value contains an apostrophe, between `` `…` ``. Without quotes, a `#` starts a comment and cuts the value — a common trap with passwords.
+- The file holds your password in clear: keep it to your user (`chmod 600` on macOS and Linux; the server warns otherwise).
+- After changing it, run `node dist/index.js stop`; the next tool call uses the new settings. If no configuration existed yet, nothing to do: the next call reads the file.
+- `node dist/index.js status` shows the file it found and where each setting comes from (passwords as `<set>`).
+- `FOUNDRY_MCP_CONFIG` points to another file. With `FOUNDRY_MCP_STATE_DIR` set, the file is `<that directory>/config.env`.
+
+The same settings can still come from a client's `env` block or the system environment (they win over the file, setting by setting) and, for development, from a `.env` in the working directory (between the two). But the shared process serves every client with **one** configuration: a client whose `env` block disagrees with the running process is served with the running configuration, and its first tool result names the settings that are ignored. Keep the settings in the file.
+
+### Settings
 
 | Variable | Required | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `FOUNDRY_URL` | **Yes** | `http://localhost:30000` | FoundryVTT server URL |
+| `FOUNDRY_URL` | **Yes** | — | FoundryVTT server URL |
 | `FOUNDRY_USERNAME` | **Yes** | — | Dedicated user account name |
 | `FOUNDRY_PASSWORD` | **Yes** | — | Dedicated user password |
 | `FOUNDRY_WRITE_ENABLED` | No | `false` | Enables game-state mutations (walls, lights, tokens, items) |
@@ -79,11 +107,14 @@ Copy `.env.example` to `.env` in the server root and configure:
 | `FOUNDRY_API_KEY` | No | — | Optional REST API module key for server diagnostics |
 | `FOUNDRY_EVENT_BUFFER_SIZE` | No | `500` | In-memory event log ring buffer capacity |
 | `FOUNDRY_EVENT_WAIT_MS` | No | `25000` | Default long-polling timeout for `watch_events` |
+| `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` | No | `5` | The shared process stops (and leaves FoundryVTT) this long after the last client closes; `0` = never |
 | `LOG_LEVEL` | No | `info` | Logging verbosity (`debug`, `info`, `warn`, `error`) |
 
 ---
 
 ## 🔌 MCP Client Configurations
+
+With the settings in the configuration file, a client entry is only the command.
 
 ### Claude Desktop (`claude_desktop_config.json`)
 
@@ -92,18 +123,16 @@ Copy `.env.example` to `.env` in the server root and configure:
   "mcpServers": {
     "foundryvtt": {
       "command": "node",
-      "args": ["<ABSOLUTE_PATH_TO_REPO>/dist/index.js"],
-      "env": {
-        "FOUNDRY_URL": "http://localhost:30000",
-        "FOUNDRY_USERNAME": "mcp-api",
-        "FOUNDRY_PASSWORD": "mcp",
-        "FOUNDRY_WRITE_ENABLED": "true",
-        "FOUNDRY_MODULE_BRIDGE_ENABLED": "true",
-        "FOUNDRY_MODULE_BRIDGE_PORT": "31415"
-      }
+      "args": ["<ABSOLUTE_PATH_TO_REPO>/dist/index.js"]
     }
   }
 }
+```
+
+### Claude Code
+
+```bash
+claude mcp add foundryvtt -- node <ABSOLUTE_PATH_TO_REPO>/dist/index.js
 ```
 
 ### Oh My Pi (`~/.omp/agent/mcp.json`)
@@ -115,14 +144,6 @@ Copy `.env.example` to `.env` in the server root and configure:
       "type": "stdio",
       "command": "node",
       "args": ["<ABSOLUTE_PATH_TO_REPO>/dist/index.js"],
-      "env": {
-        "FOUNDRY_URL": "http://localhost:30000",
-        "FOUNDRY_USERNAME": "mcp-api",
-        "FOUNDRY_PASSWORD": "mcp",
-        "FOUNDRY_WRITE_ENABLED": "true",
-        "FOUNDRY_MODULE_BRIDGE_ENABLED": "true",
-        "FOUNDRY_MODULE_BRIDGE_PORT": "31415"
-      },
       "timeout": 60000
     }
   }

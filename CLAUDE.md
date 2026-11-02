@@ -76,6 +76,10 @@ The two transports in `client.ts` are **additive** (see `connect()` and
 
 ## Environment Variables
 
+Every setting resolves per name: environment, then `.env` in the working
+directory, then the shared configuration file, then the default
+(`src/config/sources.ts`). Never read `process.env.FOUNDRY_*` directly.
+
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `FOUNDRY_URL` | Yes | FoundryVTT server URL |
@@ -87,8 +91,9 @@ The two transports in `client.ts` are **additive** (see `connect()` and
 | `LOG_LEVEL` | No | `debug` for verbose output |
 | `FOUNDRY_TIMEOUT` | No | Request timeout (ms, default 10000) |
 | `FOUNDRY_MCP_SHARED` | No | `false` = all-in-one process instead of relay + shared process (default `true`) |
-| `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` | No | Shared process exits after this long with no relay connected (default 30, `0` = never) |
-| `FOUNDRY_MCP_STATE_DIR` | No | Isolated state dir (token, `daemon.json`, logs) with its own pipe — use it in tests |
+| `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` | No | Shared process exits after this long with no relay connected (default 5, `0` = never) |
+| `FOUNDRY_MCP_STATE_DIR` | No | Isolated state dir (token, `daemon.json`, logs, `config.env`) with its own pipe — use it in tests |
+| `FOUNDRY_MCP_CONFIG` | No | Configuration file to read instead of `<state dir>/config.env` (Windows) or `~/.config/foundryvtt-mcp/config.env` |
 
 ## Rules
 

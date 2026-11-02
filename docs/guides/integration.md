@@ -2,7 +2,7 @@
 
 ## Claude Desktop
 
-Add to your Claude Desktop MCP settings:
+Recommended: put the settings in the configuration file shared by every client (see the README, *Configuration File*) and leave the `env` block out. An `env` block still works:
 
 ```json
 {
@@ -20,7 +20,7 @@ Add to your Claude Desktop MCP settings:
 }
 ```
 
-To enable optional diagnostics tools, add `FOUNDRY_API_KEY` to the `env` block:
+To enable optional diagnostics tools, add `FOUNDRY_API_KEY` to the configuration file (or the `env` block):
 
 ```json
 {

@@ -34,7 +34,7 @@ The server provides detailed diagnostics on startup. Look for:
 **Symptoms**: Cannot connect to FoundryVTT server
 **Solutions**:
 1. **Start FoundryVTT**: Ensure FoundryVTT is running and accessible
-2. **Check URL**: Verify `FOUNDRY_URL` in your `.env` file
+2. **Check URL**: Verify `FOUNDRY_URL` in your configuration file (`node dist/index.js status` shows it)
    ```env
    FOUNDRY_URL=http://localhost:30000
    ```
@@ -52,7 +52,7 @@ The server provides detailed diagnostics on startup. Look for:
 #### "Timeout" Errors
 **Symptoms**: Connection attempts time out
 **Solutions**:
-1. **Increase timeout**: Add to `.env`:
+1. **Increase timeout**: Add to your configuration file:
    ```env
    FOUNDRY_TIMEOUT=20000
    ```
@@ -180,7 +180,7 @@ In the state directory — `%LOCALAPPDATA%\foundryvtt-mcp\` on Windows, `$XDG_ST
 | `daemon.json` | pid, version, start time, pipe and log path of the running shared process. |
 | `token` | Secret the relays present to the shared process. Do not share it. |
 
-`node dist/index.js status` prints the paths actually in use. Set `LOG_LEVEL=debug` in the client's `env` block for more detail (it applies to the shared process started next).
+`node dist/index.js status` prints the paths actually in use. Set `LOG_LEVEL=debug` in the configuration file for more detail, then `node dist/index.js stop` (it applies to the shared process started next).
 
 #### Inspecting and stopping the shared process
 ```bash
@@ -220,11 +220,30 @@ The shared process died (or was killed) while it ran the call. The call is **not
 #### "refused this relay (unauthorized …)"
 The `token` file changed while a shared process was running (deleted or edited by hand). End the shared process (see above); the next call starts one with the current token.
 
+#### Where is my configuration?
+`node dist/index.js status` answers, with or without a running shared process. Its last section, **This terminal**, shows the configuration file it looked for (and whether it exists) and every setting with where it comes from: `env` (an environment variable — a client's `env` block, or the system), `.env` (a `.env` in the working directory), `file` (the configuration file). With a shared process running, `status` also shows the settings that process runs with, and what each connected client declared. Passwords and API keys show as `<set>`.
+
+The file is `%LOCALAPPDATA%\foundryvtt-mcp\config.env` on Windows and `$XDG_CONFIG_HOME/foundryvtt-mcp/config.env` (or `~/.config/foundryvtt-mcp/config.env`) elsewhere; `FOUNDRY_MCP_CONFIG` names another one, and `FOUNDRY_MCP_STATE_DIR` moves it into that directory. See the README, *Configuration File*.
+
+#### "FoundryVTT MCP is not configured: …"
+No `FOUNDRY_URL` anywhere, or a setting that does not validate (the message names it and where it comes from). The server keeps running and lists its tools; every call answers with this message and reads the configuration again. Write the file at the path the message gives — at least `FOUNDRY_URL`, `FOUNDRY_USERNAME` and `FOUNDRY_PASSWORD`, each value between `'…'` — and call the tool again: no client restart needed.
+
+#### "This MCP client's own settings are ignored: …"
+The shared process serves every MCP client with **one** configuration, and this client passes settings of its own — usually an `env` block left in its configuration (or, for Claude Code, a `FOUNDRY_*` variable in the system environment, which it passes on; Claude desktop does not). They are not applied; the note names them and where they come from, and `node dist/index.js status` lists every client with its ignored settings. Remove the `env` block (or the variable) and restart that client, or, if its values are the ones you want, put them in the configuration file and run `node dist/index.js stop`.
+
+Only the connection settings count (URL, account and passwords, API key, socket path, writes, module bridge, headless GM session, data path). A client with another `LOG_LEVEL`, timeout or idle delay is served without a note: the shared process's values apply.
+
+#### The shared process restarted after I edited the configuration file
+Expected, once: a client whose settings match the file *as it is now* while the running process was started with other ones (the file changed, or a client's `env` block started it) restarts it with the file's settings. Running calls finish first. It never restarts in a loop: any other difference is served, with the note above. An unreadable or invalid file restarts nothing.
+
+#### The shared process stops on its own / `mcp-api` leaves Foundry's player list
+It stops `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` (5 by default) after the **last** MCP client closed (Claude desktop counts as closed only once quit from the notification area too), and leaves FoundryVTT then. Reopening a client within that delay keeps the same process; later, the first call starts a new one (a few seconds). `0` keeps it up for good. To stop it at once: `node dist/index.js stop`.
+
 #### The shared process keeps restarting / FoundryVTT reconnects often
-`daemon.log` shows `a relay with a different config connected` (or `version`): two MCP clients pass different settings (another `env` block, another `LOG_LEVEL`, an extra variable…) or run different versions of the server, and each one restarts the shared process with its own. Give every client the same `env` block and the same build, or set `FOUNDRY_MCP_SHARED=false` for one of them. After updating or rebuilding the server, restart your MCP clients so that all relays run the new build.
+`daemon.log` shows `a relay from a newer build … connected`: an MCP client runs a newer build than the shared process. Restart every MCP client after updating or rebuilding the server, so that all relays run the same build. (A different configuration no longer restarts it more than once — see above.)
 
 #### Configuration in `.env` ignored with Claude Desktop
-Claude Desktop starts MCP servers in `C:\Windows\System32`, where no `.env` file is looked up. Put the configuration in the `env` block of `claude_desktop_config.json`. A `.env` file is only read from the working directory of the process (handy for Claude Code or a terminal started in the repository).
+Claude Desktop starts MCP servers in `C:\Windows\System32`, where no `.env` file is looked up. Use the configuration file instead (see *Where is my configuration?*): every client reads it. A `.env` is only read from the working directory of the process (handy for development in the repository).
 
 #### Diagnostics Tools Not Working
 **Symptoms**: Health monitoring and log tools fail
@@ -232,17 +251,18 @@ Claude Desktop starts MCP servers in `C:\Windows\System32`, where no `.env` file
 1. **REST API module required**: These 5 tools require the optional Foundry Local REST API module
 2. **Install module**: Download from FoundryVTT's module browser
 3. **Enable module**: Activate it in your world's module settings
-4. **Set API key**: Add `FOUNDRY_API_KEY` to your `.env` file
+4. **Set API key**: Add `FOUNDRY_API_KEY` to your configuration file
 5. **Update module**: Ensure you have the latest version (v0.8.1+)
 
 ## Environment Configuration
 
-### .env File Template
+### Configuration File Template
+The configuration file (`%LOCALAPPDATA%\foundryvtt-mcp\config.env` on Windows, `~/.config/foundryvtt-mcp/config.env` elsewhere), or a `.env` for development:
 ```env
 # Required
 FOUNDRY_URL=http://localhost:30000
 FOUNDRY_USERNAME=your_username
-FOUNDRY_PASSWORD=your_password
+FOUNDRY_PASSWORD='your password'
 
 # Optional: Direct user ID bypass
 # FOUNDRY_USER_ID=abc123def456ghij
@@ -364,7 +384,7 @@ npm run lint                  # Code linting
 
 ### Health Check Checklist
 - [ ] FoundryVTT is running with an active world
-- [ ] `.env` file exists with `FOUNDRY_URL`, `FOUNDRY_USERNAME`, `FOUNDRY_PASSWORD`
+- [ ] The configuration file has `FOUNDRY_URL`, `FOUNDRY_USERNAME`, `FOUNDRY_PASSWORD` (`node dist/index.js status`, section *This terminal*)
 - [ ] Username matches a FoundryVTT user exactly (case-sensitive)
 - [ ] No firewall blocking connections
 - [ ] MCP server starts without errors
