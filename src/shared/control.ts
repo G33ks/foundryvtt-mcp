@@ -4,9 +4,18 @@
  * Connect as a `control` peer: no version/config check (so a terminal with
  * no FoundryVTT configuration can still inspect or stop the process), and
  * not counted as a relay for the idle timeout. Must not import the config
- * or the logger.
+ * or the logger (`config/sources.ts` resolves settings without validating).
  */
 
+import {
+  type ConfigFileState,
+  displayValue,
+  KNOWN_SETTINGS,
+  type ResolvedSettings,
+  resolveSettings,
+  type SettingSource,
+  summarizeSources,
+} from '../config/sources.js';
 import { EndpointUnavailableError, IpcConnection } from './ipc-client.js';
 import { isEndpointAlive } from './ipc-server.js';
 import { resolveSharedPaths, type SharedPaths } from './paths.js';
@@ -92,8 +101,7 @@ export function formatStatus(status: DaemonStatus): string[] {
   if (status.startupError) {
     lines.push(`  Startup error:  ${status.startupError}`);
   }
-  // A shared process older than `state` only says `enabled`.
-  const bridgeState = bridge?.state ?? (bridge?.enabled ? 'listening' : 'disabled');
+  const bridgeState = bridge?.state ?? 'disabled';
   const notStarted = status.foundryConnected
     ? 'not started yet'
     : 'not started (FoundryVTT connection failed)';
@@ -103,7 +111,79 @@ export function formatStatus(status: DaemonStatus): string[] {
   }
   lines.push(`  Headless GM:    ${formatHeadlessGm(headlessGm, bridgeState, notStarted)}`);
   lines.push(`  Endpoint:       ${status.endpoint}`, `  Log:            ${status.logFile}`);
+  if (status.config) {
+    lines.push('', 'Configuration of the shared process:');
+    lines.push(...formatConfig(status.config.file, status.config.settings));
+  }
+  if (status.relayConfigs && status.relayConfigs.length > 0) {
+    lines.push('', 'Clients (settings each relay declared):');
+    for (const relay of status.relayConfigs) {
+      lines.push(...formatRelayConfig(relay));
+    }
+  }
   return lines;
+}
+
+/** Configuration file line, then one line per setting that is not a default. */
+export function formatConfig(
+  file: ConfigFileState,
+  settings: Array<{ name: string; value: string; source: SettingSource }>,
+): string[] {
+  const lines = [`  File:           ${formatConfigFile(file)}`];
+  if (file.warning) {
+    lines.push(`  Warning:        ${file.warning}`);
+  }
+  if (settings.length === 0) {
+    lines.push('  Settings:       none set (defaults only)');
+  }
+  const width = Math.max(0, ...settings.map((s) => s.name.length));
+  for (const setting of settings) {
+    lines.push(`    ${setting.name.padEnd(width)} = ${setting.value}  (${setting.source})`);
+  }
+  return lines;
+}
+
+function formatConfigFile(file: ConfigFileState): string {
+  if (file.error) {
+    return `${file.path} (${file.error})`;
+  }
+  return `${file.path} (${file.found ? 'found' : 'not found'})`;
+}
+
+function formatRelayConfig(relay: NonNullable<DaemonStatus['relayConfigs']>[number]): string[] {
+  const name = `  Relay ${relay.pid ?? '(pid unknown)'} (v${relay.version}): `;
+  const lines = [
+    name +
+      (relay.sources === null
+        ? 'an older build that does not declare its settings'
+        : summarizeSources(relay.sources)),
+  ];
+  if (relay.ignored === null) {
+    lines.push('    served with the shared process configuration; its own differs');
+  } else if (relay.ignored.length > 0) {
+    lines.push(
+      `    served with the shared process configuration; ignored: ${relay.ignored
+        .map((s) => `${s.name} (from ${s.source})`)
+        .join(', ')}`,
+    );
+  }
+  return lines;
+}
+
+/** `status` section for the configuration this command resolves itself. */
+export function formatTerminalConfig(settings: ResolvedSettings = resolveSettings()): string[] {
+  return [
+    '',
+    'This terminal (configuration resolved by this command):',
+    ...formatConfig(
+      settings.file,
+      KNOWN_SETTINGS.filter((name) => settings.values[name] !== undefined).map((name) => ({
+        name,
+        value: displayValue(name, settings.values[name]),
+        source: settings.sources[name],
+      })),
+    ),
+  ];
 }
 
 function formatFoundryConnection(status: DaemonStatus): string {
@@ -111,7 +191,6 @@ function formatFoundryConnection(status: DaemonStatus): string {
     return 'connected';
   }
   const connection = status.foundryConnection;
-  // A shared process older than `foundryConnection`, or one never connected.
   if (!connection || connection.state === 'disconnected') {
     return connection?.error ? `not connected — ${connection.error}` : 'not connected';
   }
@@ -133,13 +212,9 @@ function formatBridge(
     return notStarted;
   }
   return (
-    `listening on port ${bridge.port}, ` +
-    (bridge.protocol === undefined
-      ? // A shared process from before bridge authentication.
-        `no authentication, module connected: ${yesNo(bridge.moduleConnected)}`
-      : `protocol v${bridge.protocol}, authenticated module connected: ` +
-        yesNo(bridge.moduleConnected) +
-        (bridge.moduleConnectedSince ? ` (since ${bridge.moduleConnectedSince})` : ''))
+    `listening on port ${bridge.port}, protocol v${bridge.protocol}, authenticated module connected: ` +
+    yesNo(bridge.moduleConnected) +
+    (bridge.moduleConnectedSince ? ` (since ${bridge.moduleConnectedSince})` : '')
   );
 }
 
@@ -151,8 +226,7 @@ function formatHeadlessGm(
   if (headlessGm?.launchError) {
     return `browser launch failed — ${headlessGm.launchError}`;
   }
-  // A shared process older than `state` only says `enabled`.
-  const state = headlessGm?.state ?? (headlessGm?.enabled ? 'running' : 'disabled');
+  const state = headlessGm?.state ?? 'disabled';
   if (!headlessGm || state === 'disabled') {
     return 'disabled';
   }
@@ -161,11 +235,14 @@ function formatHeadlessGm(
       ? 'not started (the module bridge failed to start)'
       : notStarted;
   }
-  if (headlessGm.modeText && headlessGm.sessionState) {
-    const state = headlessGm.active ? 'logged in' : headlessGm.sessionState;
-    return `${state} — ${headlessGm.modeText}`;
+  const session = headlessGm.active ? 'logged in' : (headlessGm.sessionState ?? 'not logged in');
+  return `${session} — ${headlessGm.modeText ?? headlessGm.status ?? ''}`;
+}
+
+function printLines(lines: string[]): void {
+  for (const line of lines) {
+    console.log(line);
   }
-  return `${headlessGm.active ? 'logged in' : 'not logged in'} (${headlessGm.status})`;
 }
 
 function printNotRunning(paths: SharedPaths): void {
@@ -182,13 +259,12 @@ export async function runStatus(paths: SharedPaths = resolveSharedPaths()): Prom
   const connection = await connectControl(paths);
   if (!connection) {
     printNotRunning(paths);
+    printLines(formatTerminalConfig());
     return EXIT_NOT_RUNNING;
   }
   try {
     const status = DaemonStatusSchema.parse(await connection.request('status'));
-    for (const line of formatStatus(status)) {
-      console.log(line);
-    }
+    printLines([...formatStatus(status), ...formatTerminalConfig()]);
     return 0;
   } finally {
     connection.close();

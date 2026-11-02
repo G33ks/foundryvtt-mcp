@@ -453,6 +453,17 @@ describe('handleGetHealthStatus', () => {
     );
   });
 
+  it('shows the configuration file and where the settings come from', async () => {
+    const text = getText(
+      await handleGetHealthStatus({}, worldClient(true), healthClient(makeHealth()), null, null, {
+        configuration: { file: 'C:Lconfig.env (found)', sources: '15 from file, 1 from env' },
+      }),
+    );
+    expect(text).toContain('**Configuration:**');
+    expect(text).toContain('- **File:** C:Lconfig.env (found)');
+    expect(text).toContain('- **Settings:** 15 from file, 1 from env');
+  });
+
   it('degrades gracefully when world info is unavailable', async () => {
     const failingWorld = {
       isConnected: () => false,

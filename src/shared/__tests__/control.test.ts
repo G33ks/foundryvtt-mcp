@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatStatus } from '../control.js';
+import { formatStatus, formatTerminalConfig } from '../control.js';
 import type { DaemonStatus } from '../protocol.js';
 
 const BASE: DaemonStatus = {
@@ -102,7 +102,7 @@ describe('formatStatus', () => {
       '  Module bridge:  listening on port 31415, protocol v1, authenticated module connected: no',
     );
     expect(line(status, 'Headless GM')).toBe(
-      '  Headless GM:    logged in (✅ Logged in as `mcp-gm`)',
+      '  Headless GM:    logged in — ✅ Logged in as `mcp-gm`',
     );
   });
 
@@ -172,5 +172,67 @@ describe('formatStatus', () => {
     };
     expect(line(status, 'Account')).toBe('  Account:        mcp-api (Gamemaster)');
     expect(line(status, 'Warning')).toBe('  Warning:        Make this account an Assistant GM.');
+  });
+});
+
+describe('configuration in status', () => {
+  const STATUS: DaemonStatus = {
+    ...BASE,
+    config: {
+      file: { path: 'C:L\foundryvtt-mcpconfig.env', found: true, error: null, warning: null },
+      settings: [
+        { name: 'FOUNDRY_URL', value: 'https://foundry.example', source: 'file' },
+        { name: 'FOUNDRY_PASSWORD', value: '<set>', source: 'file' },
+        { name: 'LOG_LEVEL', value: 'debug', source: 'env' },
+      ],
+    },
+    relayConfigs: [
+      {
+        pid: 11,
+        version: '1.5.2+b',
+        sources: { FOUNDRY_URL: 'file', LOG_LEVEL: 'env' },
+        ignored: [],
+      },
+      {
+        pid: 12,
+        version: '1.5.2+b',
+        sources: { FOUNDRY_URL: 'file', FOUNDRY_WRITE_ENABLED: 'env' },
+        ignored: [{ name: 'FOUNDRY_WRITE_ENABLED', source: 'env' }],
+      },
+      { pid: null, version: '1.5.2+a', sources: null, ignored: null },
+    ],
+  };
+
+  it("shows the shared process's file and each setting with its source", () => {
+    const lines = formatStatus(STATUS);
+    expect(lines).toContain('Configuration of the shared process:');
+    expect(lines).toContain('  File:           C:L\foundryvtt-mcpconfig.env (found)');
+    expect(lines).toContain('    FOUNDRY_PASSWORD = <set>  (file)');
+    expect(lines).toContain('    LOG_LEVEL        = debug  (env)');
+  });
+
+  it('lists each relay, its provenance and its ignored settings', () => {
+    const lines = formatStatus(STATUS);
+    expect(lines).toContain('  Relay 11 (v1.5.2+b): 1 from file, 1 from env');
+    expect(lines).toContain(
+      '    served with the shared process configuration; ignored: FOUNDRY_WRITE_ENABLED (from env)',
+    );
+    expect(lines).toContain(
+      '  Relay (pid unknown) (v1.5.2+a): an older build that does not declare its settings',
+    );
+    expect(lines).toContain('    served with the shared process configuration; its own differs');
+  });
+
+  it("shows this terminal's own resolution, secrets masked", () => {
+    const lines = formatTerminalConfig({
+      values: { FOUNDRY_URL: 'http://x', FOUNDRY_PASSWORD: 'hunter2' },
+      sources: { FOUNDRY_URL: 'env', FOUNDRY_PASSWORD: '.env' } as never,
+      file: { path: '/cfg/config.env', found: false, error: null, warning: null },
+      dotenvPath: null,
+    });
+    expect(lines).toContain('This terminal (configuration resolved by this command):');
+    expect(lines).toContain('  File:           /cfg/config.env (not found)');
+    expect(lines.join('\n')).toContain('FOUNDRY_PASSWORD = <set>  (.env)');
+    expect(lines.join('\n')).not.toContain('hunter2');
   });
 });

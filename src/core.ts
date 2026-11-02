@@ -14,7 +14,8 @@ import {
   McpError,
   type ReadResourceResult,
 } from '@modelcontextprotocol/sdk/types.js';
-import { config } from './config/index.js';
+import { config, configSettings } from './config/index.js';
+import { summarizeSources } from './config/sources.js';
 import { DiagnosticsClient } from './diagnostics/client.js';
 import { NoActiveWorldError } from './foundry/auth.js';
 import {
@@ -104,6 +105,19 @@ export interface CoreStatus {
 export interface FoundryCoreOptions {
   /** Relays of the shared process hosting this core, for `get_health_status`. */
   relays?: () => NonNullable<HealthRuntime['relays']>;
+}
+
+/** One line for get_health_status: the configuration file and where settings come from. */
+function configurationSummary(): { file: string; sources: string } | undefined {
+  let settings: ReturnType<typeof configSettings>;
+  try {
+    settings = configSettings();
+  } catch {
+    return undefined;
+  }
+  const { file, sources } = settings;
+  const state = file.error ? file.error : file.found ? 'found' : 'not found';
+  return { file: `${file.path} (${state})`, sources: summarizeSources(sources) };
 }
 
 export class FoundryCore {
@@ -418,11 +432,13 @@ export class FoundryCore {
   }
 
   private healthRuntime(): HealthRuntime {
+    const configuration = configurationSummary();
     return {
       ...(this.options.relays ? { relays: this.options.relays() } : {}),
       ...(this.headlessLaunchError ? { headlessLaunchError: this.headlessLaunchError } : {}),
       bridgeState: this.bridgeState(),
       sharedAccount: this.headlessGmSession?.mode() === 'shared',
+      ...(configuration ? { configuration } : {}),
       ...(this.bridgeError ? { bridgeError: this.bridgeError } : {}),
     };
   }

@@ -43,6 +43,8 @@ export interface HealthRuntime {
   bridgeError?: string;
   /** The headless GM page shares the connector's account (single-account mode). */
   sharedAccount?: boolean;
+  /** The configuration file of this process and where its settings come from. */
+  configuration?: { file: string; sources: string };
 }
 
 function sharedProcessSection(relays: NonNullable<HealthRuntime['relays']>): string {
@@ -528,6 +530,14 @@ ${worldLines.join('\n')}
 **System Health:**
 ${healthSection}${moduleBridgeSection ? `\n\n**Module Bridge:**\n${moduleBridgeSection}` : ''}${headlessSection}${
   runtime.relays ? `\n\n**Shared Process:**\n${sharedProcessSection(runtime.relays)}` : ''
+}
+
+**Configuration:**
+${
+  runtime.configuration
+    ? `- **File:** ${runtime.configuration.file}
+- **Settings:** ${runtime.configuration.sources}`
+    : 'ℹ️ Not available'
 }
 
 **Journal Integrity:**
