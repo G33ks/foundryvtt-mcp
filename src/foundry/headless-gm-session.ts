@@ -85,6 +85,67 @@ function firstLine(text: string): string {
 }
 
 /**
+ * Launches the headless browser: the explicit `executablePath` (no fallback),
+ * else the first browser found that starts. Every launch gets
+ * {@link HEADLESS_BROWSER_ARGS} and Playwright's throwaway profile.
+ *
+ * @throws with the real launch errors; install advice and the locations
+ *   tried only when no browser was found at all
+ */
+export async function launchHeadlessBrowser(options: {
+  executablePath?: string;
+  findBrowsers?: () => BrowserSearch;
+}): Promise<{ browser: Browser; choice: BrowserChoice }> {
+  const args = [...HEADLESS_BROWSER_ARGS];
+  const { executablePath } = options;
+  if (executablePath) {
+    try {
+      const browser = await chromium.launch({ headless: true, executablePath, args });
+      return {
+        browser,
+        choice: {
+          name: browserNameFromPath(executablePath),
+          path: executablePath,
+          origin: 'configured',
+        },
+      };
+    } catch (error) {
+      throw new Error(
+        `Could not launch the browser at FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH=${executablePath}: ` +
+          `${errorText(error)}. Check the path: it must point to the executable of a ` +
+          'Chromium-based browser (Chrome, Edge, Brave, Chromium).',
+      );
+    }
+  }
+
+  const { found, tried } = (options.findBrowsers ?? defaultBrowserSearch)();
+  // Install advice only when nothing was found: a browser that is there
+  // but fails to start needs its real error, not a hint to install another.
+  if (found.length === 0) {
+    throw new Error(noBrowserMessage(tried));
+  }
+  const failures: string[] = [];
+  for (const candidate of found) {
+    try {
+      const browser = await chromium.launch({
+        headless: true,
+        executablePath: candidate.path,
+        args,
+      });
+      if (failures.length > 0) {
+        logger.warn(`Headless GM session: using ${candidate.name} — ${failures.join('; ')}`);
+      }
+      return { browser, choice: { ...candidate, origin: 'detected' } };
+    } catch (error) {
+      failures.push(`${candidate.name} (${candidate.path}): ${firstLine(errorText(error))}`);
+    }
+  }
+  throw new Error(
+    `Could not launch a browser for the headless GM session. Attempts: ${failures.join('; ')}`,
+  );
+}
+
+/**
  * Chromium features that stop the companion module from reaching
  * {@link ModuleBridge}. The page is served from `FOUNDRY_URL` (often a public
  * origin) while the bridge listens on `ws://localhost`, and recent Chromium
@@ -676,52 +737,9 @@ export class HeadlessGmSession {
   }
 
   private async launchBrowser(): Promise<Browser> {
-    const args = [...HEADLESS_BROWSER_ARGS];
-    const { executablePath } = this.options;
-    if (executablePath) {
-      try {
-        const browser = await chromium.launch({ headless: true, executablePath, args });
-        this.browserChoice = {
-          name: browserNameFromPath(executablePath),
-          path: executablePath,
-          origin: 'configured',
-        };
-        return browser;
-      } catch (error) {
-        throw new Error(
-          `Could not launch the browser at FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH=${executablePath}: ` +
-            `${errorText(error)}. Check the path: it must point to the executable of a ` +
-            'Chromium-based browser (Chrome, Edge, Brave, Chromium).',
-        );
-      }
-    }
-
-    const { found, tried } = (this.options.findBrowsers ?? defaultBrowserSearch)();
-    // Install advice only when nothing was found: a browser that is there
-    // but fails to start needs its real error, not a hint to install another.
-    if (found.length === 0) {
-      throw new Error(noBrowserMessage(tried));
-    }
-    const failures: string[] = [];
-    for (const candidate of found) {
-      try {
-        const browser = await chromium.launch({
-          headless: true,
-          executablePath: candidate.path,
-          args,
-        });
-        this.browserChoice = { ...candidate, origin: 'detected' };
-        if (failures.length > 0) {
-          logger.warn(`Headless GM session: using ${candidate.name} — ${failures.join('; ')}`);
-        }
-        return browser;
-      } catch (error) {
-        failures.push(`${candidate.name} (${candidate.path}): ${firstLine(errorText(error))}`);
-      }
-    }
-    throw new Error(
-      `Could not launch a browser for the headless GM session. Attempts: ${failures.join('; ')}`,
-    );
+    const { browser, choice } = await launchHeadlessBrowser(this.options);
+    this.browserChoice = choice;
+    return browser;
   }
 
   private scheduleLogin(delayMs: number): void {

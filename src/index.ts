@@ -13,6 +13,8 @@
  * - `daemon`      the shared process owning the FoundryVTT connection.
  * - `status`      print the shared process's state.
  * - `stop`        stop the shared process.
+ * - `init`        write the configuration file interactively; `init --check`
+ *                 checks the existing configuration without writing anything.
  * - `daemon-launch` internal: starts `daemon` detached and exits (see shared/spawn.ts).
  *
  * Each role is imported on demand so the relay and the control commands do
@@ -41,6 +43,11 @@ async function main(role: string | undefined): Promise<void> {
       process.exit(await runStop());
       break;
     }
+    case 'init': {
+      const { runInit } = await import('./cli/init.js');
+      process.exit(await runInit(process.argv.slice(3), ENTRY));
+      break;
+    }
     case 'daemon-launch': {
       const { runDaemonLauncher } = await import('./shared/spawn.js');
       runDaemonLauncher(ENTRY);
@@ -66,7 +73,7 @@ async function main(role: string | undefined): Promise<void> {
     }
     default:
       process.stderr.write(
-        `Unknown command: ${role}\nUsage: foundryvtt-mcp [daemon | status | stop]\n`,
+        `Unknown command: ${role}\nUsage: foundryvtt-mcp [init [--check] | daemon | status | stop]\n`,
       );
       process.exit(2);
   }

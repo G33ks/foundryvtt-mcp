@@ -57,6 +57,11 @@ export class Logger {
     this.logLevel = logLevel;
   }
 
+  /** Overrides the configured level (`init` keeps its terminal output to its own messages). */
+  setLevel(level: LogLevel): void {
+    this.logLevel = level;
+  }
+
   /**
    * Also writes every emitted line to `sink` (e.g. a log file). The shared
    * process runs detached with no stderr, so its sink is the only output.

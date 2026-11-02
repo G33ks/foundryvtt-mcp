@@ -54,7 +54,7 @@ export class NoActiveWorldError extends RefusedError {
  * A hint only — English text that may change: the decision is
  * {@link fetchJoinUsers} returning no user list.
  */
-function isNoWorldPage(data: unknown): boolean {
+export function isNoWorldPage(data: unknown): boolean {
   return (
     typeof data === 'string' &&
     /There is currently no active game session|<title>[^<]*No Active Game/i.test(data)
