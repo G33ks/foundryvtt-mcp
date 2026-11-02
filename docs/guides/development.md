@@ -75,22 +75,3 @@ npm run clean && npm run build
 # Development mode with hot reload
 npm run dev
 ```
-
-## API Documentation (TypeDoc)
-
-Complete API documentation is auto-generated from TypeScript source code and JSDoc comments.
-
-```bash
-npm run docs        # Generate documentation
-npm run docs:serve  # Generate and serve locally
-```
-
-### What's Documented
-
-- **FoundryClient API** — complete client documentation with examples
-- **TypeScript Interfaces** — all data structures and type definitions
-- **Configuration** — environment variables and setup options
-- **Utilities** — helper functions and logging
-- **Usage Examples** — code samples for common operations
-
-The documentation is automatically updated via GitHub Actions when source code changes.
