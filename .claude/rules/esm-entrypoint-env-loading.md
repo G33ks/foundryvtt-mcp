@@ -30,7 +30,7 @@ export const logger = new Logger(config.logLevel);   // ← resolves the WHOLE c
 but that access is this line, during import evaluation. Configuration was
 therefore validated before `.env` was read, and startup died with
 `Configuration validation failed` while the help text told the user to check
-the `.env` file it had just ignored. `scripts/test-connection.ts` carried the
+the `.env` file it had just ignored. `scripts/test-connection.ts` (since removed) carried the
 identical defect.
 
 The reporter diagnosed it as a missing `dotenv` dependency. It was not:

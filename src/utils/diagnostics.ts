@@ -205,7 +205,7 @@ export class DiagnosticSystem {
       output += '  1. Ensure FoundryVTT is running and accessible\n';
       output += '  2. Check FOUNDRY_URL in your .env file\n';
       output += '  3. Verify network connectivity\n';
-      output += '  4. Test with: `npm run test-connection`\n';
+      output += '  4. Check the configuration with: `foundryvtt-mcp init --check`\n';
     }
 
     return output;
@@ -220,7 +220,7 @@ export class DiagnosticSystem {
       suggestions:
         "• **Check if FoundryVTT is running** - Start FoundryVTT and ensure it's accessible\n" +
         `• **Verify server URL** - Check that \`${config.foundry.url}\` is correct\n` +
-        '• **Test connectivity** - Run `npm run test-connection` for detailed diagnostics\n' +
+        '• **Test connectivity** - Run `foundryvtt-mcp init --check` for a step-by-step check\n' +
         '• **Check firewall** - Ensure no firewall is blocking the connection',
       severity: 'critical',
       canContinue: false,

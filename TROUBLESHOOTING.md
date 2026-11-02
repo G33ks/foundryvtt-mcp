@@ -4,18 +4,24 @@ This guide helps you diagnose and resolve common issues with the FoundryVTT MCP 
 
 ## Quick Diagnostics
 
-### Setup Wizard (Recommended for New Users)
+### `init --check` (start here)
 ```bash
-npm run setup-wizard
+node dist/index.js init --check     # or: foundryvtt-mcp init --check
 ```
-The interactive setup wizard will detect your FoundryVTT installation and guide you through configuration.
+Checks the configuration the connector would use, step by step, without asking
+anything or writing anything — safe while the shared process runs:
+
+1. the address answers, with a world running (TLS checked like the connector does);
+2. the account logs in, with a GM role (Assistant GM recommended);
+3. the companion module `foundryvtt-mcp-bridge` is installed and enabled in the world (and its version);
+4. a Chromium-based browser starts headless for the invisible GM session.
+
+Each failed step says what to fix. To write or fix the configuration
+interactively, run `node dist/index.js init` (see [SETUP_GUIDE.md](SETUP_GUIDE.md)).
 
 ### Health Check
 ```bash
-# Test connection directly:
-npm run test-connection
-
-# Or use the MCP tool for comprehensive diagnostics (requires REST API module):
+node dist/index.js status            # the shared process: connection, bridge, browser
 # In your AI client, run: get_health_status
 ```
 
@@ -287,9 +293,9 @@ LOG_LEVEL=info
 ```
 
 ### Configuration Validation
-Run the setup wizard to validate your configuration:
+Check your configuration against the live FoundryVTT:
 ```bash
-npm run setup-wizard
+node dist/index.js init --check
 ```
 
 ## Advanced Diagnostics
@@ -359,7 +365,7 @@ If you continue to experience problems:
 
 1. **Run diagnostics**:
    ```bash
-   npm run test-connection
+   node dist/index.js init --check
    ```
 
 2. **Gather information**:
@@ -380,8 +386,8 @@ If you continue to experience problems:
 ### Common Commands
 ```bash
 # Setup and configuration
-npm run setup-wizard          # Interactive setup
-npm run test-connection       # Test connectivity
+node dist/index.js init           # Interactive setup (writes the configuration file)
+node dist/index.js init --check   # Check the configuration, writes nothing
 npm run build                 # Build the project
 npm start                     # Start the MCP server
 

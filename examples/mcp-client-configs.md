@@ -178,7 +178,7 @@ FOUNDRY_TIMEOUT=15000
 1. **Test the MCP server standalone**:
    ```bash
    cd /path/to/foundryvtt-mcp
-   npm run test-connection
+   node dist/index.js init --check
    ```
 
 2. **Test MCP client connection**:
@@ -227,7 +227,7 @@ Once connected, try these prompts with your AI assistant:
 2. **"Tool not available" errors**
    - Check if FoundryVTT is accessible
    - Verify environment variables are set correctly
-   - Try `npm run test-connection` to diagnose
+   - Try `node dist/index.js init --check` to diagnose
 
 3. **"Empty results" or limited functionality**
    - Ensure a **world is loaded** in FoundryVTT (the server needs an active world, not the setup screen)

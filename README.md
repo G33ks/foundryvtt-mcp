@@ -37,7 +37,7 @@ Your AI assistant starts a small relay program for this server. Every relay, fro
 
 - **Live world cache**: on connect, the server loads the world over Socket.IO and keeps it in memory; every `modifyDocument` broadcast — from the AI's own writes or from any user in Foundry — updates it, so reads are instant and stay current. `refresh_world_data` forces a full reload.
 - **Socket.IO connection**: authenticates as `FOUNDRY_USERNAME` (Assistant GM role recommended) and performs every write over Foundry's core `modifyDocument` protocol — only when `FOUNDRY_WRITE_ENABLED=true`. It is the only side that logs in: when Foundry forgets its session (server restart, world shut down) it logs in again by itself, retrying every 5 s at first and at most every 2 min, and tool calls made meanwhile wait up to 15 s before being refused with the reason.
-- **Invisible GM session**: started when `FOUNDRY_MODULE_BRIDGE_ENABLED=true`. The shared process drives a background browser through `playwright-core`: Chrome, then Edge, then Playwright's own Chromium (`npx playwright install chromium`), or any Chromium-based browser set in `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`. The page shares the Socket.IO connection's session — one account, one login — and never fills the `/join` form: Foundry keeps several connections per session, so neither ejects the other. The page stays on `/game` (a navigation elsewhere, such as **Log Out**, is blocked and the page reloads `/game`, because leaving would log the shared session out). A watchdog reloads the page if the module stays disconnected for about a minute. Advanced: `FOUNDRY_HEADLESS_GM_USERNAME` / `FOUNDRY_HEADLESS_GM_PASSWORD` naming another account give the page its own login instead. A human can meanwhile play as a normal **Player** in their own browser.
+- **Invisible GM session**: started when `FOUNDRY_MODULE_BRIDGE_ENABLED=true`. The shared process drives a background browser through `playwright-core`: the first one found among Chrome, Edge, Brave, Vivaldi, a system Chromium and Playwright's own Chromium (`npx playwright install chromium`), or the Chromium-based browser set in `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`. The page shares the Socket.IO connection's session — one account, one login — and never fills the `/join` form: Foundry keeps several connections per session, so neither ejects the other. The page stays on `/game` (a navigation elsewhere, such as **Log Out**, is blocked and the page reloads `/game`, because leaving would log the shared session out). A watchdog reloads the page if the module stays disconnected for about a minute. Advanced: `FOUNDRY_HEADLESS_GM_USERNAME` / `FOUNDRY_HEADLESS_GM_PASSWORD` naming another account give the page its own login instead. A human can meanwhile play as a normal **Player** in their own browser.
 - **Companion module** (`foundryvtt-mcp-bridge`, 0.5.0 or later): runs only in that GM session and serves the bridge tools — `capture_scene` (canvas screenshot with a grid overlay), `roll_and_post` (native `Roll` chat cards), `get_document_schema`, `search_compendium_content` and compendium imports, `upload_asset` (FilePicker), `set_pause`, `ping_canvas`, `set_target` / `get_targets`. Without it these tools report unavailable; everything else keeps working. The bridge listens on loopback only and authenticates the module — see [Module Bridge Security](#module-bridge-security).
 - **Optional REST API module**: with `FOUNDRY_API_KEY` set, the server also connects to the Foundry Local REST API module over HTTP. It backs the diagnostics tools (`get_health_status`, `get_system_health`, `get_recent_logs`, `search_logs`, `diagnose_errors`) and `search_compendium`, and some reads use it instead of the cache (actor and item search, actor details, scene and world info, `roll_dice`). Socket.IO stays the main connection and carries every write.
 - **Shared process** (default): MCP clients may start several server instances — Claude Desktop starts several at launch — so each instance is only a lightweight relay, and the FoundryVTT connection, the bridge and the GM session live once, in a background process every relay shares. See [Shared Process Mode](#shared-process-mode); `FOUNDRY_MCP_SHARED=false` runs everything in one process instead.
@@ -86,7 +86,7 @@ Your AI assistant starts a small relay program for this server. Every relay, fro
 - **Node.js 18+** or **Bun**
 - **FoundryVTT v13 or v14** running an active world (the versions the server handles explicitly; older versions are not verified)
 - A dedicated Foundry user account with the **Assistant GM** role (Gamemaster works too, with the caveat below)
-- **A Chromium-based browser installed** (for the automatic headless GM browser session — see below): Google Chrome or Microsoft Edge are detected automatically; any other Chromium browser (Brave, Vivaldi…) works through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`
+- **A Chromium-based browser installed** (for the automatic headless GM browser session — see below): Google Chrome, Microsoft Edge, Brave, Vivaldi and Chromium are detected automatically; any other Chromium browser works through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`
 
 ### 2. Configure Dedicated Foundry User
 
@@ -123,7 +123,9 @@ Every MCP client on the machine shares **one configuration file**, so a client e
 
 `FOUNDRY_MCP_CONFIG` names another file and wins over everything; with `FOUNDRY_MCP_STATE_DIR` set, the file is `<that directory>/config.env` (a fully isolated setup, for tests).
 
-One `KEY=value` per line, with exactly the names of the variables below; `#` starts a comment:
+**The easy way:** after `npm install` and `npm run build`, run `node dist/index.js init` (or `foundryvtt-mcp init`) in a terminal. It asks for the address, the account and whether the assistant may change the game, checks each answer against your FoundryVTT (world running, GM role, companion module enabled, browser), writes the file, and prints the entries to paste into Claude desktop and Claude Code — see [SETUP_GUIDE.md](SETUP_GUIDE.md#5-run-init). `node dist/index.js init --check` re-runs the checks on the existing file, without asking or writing anything.
+
+By hand: one `KEY=value` per line, with exactly the names of the variables below; `#` starts a comment:
 
 ```env
 FOUNDRY_URL=https://foundry.example.com
@@ -168,7 +170,7 @@ The same names work in the configuration file, in an `env` block, in the system 
 
 #### Choosing the Headless GM Browser
 
-Without `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`, the server tries Google Chrome, then Microsoft Edge, then Playwright's own Chromium (only present after `npx playwright install chromium`). To use another Chromium-based browser such as Brave or Vivaldi, point the variable at its executable, in the configuration file:
+Without `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`, the server looks at the usual install locations for Google Chrome, then Microsoft Edge, Brave, Vivaldi, a system Chromium, and last Playwright's own Chromium (only present after `npx playwright install chromium`), and uses the first one that starts. `status` and `get_health_status` show which (`detected`). To choose the browser — another Chromium-based one, or one installed elsewhere — point the variable at its executable in the configuration file; it is then used with no fallback (`configured`):
 
 ```env
 FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH='C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe'

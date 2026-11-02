@@ -39,7 +39,7 @@ install:
 
 # Full project setup: install, build, verify connection
 [group: "dev"]
-setup: install build test-connection
+setup: install build check-config
 
 # Show project status and environment
 [group: "dev"]
@@ -76,10 +76,10 @@ test-watch:
 test-coverage:
     bun run test:coverage
 
-# Test connection to FoundryVTT server
+# Check the configuration against FoundryVTT (no questions, writes nothing)
 [group: "test"]
-test-connection:
-    bun run test-connection
+check-config:
+    node dist/index.js init --check
 
 # Run integration tests against an ALREADY-RUNNING :30001 container (needs .env.integration)
 [group: "test"]
@@ -185,10 +185,10 @@ setup-env:
     sed -i '' 's/^    //' .env
     echo ".env file created - update with your settings"
 
-# Run the interactive setup wizard
+# Write the configuration file interactively
 [group: "env"]
-setup-wizard:
-    bunx tsx scripts/setup-wizard.ts
+init:
+    node dist/index.js init
 
 # Set up full development environment
 [group: "env"]

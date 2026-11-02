@@ -39,10 +39,10 @@ dev: ## Start development server with hot reload
 install: ## Install dependencies
 	npm install
 
-setup: install build test-connection ## Full project setup
+setup: install build check-config ## Full project setup
 
 # Testing targets
-.PHONY: test test-unit test-watch test-coverage test-connection
+.PHONY: test test-unit test-watch test-coverage check-config
 test: ## Run all unit tests
 	npm test
 
@@ -54,8 +54,8 @@ test-watch: ## Run tests in watch mode
 test-coverage: ## Generate test coverage report
 	npm run test:coverage
 
-test-connection: ## Test connection to FoundryVTT server
-	npm run test-connection
+check-config: ## Check the configuration against FoundryVTT (init --check)
+	node dist/index.js init --check
 
 # End-to-End testing targets
 .PHONY: test-e2e test-e2e-ui test-e2e-headed test-e2e-debug test-e2e-report

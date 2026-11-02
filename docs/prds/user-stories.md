@@ -65,7 +65,7 @@ All gated on `FOUNDRY_API_KEY`.
 
 | ID | Story | Surface | Coverage |
 |---|---|---|---|
-| CN-1 | As a new user, I run the setup wizard and get a working `.env`. | `scripts/setup-wizard.ts` | ❌ |
+| CN-1 | As a new user, I run `init` and get a working configuration file. | `src/cli/init.ts` (`foundryvtt-mcp init`, `init --check`) | ✅ unit-tested (`src/cli/__tests__/`) |
 | CN-2 | As a user behind a reverse proxy, I configure HTTPS + custom socket path. | `FOUNDRY_URL`, `FOUNDRY_SOCKET_PATH` | ⚠ config schema tested; live HTTPS path not |
 | CN-3 | As a user, plaintext HTTP to a non-localhost host warns me. | `auth.ts:117-132` | ❌ warning is emitted in code; no unit test asserts `logger.warn` is called |
 | CN-4 | As a user with `FOUNDRY_USER_ID` set, I skip the username→ID lookup step. | `auth.ts:47-52`, `client.ts:146` | ⚠ `auth.integration.test.ts:41-62` covers ID resolution; pure unit branch (16-char regex shortcut, no Socket.IO emit) not isolated |

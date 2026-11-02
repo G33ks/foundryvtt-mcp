@@ -21,7 +21,7 @@ bun run test:e2e       # E2E tests (Playwright, headless)
 bun run lint           # Lint code (Biome)
 bun run lint:fix       # Auto-fix lint issues
 bun run format         # Format code (Biome)
-bun run test-connection # Test MCP→FoundryVTT connection
+node dist/index.js init --check # Check the configuration against FoundryVTT
 ```
 
 ## Architecture

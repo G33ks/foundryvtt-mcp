@@ -8,7 +8,7 @@ script.
 
 ## The cost (real: PR #193)
 
-`scripts/test-connection.ts` carried two latent bugs that the build never
+`scripts/test-connection.ts` (since removed, replaced by `init --check`) carried two latent bugs that the build never
 caught because the file isn't in the `tsc` set:
 
 | Bug | Why tsc would have caught it | Failed at |

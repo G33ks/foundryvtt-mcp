@@ -10,13 +10,13 @@ This guide walks you through setting up and configuring the FoundryVTT Model Con
 - **Node.js 18+** or **Bun** installed.
 - **FoundryVTT v13 or v14** (the versions the server handles explicitly; older versions are not verified) running with an **active world** (not on the world selection/setup screen).
 - An MCP client (Claude Desktop, Claude Code, Oh My Pi, VS Code, Cursor).
-- **A Chromium-based browser installed**, for the automatic headless GM browser session (step 4): Google Chrome or Microsoft Edge are detected automatically; any other Chromium browser (Brave, Vivaldi…) works through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`.
+- **A Chromium-based browser installed**, for the automatic headless GM browser session (step 4): Google Chrome, Microsoft Edge, Brave, Vivaldi and Chromium are detected automatically; any other Chromium browser works through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`.
 
 ### 2. Set Up a Dedicated Foundry User
 In FoundryVTT:
 1. Open **Configuration** (gear icon) → **User Management**.
 2. Click **Create User**.
-3. Set **User Name** (e.g. `mcp-api`) and a password (e.g. `mcp`).
+3. Set **User Name** (e.g. `mcp-api`) and a long password used nowhere else.
 4. Set Role to **Assistant GM**.
 5. Save changes.
 
@@ -64,7 +64,7 @@ The tab stays on the game page: a navigation elsewhere — **Log Out**, or Found
 
 The session is self-healing: a watchdog polls the bridge's own connectivity every 20s (independently of whether the Foundry login itself is still active) and force-reloads the tab if it stays disconnected for ~60s. This recovers the module's WebSocket even when the browser session never actually logs out — the module's own client-side reconnect logic gives up permanently after ~85 minutes of failed attempts, and a full page reload gives it a fresh start rather than requiring a server restart.
 
-This step needs nothing from you beyond a browser being available. The server tries Google Chrome, then Microsoft Edge, then Playwright's own Chromium — the latter is not bundled and must be downloaded once with `npx playwright install chromium`. To use another Chromium-based browser (Brave, Vivaldi…), set `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` to its executable in the [configuration file](#configuration):
+This step needs nothing from you beyond a browser being available. The server looks, at their usual install locations, for Google Chrome, then Microsoft Edge, Brave, Vivaldi, a system Chromium, and last Playwright's own Chromium (not bundled: downloaded with `npx playwright install chromium`). It uses the first one found; if that one fails to start, the next. `status` and `get_health_status` show the browser, its path and `(detected)`; with none found, the error lists every location tried. To choose the browser yourself — another Chromium-based browser, or one installed elsewhere — set `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` to its executable in the [configuration file](#configuration) (no fallback then: an error names that path):
 
 ```env
 FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH='C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe'
@@ -75,6 +75,30 @@ FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH='C:\Program Files\BraveSoftware\Brave-Browse
 The headless browser is launched with Chromium's local network access checks disabled, so the module can reach the bridge on `ws://localhost` even when Foundry is served from a public address (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#module-bridge-never-connects--websocket--failed)).
 
 Keep `FOUNDRY_HEADLESS_GM_ENABLED` at its default `true`: since module 0.5.0, the companion module only connects from this session — it authenticates the server through a function only the headless session provides (see the README, [Module Bridge Security](README.md#module-bridge-security)). A GM tab opened by hand is no longer supported, so `FOUNDRY_HEADLESS_GM_ENABLED=false` disables the bridge in practice, and the server logs a warning at startup.
+
+### 5. Run `init`
+
+Build the server (`npm install` then `npm run build`), then, in PowerShell, Windows Terminal, cmd or any terminal window:
+
+```bash
+node dist/index.js init        # or `foundryvtt-mcp init` when installed as a package
+```
+
+`init` writes the [configuration file](#configuration), checking each answer against your FoundryVTT as it goes:
+
+1. It shows where the file is. If it exists, its values are the defaults — passwords show as `<set>`, and Enter keeps them.
+2. **Address**: it checks that the server answers with a world running (a clear message, and Enter to try again, when it is unreachable, its certificate is refused, or no world is launched).
+3. **Account**: the user from step 2 and its password (typing stays hidden). A Player or Trusted Player is refused (the module and the headless session need a GM role); a Gamemaster gets the warning above. A wrong password asks again.
+4. **Module**: it checks that `foundryvtt-mcp-bridge` is installed and enabled in the world, or says how to.
+5. **Browser**: it shows the browser found and starts it headless once.
+6. **Writes**: whether the assistant may change the game (`FOUNDRY_WRITE_ENABLED`; no by default).
+7. It writes only what differs from the defaults (and always `FOUNDRY_MODULE_BRIDGE_ENABLED=true`). An existing file is copied first (`config.env.bak-<date>-<time>`) and changed in place, keeping your comments and other settings; the file is then read back to check it.
+8. It prints the entry for Claude desktop (**Settings → Developer → Edit Config**) and the `claude mcp add` command for Claude Code.
+9. If the shared process is running with older connection settings, it offers to stop it.
+
+`init` needs an interactive terminal: with redirected input it refuses. It never asks about the two-account mode (an advanced option, set by hand in the file).
+
+`node dist/index.js init --check` runs the same checks on the existing configuration, asking and writing nothing — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#init---check-start-here).
 
 ---
 
@@ -87,7 +111,7 @@ All MCP clients share one file, so no client needs its own copy of the settings:
 - **Windows**: `%LOCALAPPDATA%\foundryvtt-mcp\config.env`
 - **macOS, Linux**: `$XDG_CONFIG_HOME/foundryvtt-mcp/config.env`, or `~/.config/foundryvtt-mcp/config.env`
 
-Create it with your settings, one `KEY=value` per line:
+[`init`](#5-run-init) writes it for you. To write it by hand, one `KEY=value` per line:
 
 ```env
 # FoundryVTT MCP — shared by every MCP client
@@ -193,7 +217,7 @@ claude mcp add foundryvtt -- node <ABSOLUTE_PATH_TO_REPO>/dist/index.js
 
 - **Socket.IO Authentication Failed**: Double-check that the Foundry world is active, the username is exact (case-sensitive), and the password matches.
 - **Companion Bridge Not Connecting**: Check `get_health_status` — it reports both bridge connectivity and the headless session's own status line. Ensure the module is enabled in Foundry's module manager and that the installed copy is version **0.5.0 or later** (an older module never authenticates — update or reinstall it, step 3). The server tells the module which port to use, so the module's own **Bridge Port** setting is only a fallback and needs no change. In shared-process mode, read `daemon.log` for `Module bridge refused a connection: …` lines (see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#module-bridge-refused-a-connection-)).
-- **Headless GM session: "No usable browser found"**: Install Google Chrome or Microsoft Edge, set `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` to any Chromium-based browser binary (Brave, Vivaldi…), or download Playwright's Chromium with `npx playwright install chromium`.
+- **Headless GM session: "No browser found"**: the message lists every location tried. Install Google Chrome, Microsoft Edge or Brave, or set `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` to a Chromium-based browser installed elsewhere. `node dist/index.js init --check` tries the browser without starting the connector.
 - **Bridge never connects, browser console shows `WebSocket connection to 'ws://localhost:31415/' failed`**: The browser is blocking the Foundry page (a public origin) from reaching `localhost` — Chromium's local network access protection, plus Brave's own localhost-access permission. The headless session disables these checks itself; if it still fails, see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#module-bridge-never-connects--websocket--failed).
 - **Headless GM session: "No user named ... is registered in this world's join list"**: (Two-account mode only.) The account named in `FOUNDRY_HEADLESS_GM_USERNAME` doesn't exist in this world, or the world is on the setup screen rather than active. Verify step 2 above and that Foundry shows the world as loaded.
 - **Bridge was connected earlier and stops working, with the headless session still showing "Logged in"**: The module's own WebSocket dropped independently of the Foundry login (rare, but possible). This self-heals automatically within ~60s (the watchdog force-reloads the tab) — if `get_health_status` still shows it disconnected after a couple of minutes, check the server logs for a reload failure and restart the MCP server process as a fallback.

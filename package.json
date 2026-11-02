@@ -30,8 +30,6 @@
     "test:integration:watch": "vitest --watch --config vitest.integration.config.ts",
     "test:integration:ui": "vitest --ui --config vitest.integration.config.ts",
     "test:integration:docker": "docker compose -f docker-compose.test.yml up -d --wait && bun run test:integration; docker compose -f docker-compose.test.yml down -v",
-    "test-connection": "tsx scripts/test-connection.ts",
-    "setup-wizard": "tsx scripts/setup-wizard.ts",
     "lint": "biome check src",
     "lint:fix": "biome check --write src",
     "format": "biome format --write src",
@@ -39,7 +37,7 @@
     "clean": "rimraf dist",
     "docs": "typedoc src/index.ts --out docs --exclude '**/*.test.ts'",
     "docs:serve": "npm run docs && npx http-server docs",
-    "setup": "npm run clean && npm run build && npm run test-connection",
+    "setup": "npm run clean && npm run build && node dist/index.js init --check",
     "prepare": "husky",
     "prepublishOnly": "bun run build"
   },
