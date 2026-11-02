@@ -418,7 +418,7 @@ npm run lint
 npm run dev
 ```
 
-The repository also carries a `bun.lock` and a `justfile`: with [Bun](https://bun.sh/) and [just](https://just.systems/), `just qa` runs the lint, type check and unit tests in one go.
+`npm run lint && npx tsc --noEmit && npm test` runs the lint, type check and unit tests in one go.
 
 ---
 

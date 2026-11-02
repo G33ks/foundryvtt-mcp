@@ -1,7 +1,8 @@
 # `scripts/` Is Outside the Typecheck Surface — Smoke-Run It
 
 `tsconfig.json` sets `include: ["src/**/*"]`, so **nothing under `scripts/`
-is typechecked**. `bunx tsc --noEmit`, `just qa`, and CI all pass while a
+is typechecked**. `npx tsc --noEmit`, the pre-commit gate (`npm run lint &&
+npx tsc --noEmit && npm test`) and CI all pass while a
 helper script calls a nonexistent method or reads a property that doesn't
 exist — the failure only appears at **runtime**, when you actually run the
 script.
@@ -16,15 +17,15 @@ caught because the file isn't in the `tsc` set:
 | `client.connectWebSocket()` | no such method on `FoundryClient` (it's `connect()`) | runtime → `is not a function` |
 | `config.foundry.useRestModule` | property absent from the config type | runtime → silently `undefined`, drove wrong output |
 
-Both shipped green through `just qa` and CI; only `bun run test-connection`
-surfaced them.
+Both shipped green through the pre-commit gate and CI; only running the
+script surfaced them.
 
 ## The habit
 
-- **When editing anything under `scripts/`, run it** (`bun run <script>` /
-  `bunx tsx scripts/<x>.ts`) before trusting it. The typechecker will not
+- **When editing anything under `scripts/`, run it** (`npm run <script>` /
+  `npx tsx scripts/<x>.ts`) before trusting it. The typechecker will not
   flag method/property typos there.
-- **Don't assume `just qa` covers a script** — it covers `src/` only.
+- **Don't assume the pre-commit gate covers a script** — it covers `src/` only.
 
 ## Durable fix (preferred)
 
@@ -36,10 +37,9 @@ runtime. Either widen the main config or add a dedicated one:
 { "extends": "./tsconfig.json", "include": ["scripts/**/*"] }
 ```
 
-```just
-# justfile — wire into qa
-check-types-scripts:
-    bunx tsc --noEmit -p tsconfig.scripts.json
+```jsonc
+// package.json "scripts" — add to the pre-commit gate
+"check-types:scripts": "tsc --noEmit -p tsconfig.scripts.json"
 ```
 
 Adding `scripts/` to the checked set will surface any remaining drift there

@@ -18,9 +18,12 @@ FoundryVTT documents.
 | **REST / `apiKey`** (secondary) | `FOUNDRY_API_KEY` set | Hits `/api/*` on the REST module / bridge. Optional — per the README it powers "REST API diagnostics". May be extracted (`feat/extract-rest-api-module`). |
 
 `.env.example` states Socket.IO is the primary method and `FOUNDRY_API_KEY` is
-commented out. **Do not assume the bridge/REST path is in use** — default
-deployments are Socket.IO-only. The bridge repo (`foundryvtt-local-rest-api`)
-is local-only (no remote) with active WIP; treat it as out-of-scope.
+commented out. **Do not assume the REST path is in use** — default
+deployments are Socket.IO-only. The REST API module is a separate project, not
+shipped here. The companion module this repo does ship ("FoundryVTT MCP
+Bridge", `foundry-module/`, released on `bridge-v*` tags by
+`bridge-release.yml`) is not the REST transport: it is the WebSocket bridge
+enabled by `FOUNDRY_MODULE_BRIDGE_ENABLED`, which carries the canvas-only tools.
 
 ## Writes use the core `modifyDocument` Socket.IO protocol
 
@@ -82,11 +85,10 @@ Consequences for new write tools:
 
 The exact wire shape is FoundryVTT-version-specific and **not reliably
 documented on the web** (the wiki is JS-rendered). The authoritative source is
-the actual app, shipped unminified under `data/container_cache/foundryvtt-<ver>.zip`:
-
-```
-unzip -o -q data/container_cache/foundryvtt-13.348.zip 'resources/app/client/data/client-backend.mjs' -d /tmp/fvtt
-```
+the actual app, which ships its client and common code unminified. This repo
+does not carry it: you need a local copy of a FoundryVTT installation of the
+target version (the desktop app's `resources/app/` folder, or the root of the
+extracted Node.js build), and the paths below are relative to it.
 
 Key files: `client/data/client-backend.mjs` (`#buildRequest`/`#dispatchRequest`),
 `client/helpers/socket-interface.mjs` (`dispatch` = emit-with-ack), and

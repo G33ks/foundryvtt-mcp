@@ -15,22 +15,20 @@ Include scope when applicable: `feat(tools):`, `fix(auth):`
 
 ## Build & Test
 
-This project uses **bun** as the package manager and **`just`** as the task
-runner (`bun.lock`, `justfile`). Prefer the `just` recipes — they are what CI
-runs and keep local/CI parity.
+This project uses **npm** (`package-lock.json`). On Windows PowerShell, call
+`npm.cmd` / `npx.cmd`.
 
-- `just qa` — one-shot gate before committing: biome lint + `tsc` + Vitest. Run this first.
-- `just check-types` — `tsc --noEmit` only
-- `just test` — unit tests (Vitest); `just test-coverage` for coverage
-- `just lint` / `just lint-fix` — biome check (the linter+formatter); `lint-fix` auto-fixes
-- `just build` — compile TypeScript
-- `just test-e2e` — end-to-end tests (Playwright, headless)
-- `just antipatterns` — ast-grep anti-pattern scan
+- `npm run lint && npx tsc --noEmit && npm test` — one-shot gate before committing: biome lint + `tsc` + Vitest. Run this first.
+- `npx tsc --noEmit` — type check only
+- `npm test` — unit tests (Vitest); `npm run test:coverage` for coverage
+- `npm run lint` / `npm run lint:fix` — biome check (the linter+formatter); `lint:fix` auto-fixes
+- `npm run build` — compile TypeScript
+- `npm run test:e2e` — end-to-end tests (Playwright, headless)
 
 A pre-commit hook (lint-staged) runs `biome check --write` on staged files, so
 formatting is auto-applied at commit time. When only specific files need
 formatting (e.g. avoiding pre-existing lint debt elsewhere), run
-`bunx biome check --write <paths>` on just those files.
+`npx biome check --write <paths>` on those files only.
 
 ## Type Safety
 

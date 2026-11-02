@@ -60,8 +60,11 @@ npm run smoke:pack   # npm pack -> install into a fresh consumer -> verify banne
 `smoke` covers construction-time and import-time regressions (SDK shape
 changes, ESM resolution). `smoke:pack` additionally validates that the
 `package.json` `files` glob ships every runtime path the entrypoint needs —
-the kind of regression that only surfaces for users running `npx foundryvtt-mcp`
-or `bunx foundryvtt-mcp`, not for anyone running the source tree.
+the kind of regression that only surfaces for users who install the published
+package, not for anyone running the source tree (`node dist/index.js` from a
+clone).
+
+> **TODO:** npm package name to be decided (phase 6).
 
 ## Building
 

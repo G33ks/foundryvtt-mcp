@@ -14,8 +14,9 @@
  *
  * Catches packaging-shape regressions that smoke-test.js cannot: smoke-test
  * runs against the source tree, where every file is present regardless of
- * `files`. This script runs against the tarball end-users actually get via
- * `bunx`/`npx foundryvtt-mcp` / `npm install foundryvtt-mcp`. The motivating
+ * `files`. This script runs against the tarball end-users actually get when
+ * they install the published package (TODO: npm package name to be decided,
+ * phase 6). The motivating
  * scenario: shipping a release with a missing subdirectory in `files`, which
  * crashes at startup with ERR_MODULE_NOT_FOUND only when consumers install it.
  */

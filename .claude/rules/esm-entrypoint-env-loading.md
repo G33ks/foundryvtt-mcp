@@ -67,7 +67,7 @@ natural guess.
 
 A unit test cannot cover this: the defect is in module evaluation order **in a
 real process**, and any test that imports the modules has already perturbed
-that order. The gate is `bun run smoke:dotenv` (`scripts/smoke-dotenv.js`,
+that order. The gate is `npm run smoke:dotenv` (`scripts/smoke-dotenv.js`,
 wired into `test.yml`), which spawns the built server from a scratch directory
 whose only configuration is a `.env` file, with every `FOUNDRY_*` variable
 stripped from the inherited environment and `FOUNDRY_MCP_CONFIG` pointing at a
