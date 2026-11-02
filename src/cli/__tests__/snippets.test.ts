@@ -5,12 +5,12 @@
 import { describe, expect, it } from 'vitest';
 import { claudeCodeCommand, claudeDesktopSnippet, connectorCommand } from '../snippets.js';
 
-const WINDOWS_ENTRY = 'C:\\Users\\Goret\\source\\foundryvtt-mcp\\dist\\index.js';
+const WINDOWS_ENTRY = 'C:\\Users\\me\\source\\foundryvtt-mcp\\dist\\index.js';
 
 describe('claudeDesktopSnippet', () => {
   it('is valid JSON whose args hold the Windows path intact', () => {
     const text = claudeDesktopSnippet(WINDOWS_ENTRY);
-    expect(text).toContain('C:\\\\Users\\\\Goret');
+    expect(text).toContain('C:\\\\Users\\\\me');
     expect(JSON.parse(text)).toEqual({
       mcpServers: { foundryvtt: { command: 'node', args: [WINDOWS_ENTRY] } },
     });

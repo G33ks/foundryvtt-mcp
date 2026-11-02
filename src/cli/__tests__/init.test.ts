@@ -297,7 +297,7 @@ describe('init — new installation', () => {
 
 describe('init — existing file', () => {
   const FILE_VALUES = {
-    FOUNDRY_URL: 'https://179.237.108.197',
+    FOUNDRY_URL: 'https://foundry.example.com',
     FOUNDRY_USERNAME: 'mcp-api',
     FOUNDRY_PASSWORD: OLD_PASSWORD,
     FOUNDRY_WRITE_ENABLED: 'true',
@@ -312,11 +312,11 @@ describe('init — existing file', () => {
     });
     expect(await runInit([], ENTRY, h.deps)).toBe(0);
     expect(h.prompter.questions).toContain(
-      'FoundryVTT address (e.g. https://foundry.example.com) [https://179.237.108.197]',
+      'FoundryVTT address (e.g. https://foundry.example.com) [https://foundry.example.com]',
     );
     expect(h.prompter.questions).toContain('Password of "mcp-api" keepable=true');
     expect(h.prompter.questions).toContain('Allow changes to the game? default=true');
-    expect(h.login).toHaveBeenCalledWith('https://179.237.108.197', 'mcp-api', OLD_PASSWORD);
+    expect(h.login).toHaveBeenCalledWith('https://foundry.example.com', 'mcp-api', OLD_PASSWORD);
     expect(h.write).not.toHaveBeenCalled();
     expect(text(h)).toContain('Nothing to change');
     expect(text(h)).not.toContain(OLD_PASSWORD);
@@ -398,7 +398,7 @@ describe('init — no terminal', () => {
 
 describe('init --check', () => {
   const VALUES = {
-    FOUNDRY_URL: 'https://179.237.108.197',
+    FOUNDRY_URL: 'https://foundry.example.com',
     FOUNDRY_USERNAME: 'mcp-api',
     FOUNDRY_PASSWORD: OLD_PASSWORD,
     FOUNDRY_MODULE_BRIDGE_ENABLED: 'true',

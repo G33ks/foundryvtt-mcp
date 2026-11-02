@@ -17,7 +17,7 @@ import {
 describe('normalizeUrl', () => {
   it.each([
     ['https://foundry.example.com/', 'https://foundry.example.com'],
-    ['  https://179.237.108.197  ', 'https://179.237.108.197'],
+    ['  https://foundry.example.com  ', 'https://foundry.example.com'],
     ['https://foundry.example.com/join', 'https://foundry.example.com'],
     ['https://example.com/vtt/game', 'https://example.com/vtt'],
     ['foundry.example.com', 'https://foundry.example.com'],
@@ -44,7 +44,7 @@ describe('normalizeUrl', () => {
 });
 
 describe('describeNetworkError', () => {
-  const url = 'https://179.237.108.197';
+  const url = 'https://foundry.example.com';
 
   it('names TLS problems and how to fix them', () => {
     const error = Object.assign(new Error('certificate has expired'), { code: 'CERT_HAS_EXPIRED' });
