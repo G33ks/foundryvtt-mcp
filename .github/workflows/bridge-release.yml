@@ -21,14 +21,13 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
+      # The runner's preinstalled Node is enough: package-bridge.js only uses
+      # core modules available since Node 18 (no dependencies, no setup-node).
       - name: Package the module
         id: package
-        run: node scripts/package-bridge.js --tag "$GITHUB_REF_NAME" --out build/bridge-release --github-output
+        run: |
+          node --version
+          node scripts/package-bridge.js --tag "$GITHUB_REF_NAME" --out build/bridge-release --github-output
 
       - name: Create the release
         env:
