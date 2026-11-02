@@ -16,6 +16,7 @@
     "smoke:pack": "node scripts/smoke-pack.js",
     "stress:shared": "node scripts/stress-shared.js",
     "check:bridge-security": "node scripts/check-bridge-security.js",
+    "bridge:package": "node scripts/package-bridge.js",
     "test": "vitest run",
     "test:watch": "vitest --watch",
     "test:coverage": "vitest run --coverage",
@@ -54,11 +55,11 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/RN0000/foundryvtt-mcp.git"
+    "url": "https://github.com/G33ks/foundryvtt-mcp.git"
   },
-  "homepage": "https://github.com/RN0000/foundryvtt-mcp#readme",
+  "homepage": "https://github.com/G33ks/foundryvtt-mcp#readme",
   "bugs": {
-    "url": "https://github.com/RN0000/foundryvtt-mcp/issues"
+    "url": "https://github.com/G33ks/foundryvtt-mcp/issues"
   },
   "publishConfig": {
     "access": "public"
