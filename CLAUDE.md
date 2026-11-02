@@ -21,7 +21,10 @@ bun run test:e2e       # E2E tests (Playwright, headless)
 bun run lint           # Lint code (Biome)
 bun run lint:fix       # Auto-fix lint issues
 bun run format         # Format code (Biome)
+node dist/index.js init         # Write the shared configuration file, checking each answer
 node dist/index.js init --check # Check the configuration against FoundryVTT
+node dist/index.js status       # Shared process state and where each setting comes from
+node dist/index.js stop         # Stop the shared process (next call starts a fresh one)
 ```
 
 ## Architecture

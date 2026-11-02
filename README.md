@@ -1,9 +1,9 @@
 # FoundryVTT MCP Server
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Node.js](https://img.shields.io/badge/Node.js-18%2B-green.svg)](https://nodejs.org/)
+[![Node.js](https://img.shields.io/badge/Node.js-22%2B-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue.svg)](https://www.typescriptlang.org/)
-[![Vitest](https://img.shields.io/badge/Tests-1108%20passing-brightgreen.svg)](https://vitest.dev/)
+[![Vitest](https://img.shields.io/badge/Tests-1220%20passing-brightgreen.svg)](https://vitest.dev/)
 [![Tools](https://img.shields.io/badge/MCP%20Tools-114-purple.svg)](https://modelcontextprotocol.io/)
 
 A comprehensive, production-grade [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for **Foundry Virtual Tabletop (FoundryVTT)**.
@@ -81,32 +81,80 @@ Your AI assistant starts a small relay program for this server. Every relay, fro
 
 ## 🚀 Quick Start
 
-### 1. Prerequisites
+Seven steps, in this order. [SETUP_GUIDE.md](SETUP_GUIDE.md) gives the details of each one; [TROUBLESHOOTING.md](TROUBLESHOOTING.md) helps when a step fails.
 
-- **Node.js 18+** or **Bun**
-- **FoundryVTT v13 or v14** running an active world (the versions the server handles explicitly; older versions are not verified)
-- A dedicated Foundry user account with the **Assistant GM** role (Gamemaster works too, with the caveat below)
-- **A Chromium-based browser installed** (for the automatic headless GM browser session — see below): Google Chrome, Microsoft Edge, Brave, Vivaldi and Chromium are detected automatically; any other Chromium browser works through `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`
+### 1. Check the prerequisites
 
-### 2. Configure Dedicated Foundry User
+- **Node.js 22 or newer** (current LTS recommended) — `node --version` shows yours. Download it from [nodejs.org](https://nodejs.org/).
+- **Git**, to download the server.
+- **FoundryVTT v13 or v14**, with a world you can open as its Gamemaster. Foundry may run on this computer or on a server.
+- **A Chromium-based browser** on this computer: Google Chrome, Microsoft Edge, Brave, Vivaldi or Chromium. The server finds it by itself; you will never see it open.
+- **Claude desktop** or **Claude Code**.
 
-In FoundryVTT:
-1. Open **Configuration** → **User Management**
-2. Click **Create User**
-3. Set Username: `mcp-api`, Password: `mcp` (or your choice)
-4. Role: **Assistant GM** (recommended). The invisible browser session runs as this account; as a Gamemaster it could become Foundry's *active GM* in place of a human Gamemaster (equal roles go to the smaller user id) and run the game system's automations. `status` and `get_health_status` warn about it. An Assistant GM cannot grant the Gamemaster role or change `core.permissions`: the server refuses those with a clear message.
+### 2. Create a dedicated user in Foundry
+
+Launch your world and log in as its Gamemaster, then:
+
+1. Open **Game Settings** → **User Management**.
+2. Click **Create User**.
+3. Name it `mcp-api` (or any name) and give it a **long password used nowhere else**.
+4. Set its role to **Assistant GM**, then save.
+
+This one account is all the server needs. Prefer **Assistant GM** to **Gamemaster**: as a Gamemaster, the server's invisible session could take the *active GM* role from you — see [SETUP_GUIDE.md](SETUP_GUIDE.md#2-set-up-a-dedicated-foundry-user).
+
+### 3. Install the companion module, then enable it
+
+The module is installed from Foundry's **Setup** screen (in the world: **Game Settings** → **Return to Setup**).
+
+1. Open **Add-on Modules** → **Install Module**.
+2. Paste this URL into the **Manifest URL** field at the bottom, then click **Install**:
+
+   ```
+   https://raw.githubusercontent.com/G33ks/foundryvtt-mcp/main/foundry-module/module.json
+   ```
+
+3. Launch your world again, log in as its Gamemaster, open **Game Settings** → **Manage Modules**, check **FoundryVTT MCP Bridge** and click **Save Module Settings**.
+
+Updates and the manual copy: see [SETUP_GUIDE.md](SETUP_GUIDE.md#3-install-companion-module-foundryvtt-mcp-bridge).
+
+### 4. Download and build the server
+
+In a terminal (PowerShell, Terminal on macOS, any shell on Linux), in the folder where you want the server:
+
+```bash
+git clone https://github.com/G33ks/foundryvtt-mcp.git
+cd foundryvtt-mcp
+npm ci
+npm run build
+```
+
+Keep this terminal open in the `foundryvtt-mcp` folder for the next steps.
+
+### 5. Run `init`
+
+```bash
+node dist/index.js init
+```
+
+It asks for Foundry's address, the account from step 2 and whether the assistant may change the game (no by default), checking each answer against your Foundry: world running, account role, module enabled, browser. Then it writes the [configuration file](#configuration-file), the only place your settings live, and prints what to give your AI client. Details: [SETUP_GUIDE.md](SETUP_GUIDE.md#5-run-init).
+
+### 6. Add the server to Claude
+
+Use what `init` printed at the end:
+
+- **Claude desktop**: **Settings** → **Developer** → **Edit Config** opens `claude_desktop_config.json`. Add the `foundryvtt` entry printed by `init` under `"mcpServers"` (keep any entries already there), save, then **quit Claude desktop completely** (also from the notification area or menu bar) and start it again.
+- **Claude Code**: run the `claude mcp add foundryvtt …` command printed by `init` in a terminal, then start a new Claude Code session.
+
+No `env` block is needed: the settings are in the configuration file.
+
+### 7. Check that it works
+
+1. In the terminal: `node dist/index.js init --check`. It should end with `All checks passed.`; a ✖ line says what to fix.
+2. In Claude, ask: *"Show the FoundryVTT connector's health status."* Claude calls `get_health_status`, which should show the FoundryVTT connection ✅, the module bridge ✅ connected with an authenticated module, the headless GM session logged in with its browser, and the configuration file the settings come from.
+
+The first call can take a few seconds while the server connects. If something is ❌, the message says why; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 > **Playing as a human while the AI GMs?** No extra setup needed. Log into your own Foundry client as a **Player** — or as your own **Gamemaster**: with `mcp-api` an Assistant GM, you stay the active GM. The server opens its own invisible background browser session with `mcp-api`'s session for GM-tier canvas access (screenshots, dice rolls, pausing, uploads); only `mcp-api` appears in the player list for it. The module bridge requires this session: a GM tab you open yourself never connects to it (see [Module Bridge Security](#module-bridge-security)).
-
-### 3. Install the Companion Module (Recommended)
-
-In Foundry's **Setup** screen, open **Add-on Modules** → **Install Module** and paste this manifest URL into the **Manifest URL** field:
-
-```
-https://raw.githubusercontent.com/G33ks/foundryvtt-mcp/main/foundry-module/module.json
-```
-
-Then launch your world, open **Manage Modules** and enable **FoundryVTT MCP Bridge**. Later releases are offered by **Check for Updates** on the same screen. Copying the module folder by hand still works; see [SETUP_GUIDE.md](SETUP_GUIDE.md#manual-installation-advanced).
 
 ---
 
@@ -123,7 +171,7 @@ Every MCP client on the machine shares **one configuration file**, so a client e
 
 `FOUNDRY_MCP_CONFIG` names another file and wins over everything; with `FOUNDRY_MCP_STATE_DIR` set, the file is `<that directory>/config.env` (a fully isolated setup, for tests).
 
-**The easy way:** after `npm install` and `npm run build`, run `node dist/index.js init` (or `foundryvtt-mcp init`) in a terminal. It asks for the address, the account and whether the assistant may change the game, checks each answer against your FoundryVTT (world running, GM role, companion module enabled, browser), writes the file, and prints the entries to paste into Claude desktop and Claude Code — see [SETUP_GUIDE.md](SETUP_GUIDE.md#5-run-init). `node dist/index.js init --check` re-runs the checks on the existing file, without asking or writing anything.
+**The easy way** is `node dist/index.js init` ([Quick Start](#5-run-init), step 5): it writes the file after checking each answer against your FoundryVTT. `node dist/index.js init --check` re-runs the checks on the existing file, without asking or writing anything.
 
 By hand: one `KEY=value` per line, with exactly the names of the variables below; `#` starts a comment:
 
@@ -140,7 +188,7 @@ FOUNDRY_MODULE_BRIDGE_ENABLED=true
 - **Priority, setting by setting**: an environment variable (the client's `env` block, or the system) wins, then a `.env` in the working directory (for development), then the file, then the default. `node dist/index.js status` shows where each setting comes from.
 - **After editing the file**, run `node dist/index.js stop`: the next call starts the shared process with the new settings. A client whose relay was waiting for a configuration needs nothing: its next call reads the file.
 - **The file is authoritative**: a client that still passes its own `env` block is served with the configuration the shared process runs, and its first tool result says which of its settings are ignored and where they come from (see [Shared Process Mode](#shared-process-mode)).
-- **No configuration at all**: the server still starts and lists its tools; each call says where the file is expected and what it needs (`FOUNDRY_URL`, `FOUNDRY_USERNAME`, `FOUNDRY_PASSWORD`) — see [SETUP_GUIDE.md](SETUP_GUIDE.md#configuration).
+- **No configuration at all**: the server still starts and lists its tools; each call says where the file is expected and what it needs (`FOUNDRY_URL`, `FOUNDRY_USERNAME`, `FOUNDRY_PASSWORD`) — see [SETUP_GUIDE.md](SETUP_GUIDE.md#the-configuration-file).
 
 ### Environment Variables
 
@@ -229,7 +277,7 @@ With the settings in the [configuration file](#configuration-file), add to `clau
 
 ### Claude Code Configuration
 
-`claude mcp add foundryvtt -- node <PATH_TO_REPO>/dist/index.js`, or in `~/.claude.json` (or a project's `.mcp.json`):
+`claude mcp add foundryvtt --scope user -- node "<PATH_TO_REPO>/dist/index.js"` (all your projects; `--scope local` for the current project only), or in `~/.claude.json` (or a project's `.mcp.json`):
 
 ```json
 {
@@ -243,7 +291,7 @@ With the settings in the [configuration file](#configuration-file), add to `clau
 }
 ```
 
-An `env` block still works in any client (its values win over the file for that client), but the shared process serves every client with one configuration — see [Shared Process Mode](#shared-process-mode).
+**Alternative, not recommended:** an `env` block in a client entry still works (its values win over the file for that client), but the shared process serves every client with one configuration, so a client whose `env` block disagrees is told its settings are ignored — see [Shared Process Mode](#shared-process-mode).
 
 ### Oh My Pi Configuration
 
@@ -354,13 +402,13 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
 ## 🧪 Development & Testing
 
 ```bash
-# Install dependencies
-npm install
+# Install dependencies (exactly the locked versions)
+npm ci
 
 # Compile TypeScript
 npm run build
 
-# Run complete unit test suite (1108 tests)
+# Run the unit test suite (1220 tests)
 npm test
 
 # Run linter and formatting checks
@@ -369,6 +417,8 @@ npm run lint
 # Start server in development watch mode
 npm run dev
 ```
+
+The repository also carries a `bun.lock` and a `justfile`: with [Bun](https://bun.sh/) and [just](https://just.systems/), `just qa` runs the lint, type check and unit tests in one go.
 
 ---
 

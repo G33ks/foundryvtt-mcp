@@ -2,9 +2,11 @@
 
 This document provides configuration examples for connecting various AI assistants to your FoundryVTT MCP Server.
 
+Every example assumes the settings are in the shared configuration file, written by `node dist/index.js init` (see the README's [Quick Start](../README.md#-quick-start)). A client entry then holds only the command: every MCP client on the machine reads the same file.
+
 ## Claude Desktop
 
-Add this to your Claude Desktop MCP settings file:
+**Settings** → **Developer** → **Edit Config** opens the file. Add the entry inside `"mcpServers"`, next to any entries already there, then quit Claude desktop completely and start it again.
 
 ### Location
 - **Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
@@ -16,37 +18,50 @@ Add this to your Claude Desktop MCP settings file:
 ```json
 {
   "mcpServers": {
-    "foundry-vtt": {
+    "foundryvtt": {
+      "command": "node",
+      "args": ["/path/to/foundryvtt-mcp/dist/index.js"]
+    }
+  }
+}
+```
+
+On Windows, write the path with forward slashes (`C:/Users/you/foundryvtt-mcp/dist/index.js`) or doubled backslashes; `init` prints the entry with the right path.
+
+> The server connects to FoundryVTT over **Socket.IO** with a world user
+> account (Assistant GM). The companion module **FoundryVTT MCP Bridge** adds
+> the canvas, dice, compendium and upload tools. Setting `FOUNDRY_API_KEY`
+> additionally enables the optional, read-only REST diagnostics tools.
+
+### Alternative: an `env` block (not recommended)
+
+Settings can also be given in the entry itself:
+
+```json
+{
+  "mcpServers": {
+    "foundryvtt": {
       "command": "node",
       "args": ["/path/to/foundryvtt-mcp/dist/index.js"],
       "env": {
         "FOUNDRY_URL": "http://localhost:30000",
-        "FOUNDRY_USERNAME": "your_username",
-        "FOUNDRY_PASSWORD": "your_password",
-        "LOG_LEVEL": "info"
+        "FOUNDRY_USERNAME": "mcp-api",
+        "FOUNDRY_PASSWORD": "your_password"
       }
     }
   }
 }
 ```
 
-> The server connects to FoundryVTT directly over **Socket.IO** using a world
-> user account — no custom module required. Setting `FOUNDRY_API_KEY` additionally
-> enables the optional, read-only REST diagnostics tools.
+They win over the file for this client only, but one shared process serves every client with one configuration: a client whose `env` block disagrees with it is told, in its first tool result, which of its settings are ignored. Keep the settings in the file.
 
-### Alternative: Using .env file
+## Claude Code
 
-```json
-{
-  "mcpServers": {
-    "foundry-vtt": {
-      "command": "node",
-      "args": ["/path/to/foundryvtt-mcp/dist/index.js"],
-      "cwd": "/path/to/foundryvtt-mcp"
-    }
-  }
-}
+```bash
+claude mcp add foundryvtt --scope user -- node "/path/to/foundryvtt-mcp/dist/index.js"
 ```
+
+`--scope user` registers it for all your projects; `--scope local` for the current project only, on this machine. `claude mcp list` shows the entry.
 
 ## Custom MCP Client (Node.js)
 
@@ -150,28 +165,31 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-## Environment Variables Reference
+## Settings Reference
 
-When configuring your MCP client, you can set these environment variables:
+The configuration file (`%LOCALAPPDATA%\foundryvtt-mcp\config.env` on Windows, `~/.config/foundryvtt-mcp/config.env` on macOS and Linux) takes one `KEY='value'` per line:
 
-```bash
-# Required — Socket.IO connection (the default and primary transport)
-FOUNDRY_URL=http://localhost:30000
-FOUNDRY_USERNAME=your_username
-FOUNDRY_PASSWORD=your_password
+```env
+# Required — Socket.IO connection (the primary transport)
+FOUNDRY_URL='http://localhost:30000'
+FOUNDRY_USERNAME='mcp-api'
+FOUNDRY_PASSWORD='your password'
 
-# Optional — enables the read-only REST API diagnostics tools.
-# When set, the server uses REST API mode instead of Socket.IO.
-FOUNDRY_API_KEY=your_api_key_here
+# The companion module bridge (init always writes it)
+FOUNDRY_MODULE_BRIDGE_ENABLED='true'
 
 # Optional — enables game-state mutations (write tools). Default: false.
-FOUNDRY_WRITE_ENABLED=true
+FOUNDRY_WRITE_ENABLED='true'
+
+# Optional — the read-only REST API diagnostics tools, alongside Socket.IO.
+# FOUNDRY_API_KEY='your_api_key_here'
 
 # Optional
-LOG_LEVEL=info
-NODE_ENV=production
-FOUNDRY_TIMEOUT=15000
+# LOG_LEVEL='debug'
+# FOUNDRY_TIMEOUT='15000'
 ```
+
+The full list is in the README, [Environment Variables](../README.md#environment-variables).
 
 ## Testing Your Configuration
 
@@ -181,17 +199,13 @@ FOUNDRY_TIMEOUT=15000
    node dist/index.js init --check
    ```
 
-2. **Test MCP client connection**:
-   ```bash
-   # Using curl to test if server responds
-   echo '{"method": "tools/list", "id": 1}' | node dist/index.js
-   ```
+2. **Test the MCP client connection**: ask the assistant for the connector's health status (`get_health_status`).
 
-3. **Debug connection issues**:
+3. **Inspect the shared process**:
    ```bash
-   # Run with debug logging
-   LOG_LEVEL=debug node dist/index.js
+   node dist/index.js status
    ```
+   For more detail, set `LOG_LEVEL='debug'` in the configuration file, run `node dist/index.js stop`, and read `daemon.log` (its path is in `status`).
 
 ## Example Prompts for AI Assistants
 
@@ -226,7 +240,7 @@ Once connected, try these prompts with your AI assistant:
 
 2. **"Tool not available" errors**
    - Check if FoundryVTT is accessible
-   - Verify environment variables are set correctly
+   - Run `node dist/index.js status`: it shows where each setting comes from
    - Try `node dist/index.js init --check` to diagnose
 
 3. **"Empty results" or limited functionality**
@@ -236,27 +250,16 @@ Once connected, try these prompts with your AI assistant:
 
 4. **Permission or authentication errors**
    - Check FoundryVTT user permissions
-   - Verify API key is valid
+   - Verify the API key is valid (only when `FOUNDRY_API_KEY` is set)
    - Ensure FoundryVTT allows external connections
 
 ### Getting Debug Information
 
-Add debug environment variables to your MCP client config:
-
-```json
-{
-  "env": {
-    "LOG_LEVEL": "debug",
-    "NODE_ENV": "development"
-  }
-}
-```
-
-This will provide detailed logging to help diagnose connection and functionality issues.
+Add `LOG_LEVEL='debug'` to the configuration file, then run `node dist/index.js stop`: the shared process started by the next call logs in detail to `daemon.log`. See [TROUBLESHOOTING.md](../TROUBLESHOOTING.md).
 
 ## Performance Tips
 
-1. **Use resource caching**: Resources are cached for 5 minutes by default
+1. **Reads are served from memory**: the world is loaded once and kept current by FoundryVTT's own updates
 2. **Limit search results**: Use the `limit` parameter to avoid large data transfers
 3. **Batch operations**: Group related requests when possible
 4. **Monitor logs**: Watch for performance warnings in debug mode

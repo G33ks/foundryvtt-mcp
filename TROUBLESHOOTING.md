@@ -26,11 +26,11 @@ node dist/index.js status            # the shared process: connection, bridge, b
 ```
 
 ### Check Current Status
-The server provides detailed diagnostics on startup. Look for:
-- Connection status
-- Authentication method and status
-- World data loading confirmation
-- Feature availability summary
+The shared process runs in the background, so its startup messages go to `daemon.log`, not to a terminal: `node dist/index.js status` prints its path. Look there for:
+- `Connected to FoundryVTT via Socket.IO`
+- `Module bridge listening on ws://localhost:31415 (loopback only)`
+- `Headless GM session logged in — sharing the connector's session (mcp-api)`
+- `Foundry module connected and authenticated (protocol v1)`
 
 ## Common Issues
 
@@ -263,34 +263,32 @@ Claude Desktop starts MCP servers in `C:\Windows\System32`, where no `.env` file
 #### Diagnostics Tools Not Working
 **Symptoms**: Health monitoring and log tools fail
 **Solutions**:
-1. **REST API module required**: These 5 tools require the optional Foundry Local REST API module
-2. **Install module**: Download from FoundryVTT's module browser
+1. **REST API module required**: `get_system_health`, `get_recent_logs`, `search_logs` and `diagnose_errors` need the optional Foundry Local REST API module; `get_health_status` answers without it and only adds the server's health when it is there
+2. **Install module**: it is a separate project, not distributed by this repository — see [the configuration guide](docs/guides/configuration.md#optional-diagnostics-tools)
 3. **Enable module**: Activate it in your world's module settings
-4. **Set API key**: Add `FOUNDRY_API_KEY` to your configuration file
-5. **Update module**: Ensure you have the latest version (v0.8.1+)
+4. **Set API key**: Add `FOUNDRY_API_KEY` to your configuration file, then run `node dist/index.js stop`
 
 ## Environment Configuration
 
 ### Configuration File Template
-The configuration file (`%LOCALAPPDATA%\foundryvtt-mcp\config.env` on Windows, `~/.config/foundryvtt-mcp/config.env` elsewhere), or a `.env` for development:
+`node dist/index.js init` writes the configuration file (`%LOCALAPPDATA%\foundryvtt-mcp\config.env` on Windows, `~/.config/foundryvtt-mcp/config.env` elsewhere). Written by hand, it looks like this:
 ```env
 # Required
-FOUNDRY_URL=http://localhost:30000
-FOUNDRY_USERNAME=your_username
+FOUNDRY_URL='http://localhost:30000'
+FOUNDRY_USERNAME='mcp-api'
 FOUNDRY_PASSWORD='your password'
 
-# Optional: Direct user ID bypass
-# FOUNDRY_USER_ID=abc123def456ghij
+# What init also writes
+FOUNDRY_MODULE_BRIDGE_ENABLED='true'
+# FOUNDRY_WRITE_ENABLED='true'
 
 # Optional: Diagnostics (requires REST API module)
-# FOUNDRY_API_KEY=your_api_key_here
+# FOUNDRY_API_KEY='your_api_key_here'
 
-# Optional Settings
-FOUNDRY_TIMEOUT=10000
-FOUNDRY_RETRY_ATTEMPTS=3
-FOUNDRY_RETRY_DELAY=1000
-LOG_LEVEL=info
+# Optional: more detail in daemon.log
+# LOG_LEVEL='debug'
 ```
+Less common settings (`FOUNDRY_USER_ID`, `FOUNDRY_TIMEOUT`, `FOUNDRY_RETRY_ATTEMPTS`…) are in the [configuration guide](docs/guides/configuration.md). After editing the file, run `node dist/index.js stop`.
 
 ### Configuration Validation
 Check your configuration against the live FoundryVTT:
@@ -301,11 +299,11 @@ node dist/index.js init --check
 ## Advanced Diagnostics
 
 ### Enable Debug Logging
-Add to your `.env` file:
+Add to the configuration file, then run `node dist/index.js stop` (the next call starts the shared process with it):
 ```env
-LOG_LEVEL=debug
+LOG_LEVEL='debug'
 ```
-This provides detailed logs including the full Socket.IO authentication flow.
+`daemon.log` then has detailed logs, including the full Socket.IO authentication flow.
 
 ### Manual Connection Testing
 Test individual components:
@@ -337,7 +335,7 @@ Use the MCP tools to test specific functionality:
 - `get_combat_state` - Test combat tracking
 - `get_users` - Test user awareness
 - `search_world` - Test world-wide search
-- `get_health_status` - Comprehensive diagnostics (requires REST API module)
+- `get_health_status` - Comprehensive diagnostics: connection, account, module bridge, headless GM session, configuration (the REST API module adds the server's health)
 
 ## Platform-Specific Issues
 
@@ -369,12 +367,12 @@ If you continue to experience problems:
    ```
 
 2. **Gather information**:
-   - Your `.env` configuration (redact sensitive values)
-   - MCP server logs (with `LOG_LEVEL=debug`)
+   - The output of `node dist/index.js status` (passwords show as `<set>`; check for anything else private)
+   - `daemon.log` (with `LOG_LEVEL=debug`)
    - FoundryVTT version and active modules
    - Error messages and stack traces
 
-3. **Report the issue**: [GitHub Issues](https://github.com/laurigates/foundryvtt-mcp/issues)
+3. **Report the issue**: [GitHub Issues](https://github.com/G33ks/foundryvtt-mcp/issues)
 
 ### Community Support
 - **Discord**: Join the FoundryVTT community
@@ -388,8 +386,9 @@ If you continue to experience problems:
 # Setup and configuration
 node dist/index.js init           # Interactive setup (writes the configuration file)
 node dist/index.js init --check   # Check the configuration, writes nothing
-npm run build                 # Build the project
-npm start                     # Start the MCP server
+node dist/index.js status         # The shared process and where each setting comes from
+node dist/index.js stop           # Stop the shared process (the next call starts a new one)
+npm run build                     # Build the project
 
 # Development
 npm run dev                   # Development mode
@@ -402,8 +401,8 @@ npm run lint                  # Code linting
 - [ ] The configuration file has `FOUNDRY_URL`, `FOUNDRY_USERNAME`, `FOUNDRY_PASSWORD` (`node dist/index.js status`, section *This terminal*)
 - [ ] Username matches a FoundryVTT user exactly (case-sensitive)
 - [ ] No firewall blocking connections
-- [ ] MCP server starts without errors
-- [ ] World data loads on connect (check startup logs)
+- [ ] `node dist/index.js init --check` ends with `All checks passed.`
+- [ ] `get_health_status` shows the connection and the module bridge connected
 - [ ] Basic tools (dice rolling) work
 - [ ] Search tools return expected results
 
@@ -412,4 +411,4 @@ Verify these work in your browser:
 - FoundryVTT main: `http://localhost:30000`
 - Join page (confirms active world): `http://localhost:30000/join`
 
-Remember: Most issues are configuration-related. The setup wizard and health diagnostics can resolve most common problems!
+Remember: most issues are configuration-related. `node dist/index.js init --check` and `get_health_status` point at most of them.
