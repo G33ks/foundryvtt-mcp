@@ -18,6 +18,7 @@ import { config, configSettings } from './config/index.js';
 import { summarizeSources } from './config/sources.js';
 import { DiagnosticsClient } from './diagnostics/client.js';
 import { NoActiveWorldError } from './foundry/auth.js';
+import type { BrowserChoice } from './foundry/browser-detect.js';
 import {
   type ConnectionStatus,
   FoundryClient,
@@ -97,6 +98,8 @@ export interface CoreStatus {
     /** e.g. "sharing the connector's session (mcp-api)". */
     modeText: string | null;
     sessionState: HeadlessSessionState | null;
+    /** The browser the session runs, once launched. */
+    browser: BrowserChoice | null;
   };
   /** Write calls queued or running. */
   writeQueue: number;
@@ -307,7 +310,7 @@ export class FoundryCore {
       }
 
       // Same best-effort isolation as the module bridge itself: a browser
-      // that fails to launch (no Chrome/Edge installed) must never take
+      // that fails to launch (none installed) must never take
       // down the Socket.IO connection or the module bridge's WS server —
       // canvas-only tools just report unavailable until this resolves.
       // Login happens in the background after this resolves (Foundry may
@@ -521,6 +524,7 @@ export class FoundryCore {
         mode: this.headlessGmSession?.mode() ?? null,
         modeText: this.headlessGmSession?.modeText() ?? null,
         sessionState: this.headlessGmSession?.sessionState() ?? null,
+        browser: this.headlessGmSession?.browserInfo() ?? null,
       },
       writeQueue: this.writeQueue.pending,
     };

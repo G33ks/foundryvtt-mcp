@@ -551,6 +551,7 @@ describe('handleGetHealthStatus', () => {
     const bridge = { isConnected: () => false } as unknown as ModuleBridge;
     const headlessSession = {
       statusText: () => '⏳ Not connected yet — no user named "mcp-api" in the join list',
+      browserInfo: () => ({ name: 'Brave', path: 'C:\\b\\brave.exe', origin: 'detected' }),
     } as unknown as HeadlessGmSession;
 
     const text = getText(
@@ -566,6 +567,7 @@ describe('handleGetHealthStatus', () => {
     expect(text).toContain('❌ Not connected');
     expect(text).toContain('**Headless GM Session:**');
     expect(text).toContain('no user named "mcp-api"');
+    expect(text).toContain('- **Browser:** Brave — C:\\b\\brave.exe (detected)');
   });
 
   it('explains the module needs the headless session when none is configured', async () => {

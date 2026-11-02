@@ -11,6 +11,22 @@ vi.mock('playwright-core', () => ({
   chromium: { launch: (...args: unknown[]) => launchMock(...args) },
 }));
 
+/** The installed browsers, as detection would report them. */
+const searchMock = vi.fn();
+vi.mock('../browser-detect.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../browser-detect.js')>()),
+  findBrowsers: () => searchMock(),
+}));
+
+const BRAVE = {
+  name: 'Brave',
+  path: 'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe',
+};
+const CHROMIUM = {
+  name: 'Chromium',
+  path: 'C:\\Users\\me\\AppData\\Local\\Chromium\\Application\\chrome.exe',
+};
+
 /** Minimal fake of the Playwright `Page` surface this module drives. */
 interface FakePage {
   on: Mock;
@@ -94,21 +110,22 @@ describe('HeadlessGmSession', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     launchMock.mockReset();
+    searchMock.mockReset();
+    searchMock.mockReturnValue({ found: [BRAVE], tried: [BRAVE.path] });
   });
 
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('launches with the chrome channel by default', async () => {
-    const state = {
+  it('launches the first browser found by its executable path', async () => {
+    const page = fakePage({
       url: 'http://localhost:30000/join',
       evaluateResult: true,
       succeedOnClick: true,
-    };
-    const page = fakePage(state);
-    const browser = fakeBrowser(page);
-    launchMock.mockResolvedValue(browser);
+    });
+    launchMock.mockResolvedValue(fakeBrowser(page));
+    searchMock.mockReturnValue({ found: [BRAVE, CHROMIUM], tried: [BRAVE.path, CHROMIUM.path] });
 
     const session = new HeadlessGmSession({
       foundryUrl: 'http://localhost:30000',
@@ -117,23 +134,30 @@ describe('HeadlessGmSession', () => {
     });
     await session.start();
 
+    expect(launchMock).toHaveBeenCalledTimes(1);
     expect(launchMock).toHaveBeenCalledWith({
       headless: true,
-      channel: 'chrome',
+      executablePath: BRAVE.path,
       args: HEADLESS_BROWSER_ARGS,
     });
+    expect(session.browserInfo()).toEqual({ ...BRAVE, origin: 'detected' });
     await session.stop();
   });
 
-  it('falls back to msedge then bundled chromium when earlier channels fail', async () => {
-    const state = {
+  it('moves on to the next browser found when one fails to start', async () => {
+    const page = fakePage({
       url: 'http://localhost:30000/join',
       evaluateResult: true,
       succeedOnClick: true,
-    };
-    const page = fakePage(state);
-    const browser = fakeBrowser(page);
-    launchMock.mockRejectedValueOnce(new Error('chrome not found')).mockResolvedValueOnce(browser);
+    });
+    launchMock
+      .mockRejectedValueOnce(
+        new Error(
+          'browserType.launch: Target page, context or browser has been closed\nCall log: …',
+        ),
+      )
+      .mockResolvedValueOnce(fakeBrowser(page));
+    searchMock.mockReturnValue({ found: [BRAVE, CHROMIUM], tried: [] });
 
     const session = new HeadlessGmSession({
       foundryUrl: 'http://localhost:30000',
@@ -142,21 +166,18 @@ describe('HeadlessGmSession', () => {
     });
     await session.start();
 
-    expect(launchMock).toHaveBeenNthCalledWith(1, {
-      headless: true,
-      channel: 'chrome',
-      args: HEADLESS_BROWSER_ARGS,
-    });
     expect(launchMock).toHaveBeenNthCalledWith(2, {
       headless: true,
-      channel: 'msedge',
+      executablePath: CHROMIUM.path,
       args: HEADLESS_BROWSER_ARGS,
     });
+    expect(session.browserInfo()).toEqual({ ...CHROMIUM, origin: 'detected' });
     await session.stop();
   });
 
   it('disables the local network access checks on every launch path', async () => {
-    launchMock.mockRejectedValue(new Error('not installed'));
+    launchMock.mockRejectedValue(new Error('boom'));
+    searchMock.mockReturnValue({ found: [BRAVE, CHROMIUM], tried: [] });
 
     const autoDetected = new HeadlessGmSession({
       foundryUrl: 'http://localhost:30000',
@@ -173,8 +194,8 @@ describe('HeadlessGmSession', () => {
     });
     await expect(explicit.start()).rejects.toThrow();
 
-    // chrome, msedge, bundled chromium, then the explicit executable path.
-    expect(launchMock).toHaveBeenCalledTimes(4);
+    // Both detected browsers, then the explicit executable path.
+    expect(launchMock).toHaveBeenCalledTimes(3);
     for (const [options] of launchMock.mock.calls) {
       expect(options.args).toContain(
         '--disable-features=LocalNetworkAccessChecks,BlockInsecurePrivateNetworkRequests,' +
@@ -184,12 +205,8 @@ describe('HeadlessGmSession', () => {
     }
   });
 
-  it('advises installing a browser only when none was found', async () => {
-    // playwright-core's own wording for a missing channel / bundled browser.
-    launchMock
-      .mockRejectedValueOnce(new Error("Chromium distribution 'chrome' is not found at C:\\x"))
-      .mockRejectedValueOnce(new Error("Chromium distribution 'msedge' is not found at C:\\y"))
-      .mockRejectedValueOnce(new Error("Executable doesn't exist at C:\\ms-playwright\\chrome"));
+  it('advises installing a browser, listing the locations tried, when none was found', async () => {
+    searchMock.mockReturnValue({ found: [], tried: ['C:\\a\\chrome.exe', 'C:\\b\\msedge.exe'] });
 
     const session = new HeadlessGmSession({
       foundryUrl: 'http://localhost:30000',
@@ -200,38 +217,18 @@ describe('HeadlessGmSession', () => {
     const error = await session.start().catch((e: unknown) => e);
     expect(String(error)).toMatch(/No browser found/);
     expect(String(error)).toMatch(/FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH/);
-    expect(launchMock).toHaveBeenCalledTimes(3);
+    expect(String(error)).toContain('C:\\a\\chrome.exe; C:\\b\\msedge.exe');
+    expect(launchMock).not.toHaveBeenCalled();
+    expect(session.browserInfo()).toBeNull();
   });
 
-  it('recognizes the lowercase "executable doesn\'t exist" playwright also uses', async () => {
-    // Seen live (recette chantier 4): "browserType.launch: Failed to launch
-    // chromium because executable doesn't exist at …".
-    launchMock
-      .mockRejectedValueOnce(new Error("Chromium distribution 'chrome' is not found at C:\\x"))
-      .mockRejectedValueOnce(new Error("Chromium distribution 'msedge' is not found at C:\\y"))
-      .mockRejectedValueOnce(
-        new Error(
-          "browserType.launch: Failed to launch chromium because executable doesn't exist at C:\\ms-playwright\\chrome.exe",
-        ),
-      );
-
-    const session = new HeadlessGmSession({
-      foundryUrl: 'http://localhost:30000',
-      username: 'mcp-api',
-      password: 'mcp',
-    });
-
-    const error = await session.start().catch((e: unknown) => e);
-    expect(String(error)).toMatch(/No browser found/);
-  });
-
-  it('shows the real launch error, without install advice, when a browser exists but fails', async () => {
+  it('shows the real launch errors, without install advice, when no browser found will start', async () => {
     launchMock
       .mockRejectedValueOnce(
         new Error('browserType.launch: Target page, context or browser has been closed'),
       )
-      .mockRejectedValueOnce(new Error("Chromium distribution 'msedge' is not found at C:\\y"))
-      .mockRejectedValueOnce(new Error("Executable doesn't exist at C:\\ms-playwright\\chrome"));
+      .mockRejectedValueOnce(new Error('spawn EACCES'));
+    searchMock.mockReturnValue({ found: [BRAVE, CHROMIUM], tried: [] });
 
     const session = new HeadlessGmSession({
       foundryUrl: 'http://localhost:30000',
@@ -241,12 +238,13 @@ describe('HeadlessGmSession', () => {
 
     const error = await session.start().catch((e: unknown) => e);
     expect(String(error)).toContain(
-      'chrome: browserType.launch: Target page, context or browser has been closed',
+      `Brave (${BRAVE.path}): browserType.launch: Target page, context or browser has been closed`,
     );
+    expect(String(error)).toContain(`Chromium (${CHROMIUM.path}): spawn EACCES`);
     expect(String(error)).not.toMatch(/Install Google Chrome/);
   });
 
-  it('names the explicit executablePath and its real error, never advising Chrome or Edge', async () => {
+  it('names the explicit executablePath and its real error, with no fallback', async () => {
     launchMock.mockRejectedValue(new Error("Executable doesn't exist at C:\\Brave\\brave.exe"));
 
     const session = new HeadlessGmSession({
@@ -262,31 +260,35 @@ describe('HeadlessGmSession', () => {
     expect(String(error)).toMatch(/check the path/i);
     expect(String(error)).not.toMatch(/Install Google Chrome/);
     expect(launchMock).toHaveBeenCalledTimes(1);
+    expect(searchMock).not.toHaveBeenCalled();
   });
 
-  it('uses an explicit executablePath without trying any channel', async () => {
-    const state = {
+  it('uses an explicit executablePath without any detection', async () => {
+    const page = fakePage({
       url: 'http://localhost:30000/join',
       evaluateResult: true,
       succeedOnClick: true,
-    };
-    const page = fakePage(state);
-    const browser = fakeBrowser(page);
-    launchMock.mockResolvedValue(browser);
+    });
+    launchMock.mockResolvedValue(fakeBrowser(page));
 
     const session = new HeadlessGmSession({
       foundryUrl: 'http://localhost:30000',
       username: 'mcp-api',
       password: 'mcp',
-      executablePath: '/opt/chrome/chrome',
+      executablePath: '/opt/vivaldi/vivaldi',
     });
     await session.start();
 
-    expect(launchMock).toHaveBeenCalledTimes(1);
+    expect(searchMock).not.toHaveBeenCalled();
     expect(launchMock).toHaveBeenCalledWith({
       headless: true,
-      executablePath: '/opt/chrome/chrome',
+      executablePath: '/opt/vivaldi/vivaldi',
       args: HEADLESS_BROWSER_ARGS,
+    });
+    expect(session.browserInfo()).toEqual({
+      name: 'Vivaldi',
+      path: '/opt/vivaldi/vivaldi',
+      origin: 'configured',
     });
     await session.stop();
   });

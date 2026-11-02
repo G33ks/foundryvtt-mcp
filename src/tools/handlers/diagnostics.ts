@@ -8,6 +8,7 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { type DiagnosticsClient, RestApiRequiredError } from '../../diagnostics/client.js';
 import type { LogEntry } from '../../diagnostics/types.js';
 import { LogEntrySchema } from '../../diagnostics/types.js';
+import { describeBrowser } from '../../foundry/browser-detect.js';
 import { type FoundryClient, gamemasterAccountWarning, roleLabel } from '../../foundry/client.js';
 import type { HeadlessGmSession } from '../../foundry/headless-gm-session.js';
 import { BRIDGE_PROTOCOL_VERSION, type ModuleBridge } from '../../foundry/module-bridge.js';
@@ -472,8 +473,11 @@ export async function handleGetHealthStatus(
       }
     }
 
+    const browser = headlessGmSession?.browserInfo();
     const headlessSection = headlessGmSession
-      ? `\n\n**Headless GM Session:**\n${headlessGmSession.statusText()}`
+      ? `\n\n**Headless GM Session:**\n${headlessGmSession.statusText()}${
+          browser ? `\n- **Browser:** ${describeBrowser(browser)}` : ''
+        }`
       : '';
 
     const account = foundryClient.accountInfo();

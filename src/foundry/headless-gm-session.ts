@@ -16,10 +16,10 @@
  * says no module connected" confusion when the human plays as a Player and
  * nobody is logged in as GM anywhere).
  *
- * This class removes that step: it drives a headless Chromium/Chrome/Edge tab
- * (via `playwright-core` — it launches whatever Chrome/Edge is already
- * installed, any Chromium-based browser given by an explicit executable path,
- * or Playwright's own Chromium if it was downloaded) and keeps it on `/game`
+ * This class removes that step: it drives a headless Chromium-based tab
+ * (via `playwright-core` — the browser given by an explicit executable path,
+ * else the first one installed among Chrome, Edge, Brave, Vivaldi, Chromium
+ * and Playwright's own Chromium, see `browser-detect.ts`) and keeps it on `/game`
  * for as long as the server runs, in one of two modes:
  *
  * - **Shared** (default, one account): the page reuses {@link FoundryClient}'s
@@ -53,18 +53,27 @@
 import type { Browser, BrowserContext, Frame, Page, Route } from 'playwright-core';
 import { chromium } from 'playwright-core';
 import { logger } from '../utils/logger.js';
-
-/** Chrome/Edge release channels tried in order when no explicit path is configured. */
-const BROWSER_CHANNELS: Array<string | undefined> = ['chrome', 'msedge', undefined];
+import {
+  type BrowserChoice,
+  type BrowserSearch,
+  browserNameFromPath,
+  findBrowsers,
+  noBrowserMessage,
+} from './browser-detect.js';
 
 /**
- * playwright-core's wording for "this browser is not installed": a missing
- * channel ("Chromium distribution 'chrome' is not found at …") or a missing
- * executable ("Executable doesn't exist at …", or "Failed to launch chromium
- * because executable doesn't exist at …"). Anything else is a browser that
- * exists but failed to start.
+ * Detection with Playwright's own Chromium as the last candidate, for when
+ * `playwright install chromium` was run.
  */
-const BROWSER_NOT_FOUND = /Chromium distribution '[^']*' is not found|executable doesn't exist/i;
+export function defaultBrowserSearch(): BrowserSearch {
+  let playwrightPath: string | null = null;
+  try {
+    playwrightPath = chromium.executablePath() || null;
+  } catch {
+    // No Chromium build registered for this platform.
+  }
+  return findBrowsers({ playwrightPath });
+}
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -199,8 +208,10 @@ export interface HeadlessGmSessionOptions {
    * `/join` form; `password` is then unused.
    */
   sessionSource?: SessionSource;
-  /** Explicit browser executable path; skips the channel-detection fallback chain. */
+  /** Explicit browser executable path; skips detection, with no fallback. */
   executablePath?: string;
+  /** Finds the installed browsers; {@link defaultBrowserSearch} unless a test injects one. */
+  findBrowsers?: () => BrowserSearch;
   /**
    * Polled every {@link WATCHDOG_INTERVAL_MS} while logged in; sustained
    * `false` triggers a page reload to recover a dropped module-bridge
@@ -261,6 +272,7 @@ export class HeadlessGmSession {
   private watchdogTimer: NodeJS.Timeout | null = null;
   private bridgeDownTicks = 0;
   private stopped = false;
+  private browserChoice: BrowserChoice | null = null;
 
   constructor(options: HeadlessGmSessionOptions) {
     this.options = options;
@@ -272,9 +284,9 @@ export class HeadlessGmSession {
    * yet, and that must not block server startup or take other tools down.
    *
    * @throws if no browser could be launched at all — the explicit path
-   *   failed, or none of chrome/msedge/bundled chromium was found or would
-   *   start. The message carries the real launch errors (install advice
-   *   only when nothing was found); the caller logs it and keeps it for
+   *   failed, or no browser was found or none of those found would start.
+   *   The message carries the real launch errors (install advice and the
+   *   locations tried only when nothing was found); the caller logs it and keeps it for
    *   `status` and `get_health_status`.
    */
   async start(): Promise<void> {
@@ -658,12 +670,23 @@ export class HeadlessGmSession {
     await page.addInitScript({ content: BRIDGE_INIT_SCRIPT });
   }
 
+  /** The browser this session launched; `null` until {@link start} launches one. */
+  browserInfo(): BrowserChoice | null {
+    return this.browserChoice;
+  }
+
   private async launchBrowser(): Promise<Browser> {
     const args = [...HEADLESS_BROWSER_ARGS];
     const { executablePath } = this.options;
     if (executablePath) {
       try {
-        return await chromium.launch({ headless: true, executablePath, args });
+        const browser = await chromium.launch({ headless: true, executablePath, args });
+        this.browserChoice = {
+          name: browserNameFromPath(executablePath),
+          path: executablePath,
+          origin: 'configured',
+        };
+        return browser;
       } catch (error) {
         throw new Error(
           `Could not launch the browser at FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH=${executablePath}: ` +
@@ -673,29 +696,31 @@ export class HeadlessGmSession {
       }
     }
 
-    const failures: Array<{ channel: string; message: string }> = [];
-    for (const channel of BROWSER_CHANNELS) {
-      try {
-        return await chromium.launch(
-          channel !== undefined ? { headless: true, channel, args } : { headless: true, args },
-        );
-      } catch (error) {
-        failures.push({ channel: channel ?? 'bundled chromium', message: errorText(error) });
-      }
-    }
-    const attempts = failures.map((f) => `${f.channel}: ${f.message}`).join('; ');
+    const { found, tried } = (this.options.findBrowsers ?? defaultBrowserSearch)();
     // Install advice only when nothing was found: a browser that is there
     // but fails to start needs its real error, not a hint to install another.
-    if (failures.every((f) => BROWSER_NOT_FOUND.test(f.message))) {
-      throw new Error(
-        'No browser found for the headless GM session (tried chrome, msedge, bundled chromium). ' +
-          'Install Google Chrome or Microsoft Edge, or set FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH to the ' +
-          'executable of another Chromium-based browser (Brave, Chromium). Without this session the ' +
-          `companion module cannot connect to the bridge. Attempts: ${attempts}`,
-      );
+    if (found.length === 0) {
+      throw new Error(noBrowserMessage(tried));
+    }
+    const failures: string[] = [];
+    for (const candidate of found) {
+      try {
+        const browser = await chromium.launch({
+          headless: true,
+          executablePath: candidate.path,
+          args,
+        });
+        this.browserChoice = { ...candidate, origin: 'detected' };
+        if (failures.length > 0) {
+          logger.warn(`Headless GM session: using ${candidate.name} — ${failures.join('; ')}`);
+        }
+        return browser;
+      } catch (error) {
+        failures.push(`${candidate.name} (${candidate.path}): ${firstLine(errorText(error))}`);
+      }
     }
     throw new Error(
-      `Could not launch a browser for the headless GM session. Attempts: ${attempts}`,
+      `Could not launch a browser for the headless GM session. Attempts: ${failures.join('; ')}`,
     );
   }
 

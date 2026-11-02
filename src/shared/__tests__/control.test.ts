@@ -122,6 +122,22 @@ describe('formatStatus', () => {
     );
   });
 
+  it('shows the browser of the headless GM session and where it comes from', () => {
+    const headlessGm = {
+      enabled: true,
+      active: true,
+      status: 'x',
+      state: 'running' as const,
+      browser: { name: 'Brave', path: 'C:\\b\\brave.exe', origin: 'detected' as const },
+    };
+    expect(line({ ...BASE, headlessGm }, 'Browser')).toBe(
+      '  Browser:        Brave — C:\\b\\brave.exe (detected)',
+    );
+    expect(
+      line({ ...BASE, headlessGm: { ...headlessGm, browser: null } }, 'Browser'),
+    ).toBeUndefined();
+  });
+
   it('shows the shared session mode and its state', () => {
     const headlessGm = {
       enabled: true,

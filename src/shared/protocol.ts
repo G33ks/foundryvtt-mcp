@@ -207,6 +207,15 @@ export const DaemonStatusSchema = z.object({
         ])
         .nullable()
         .optional(),
+      // Absent from shared processes older than browser detection.
+      browser: z
+        .object({
+          name: z.string(),
+          path: z.string(),
+          origin: z.enum(['configured', 'detected']),
+        })
+        .nullable()
+        .optional(),
     })
     .optional(),
 });

@@ -16,6 +16,7 @@ import {
   type SettingSource,
   summarizeSources,
 } from '../config/sources.js';
+import { describeBrowser } from '../foundry/browser-detect.js';
 import { EndpointUnavailableError, IpcConnection } from './ipc-client.js';
 import { isEndpointAlive } from './ipc-server.js';
 import { resolveSharedPaths, type SharedPaths } from './paths.js';
@@ -110,6 +111,9 @@ export function formatStatus(status: DaemonStatus): string[] {
     lines.push(`  Bridge origin:  ${bridge.origin}`);
   }
   lines.push(`  Headless GM:    ${formatHeadlessGm(headlessGm, bridgeState, notStarted)}`);
+  if (headlessGm?.browser) {
+    lines.push(`  Browser:        ${describeBrowser(headlessGm.browser)}`);
+  }
   lines.push(`  Endpoint:       ${status.endpoint}`, `  Log:            ${status.logFile}`);
   if (status.config) {
     lines.push('', 'Configuration of the shared process:');

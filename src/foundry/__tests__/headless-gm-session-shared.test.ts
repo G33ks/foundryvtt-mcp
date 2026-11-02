@@ -12,6 +12,14 @@ const launchMock = vi.fn();
 vi.mock('playwright-core', () => ({
   chromium: { launch: (...args: unknown[]) => launchMock(...args) },
 }));
+// One browser "installed", whatever this machine has.
+vi.mock('../browser-detect.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../browser-detect.js')>()),
+  findBrowsers: () => ({
+    found: [{ name: 'Chrome', path: '/opt/google/chrome/chrome' }],
+    tried: [],
+  }),
+}));
 vi.mock('../../utils/logger.js', () => ({
   logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
