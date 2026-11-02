@@ -115,7 +115,7 @@ node dist/index.js init        # or `foundryvtt-mcp init` when installed as a pa
 8. It prints the entry for Claude desktop (**Settings → Developer → Edit Config**) and the `claude mcp add` commands for Claude Code (`--scope user` for all your projects, `--scope local` for the current one) — see [step 6](#6-add-the-server-to-claude).
 9. If the shared process is running with older connection settings, it offers to stop it.
 
-`init` needs an interactive terminal: with redirected input it refuses. It never asks about the two-account mode (an advanced option, set by hand in the file).
+`init` needs an interactive terminal: with redirected input it refuses. It never asks about the two-account mode (an advanced option, set by hand in the file). The commands it prints (`init --check`, `stop`) name `dist/index.js` by its full path, so they work from any folder; started as `foundryvtt-mcp init` (installed as a package), it prints `foundryvtt-mcp …` instead.
 
 `node dist/index.js init --check` runs the same checks on the existing configuration, asking and writing nothing — see [TROUBLESHOOTING.md](TROUBLESHOOTING.md#init---check-start-here).
 

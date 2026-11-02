@@ -82,7 +82,7 @@ export function mergeConfig(text: string, updates: Array<[string, string]>): str
 
 /** Header of a file `init` creates. */
 export const NEW_FILE_HEADER = [
-  '# FoundryVTT MCP — shared by every MCP client (written by `foundryvtt-mcp init`).',
+  '# FoundryVTT MCP — shared by every MCP client (written by the `init` command).',
   '# One KEY=value per line; see SETUP_GUIDE.md (Configuration) for every setting.',
   '',
 ].join('\n');

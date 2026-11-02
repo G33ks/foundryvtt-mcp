@@ -37,14 +37,15 @@ export interface Prompter {
 export function terminalProblem(
   stdin: { isTTY?: boolean } = process.stdin,
   stdout: { isTTY?: boolean } = process.stdout,
+  command = 'node dist/index.js',
 ): string | null {
   if (stdin.isTTY && stdout.isTTY) {
     return null;
   }
   return [
     '`init` asks questions and needs an interactive terminal, but its input or output is redirected.',
-    'Run it directly in PowerShell, Windows Terminal, cmd or a terminal window (in Git Bash: `winpty node dist/index.js init`).',
-    'To check an existing configuration without questions, run `init --check`.',
+    `Run it directly in PowerShell, Windows Terminal, cmd or a terminal window (in Git Bash: \`winpty ${command} init\`).`,
+    `To check an existing configuration without questions, run \`${command} init --check\`.`,
   ].join('\n');
 }
 

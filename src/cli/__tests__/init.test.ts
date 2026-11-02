@@ -435,6 +435,51 @@ describe('init --check', () => {
   it('says what to run when nothing is configured', async () => {
     const h = harness({ file: null });
     expect(await runInit(['--check'], ENTRY, h.deps)).toBe(1);
-    expect(text(h)).toContain('FOUNDRY_URL is not set: run `init`');
+    expect(text(h)).toContain(`FOUNDRY_URL is not set: run \`node "${ENTRY}" init\``);
+  });
+});
+
+describe('init — the commands it prints', () => {
+  const RUN = `node "${ENTRY}"`;
+
+  it('prints commands that work after a plain clone', async () => {
+    const h = harness({
+      file: null,
+      script: { asks: ['foundry.example.com', 'mcp-api'], secrets: [PASSWORD], confirms: [true] },
+    });
+    expect(await runInit([], ENTRY, h.deps)).toBe(0);
+    const out = text(h);
+    expect(out).toContain(`\`${RUN} stop\` so the shared process restarts with it.`);
+    expect(out).toContain(`To check it again later: ${RUN} init --check`);
+    expect(out).not.toMatch(/foundryvtt-mcp (init|stop|status)/);
+  });
+
+  it('names the stop command when the shared process keeps the old settings', async () => {
+    const h = harness({
+      file: { FOUNDRY_URL: 'https://foundry.example.com', FOUNDRY_USERNAME: 'old' },
+      running: true,
+      script: { asks: [undefined, 'mcp-api'], secrets: [PASSWORD], confirms: [undefined, false] },
+    });
+    await runInit([], ENTRY, h.deps);
+    expect(text(h)).toContain(`It keeps the previous settings until \`${RUN} stop\`.`);
+  });
+
+  it('shows the usage with the same command', async () => {
+    const h = harness({});
+    await runInit(['--force'], ENTRY, h.deps);
+    expect(text(h)).toContain(`Usage: ${RUN} init [--check]`);
+  });
+
+  it('uses the package command when init was started by that name', async () => {
+    const h = harness({
+      file: null,
+      script: {
+        asks: ['foundry.example.com', 'mcp-api'],
+        secrets: [PASSWORD],
+        confirms: [undefined],
+      },
+    });
+    await runInit([], ENTRY, { ...h.deps, command: 'foundryvtt-mcp' });
+    expect(text(h)).toContain('To check it again later: foundryvtt-mcp init --check');
   });
 });

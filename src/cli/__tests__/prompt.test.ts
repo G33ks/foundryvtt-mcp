@@ -21,4 +21,11 @@ describe('terminalProblem', () => {
       expect(problem).toContain('init --check');
     }
   });
+
+  it('names the command to run, as given', () => {
+    const command = 'node "C:\\x\\dist\\index.js"';
+    const problem = terminalProblem({ isTTY: false }, { isTTY: true }, command);
+    expect(problem).toContain(`\`winpty ${command} init\``);
+    expect(problem).toContain(`\`${command} init --check\``);
+  });
 });

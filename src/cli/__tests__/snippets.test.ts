@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { claudeCodeCommand, claudeDesktopSnippet } from '../snippets.js';
+import { claudeCodeCommand, claudeDesktopSnippet, connectorCommand } from '../snippets.js';
 
 const WINDOWS_ENTRY = 'C:\\Users\\Goret\\source\\foundryvtt-mcp\\dist\\index.js';
 
@@ -32,5 +32,21 @@ describe('claudeCodeCommand', () => {
     expect(claudeCodeCommand('/opt/mcp/dist/index.js', 'local')).toBe(
       'claude mcp add foundryvtt --scope local -- node "/opt/mcp/dist/index.js"',
     );
+  });
+});
+
+describe('connectorCommand', () => {
+  it('runs the entry through node, quoted, after a plain clone', () => {
+    expect(connectorCommand(WINDOWS_ENTRY, WINDOWS_ENTRY)).toBe(`node "${WINDOWS_ENTRY}"`);
+    expect(connectorCommand(WINDOWS_ENTRY, undefined)).toBe(`node "${WINDOWS_ENTRY}"`);
+  });
+
+  it('uses the package command when started by that name', () => {
+    expect(
+      connectorCommand(
+        '/usr/lib/node_modules/foundryvtt-mcp/dist/index.js',
+        '/usr/local/bin/foundryvtt-mcp',
+      ),
+    ).toBe('foundryvtt-mcp');
   });
 });

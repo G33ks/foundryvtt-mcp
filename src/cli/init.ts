@@ -26,13 +26,15 @@ import {
 } from './checks.js';
 import { quoteValue, UnwritableValueError, type WriteResult, writeConfig } from './config-file.js';
 import { PromptCancelled, type Prompter, terminalProblem, terminalPrompter } from './prompt.js';
-import { claudeCodeCommand, claudeDesktopSnippet } from './snippets.js';
+import { claudeCodeCommand, claudeDesktopSnippet, connectorCommand } from './snippets.js';
 
 export interface InitDeps {
   prompter: Prompter;
   print: (line: string) => void;
   /** Absolute path of `dist/index.js`, for the client snippets. */
   entry: string;
+  /** How to run the connector from a terminal, in the commands `init` prints. */
+  command: string;
   resolve: () => ResolvedSettings;
   readFile: (file: string) => Record<string, string>;
   probeJoin: (url: string) => Promise<Verdict>;
@@ -67,12 +69,14 @@ const ACCOUNT_ADVICE = [
   'unique password used nowhere else.',
 ];
 
-const WRITE_ADVICE = [
-  'Allow changes to the game? With "yes", the assistant can create, edit and delete documents',
-  '(actors, journals, scenes, tokens, combat…) in the world. With "no", it can only read.',
-  'To change your mind later: edit FOUNDRY_WRITE_ENABLED in the configuration file, then run',
-  '`foundryvtt-mcp stop` so the shared process restarts with it.',
-];
+function writeAdvice(command: string): string[] {
+  return [
+    'Allow changes to the game? With "yes", the assistant can create, edit and delete documents',
+    '(actors, journals, scenes, tokens, combat…) in the world. With "no", it can only read.',
+    'To change your mind later: edit FOUNDRY_WRITE_ENABLED in the configuration file, then run',
+    `\`${command} stop\` so the shared process restarts with it.`,
+  ];
+}
 
 function ok(print: InitDeps['print'], message: string): void {
   print(`✔ ${message}`);
@@ -116,7 +120,12 @@ async function runCheck(deps: InitDeps): Promise<number> {
 
   const url = normalizeUrl(v.FOUNDRY_URL ?? '');
   if (!v.FOUNDRY_URL || !url.ok) {
-    fail(print, v.FOUNDRY_URL ? url.message : 'FOUNDRY_URL is not set: run `init` to write it.');
+    fail(
+      print,
+      v.FOUNDRY_URL
+        ? url.message
+        : `FOUNDRY_URL is not set: run \`${deps.command} init\` to write it.`,
+    );
     healthy = false;
   } else {
     warn(print, url.warning);
@@ -128,7 +137,10 @@ async function runCheck(deps: InitDeps): Promise<number> {
     if (!join.ok) {
       print('  (login, role and module not checked)');
     } else if (!username || !v.FOUNDRY_PASSWORD) {
-      fail(print, 'FOUNDRY_USERNAME or FOUNDRY_PASSWORD is not set: run `init` to write them.');
+      fail(
+        print,
+        `FOUNDRY_USERNAME or FOUNDRY_PASSWORD is not set: run \`${deps.command} init\` to write them.`,
+      );
       healthy = false;
     } else {
       try {
@@ -362,7 +374,7 @@ async function runInteractive(deps: InitDeps): Promise<number> {
   print('');
 
   // Writes
-  for (const line of WRITE_ADVICE) {
+  for (const line of writeAdvice(deps.command)) {
     print(line);
   }
   const allowWrites = await prompter.confirm(
@@ -429,10 +441,10 @@ async function runInteractive(deps: InitDeps): Promise<number> {
     ) {
       await deps.stopSharedProcess();
     } else {
-      print('It keeps the previous settings until `foundryvtt-mcp stop`.');
+      print(`It keeps the previous settings until \`${deps.command} stop\`.`);
     }
   }
-  ok(print, 'Setup complete. To check it again later: foundryvtt-mcp init --check');
+  ok(print, `Setup complete. To check it again later: ${deps.command} init --check`);
   return 0;
 }
 
@@ -444,10 +456,12 @@ async function defaultDeps(entry: string): Promise<InitDeps> {
   const { isEndpointAlive } = await import('../shared/ipc-server.js');
   const { resolveSharedPaths } = await import('../shared/paths.js');
   const { runStop } = await import('../shared/control.js');
+  const command = connectorCommand(entry, process.argv[1]);
   return {
     prompter: terminalPrompter(),
     print: (line) => process.stdout.write(`${line}\n`),
     entry,
+    command,
     resolve: () => resolveSettings(),
     readFile: (file) => readConfigFile(file).values,
     probeJoin: (url) => probeJoin(url),
@@ -456,7 +470,7 @@ async function defaultDeps(entry: string): Promise<InitDeps> {
     write: (file, updates) => writeConfig(file, updates),
     sharedProcessRunning: () => isEndpointAlive(resolveSharedPaths().endpoint),
     stopSharedProcess: () => runStop(),
-    terminalProblem: () => terminalProblem(),
+    terminalProblem: () => terminalProblem(process.stdin, process.stdout, command),
   };
 }
 
@@ -473,7 +487,7 @@ export async function runInit(
 
   const unknown = args.filter((arg) => arg !== '--check');
   if (unknown.length > 0) {
-    deps.print(`Unknown option: ${unknown.join(' ')}\nUsage: foundryvtt-mcp init [--check]`);
+    deps.print(`Unknown option: ${unknown.join(' ')}\nUsage: ${deps.command} init [--check]`);
     return 2;
   }
   if (args.includes('--check')) {
