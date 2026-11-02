@@ -1,0 +1,60 @@
+name: Bridge Module Release
+
+# Publishes the companion FoundryVTT module (foundry-module/) on its own tags.
+# A tag bridge-vX.Y.Z or bridge-vX.Y.Z-<prerelease> creates a GitHub release with
+# two attachments: module.json (exact tag version, this tag's download URL) and
+# foundryvtt-mcp-bridge.zip. Foundry installs and updates from the stable manifest
+# URL on main, never from releases/latest. Checks and packaging live in
+# scripts/package-bridge.js, which also serves as the local fallback.
+
+on:
+  push:
+    tags:
+      - 'bridge-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Package the module
+        id: package
+        run: node scripts/package-bridge.js --tag "$GITHUB_REF_NAME" --out build/bridge-release --github-output
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ steps.package.outputs.version }}
+          PRERELEASE: ${{ steps.package.outputs.prerelease }}
+        run: |
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then
+            flags+=(--prerelease)
+          fi
+          cat > build/release-notes.md <<EOF
+          FoundryVTT MCP Bridge ${VERSION}, the companion module of foundryvtt-mcp.
+
+          Install or update it from Foundry's Setup screen (Add-on Modules → Install Module) with the stable manifest URL:
+          https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/main/foundry-module/module.json
+
+          To install exactly this version, use the module.json attached to this release instead.
+          EOF
+          gh release create "$TAG" \
+            build/bridge-release/module.json \
+            build/bridge-release/foundryvtt-mcp-bridge.zip \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --latest=false \
+            --title "FoundryVTT MCP Bridge ${VERSION}" \
+            --notes-file build/release-notes.md \
+            "${flags[@]}"

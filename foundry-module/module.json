@@ -2,15 +2,18 @@
     "id": "foundryvtt-mcp-bridge",
     "title": "FoundryVTT MCP Bridge",
     "description": "Companion module for foundryvtt-mcp. Relays canvas-only commands (scene screenshots, document schema introspection, etc.) from the MCP server to this browser session over a local WebSocket — capabilities FoundryVTT's own Socket.IO document API cannot reach.",
-    "version": "0.5.0",
+    "version": "0.5.1",
     "authors": [
         { "name": "foundryvtt-mcp" }
     ],
+    "url": "https://github.com/G33ks/foundryvtt-mcp",
+    "manifest": "https://raw.githubusercontent.com/G33ks/foundryvtt-mcp/main/foundry-module/module.json",
+    "download": "https://github.com/G33ks/foundryvtt-mcp/releases/download/bridge-v0.5.1/foundryvtt-mcp-bridge.zip",
     "esmodules": [
         "scripts/main.js"
     ],
     "compatibility": {
-        "minimum": "11",
+        "minimum": "13",
         "verified": "14"
     }
 }

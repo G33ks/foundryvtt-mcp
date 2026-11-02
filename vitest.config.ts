@@ -4,7 +4,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['src/**/*.test.ts'],
+    include: ['src/**/*.test.ts', 'scripts/**/*.test.js'],
     env: {
       NODE_ENV: 'test',
       FOUNDRY_URL: 'http://localhost:30000',
