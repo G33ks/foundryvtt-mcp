@@ -43,7 +43,7 @@ const SIGKILL_GRACE_MS = 2000;
 
 if (!existsSync(serverPath)) {
   console.error(`❌ Built server not found at ${serverPath}`);
-  console.error('   Run `bun run build` before invoking the smoke test.');
+  console.error('   Run `npm run build` before invoking the smoke test.');
   process.exit(2);
 }
 
