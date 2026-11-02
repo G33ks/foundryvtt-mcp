@@ -3,8 +3,8 @@
 /**
  * Stress test for shared-process mode, against a live FoundryVTT.
  *
- * Usage (after `npm run build`, with the usual FOUNDRY_* configuration in the
- * environment or in a .env file in the working directory):
+ * Usage (after `npm run build`, with the usual configuration: the configuration
+ * file, the environment, or a .env file in the working directory):
  *
  *   node scripts/stress-shared.js [--tool get_world_summary] [--keep]
  *
@@ -83,6 +83,19 @@ async function control(paths, op) {
   } catch {
     return null;
   }
+}
+
+// The isolated state dir below would also move the configuration file
+// (<state dir>/config.env): keep reading the regular one.
+const { configFilePath } = await dist('config/sources.js');
+const { tryGetConfig } = await dist('config/index.js');
+process.env.FOUNDRY_MCP_CONFIG ??= configFilePath();
+// Relays answer without a configuration (each call says what is missing),
+// so check it here rather than wait for calls that cannot succeed.
+const loaded = tryGetConfig();
+if ('error' in loaded) {
+  console.error(`✗ ${loaded.error.message}`);
+  process.exit(2);
 }
 
 // The regular (non-isolated) shared process would hold the bridge port.
