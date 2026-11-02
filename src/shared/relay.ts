@@ -5,18 +5,28 @@
  * and forwards `tools/call` / `resources/read` to the shared process,
  * starting it when needed. MCP clients may start and stop relays freely;
  * the FoundryVTT connection lives in the shared process.
+ *
+ * A relay starts and answers even with no usable configuration: each tool
+ * call then says what is missing, and re-reads the configuration, so writing
+ * the configuration file is enough — no client restart.
  */
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { CallToolResultSchema, ReadResourceResultSchema } from '@modelcontextprotocol/sdk/types.js';
-import { getConfig } from '../config/index.js';
+import {
+  type CallToolResult,
+  CallToolResultSchema,
+  ErrorCode,
+  McpError,
+  ReadResourceResultSchema,
+} from '@modelcontextprotocol/sdk/types.js';
 import { createMcpServer, STARTUP_BANNER } from '../mcp-server.js';
 import { logger } from '../utils/logger.js';
 import { OutdatedRelayNotice } from './build-order.js';
-import { configFingerprint } from './config-hash.js';
+import { IgnoredConfigNotice } from './config-notice.js';
 import { DaemonLink } from './daemon-link.js';
 import { resolveSharedPaths } from './paths.js';
 import { type Hello, PROTOCOL_VERSION } from './protocol.js';
+import { RelayConfig } from './relay-config.js';
 import { RotatingLog } from './rotating-log.js';
 import { spawnDaemon } from './spawn.js';
 import { loadOrCreateToken } from './token.js';
@@ -25,9 +35,6 @@ import { buildVersion } from './version.js';
 export async function runRelay(entry: string): Promise<void> {
   process.stderr.write(STARTUP_BANNER);
 
-  // Validate the configuration up front, exactly like the all-in-one mode:
-  // a broken setup fails here, visibly, not on the first tool call.
-  const config = getConfig();
   const paths = resolveSharedPaths();
   // stderr stays the MCP client's log; relay.log keeps a history across clients.
   const log = new RotatingLog(paths.relayLog);
@@ -36,6 +43,13 @@ export async function runRelay(entry: string): Promise<void> {
   // A relay older than the shared process is served (see build-order.ts),
   // with its startup tool list: its first tool result says so.
   const notice = new OutdatedRelayNotice(version);
+  // Served with the shared process's settings instead of its own: said once too.
+  const configNotice = new IgnoredConfigNotice();
+
+  // Re-read before each handshake, and before each call while unusable.
+  const relayConfig = new RelayConfig((message) =>
+    logger.warn(`[relay ${process.pid}] ${message}`),
+  );
 
   const link = new DaemonLink({
     endpoint: paths.endpoint,
@@ -47,8 +61,9 @@ export async function runRelay(entry: string): Promise<void> {
         protocol: PROTOCOL_VERSION,
         role: 'relay',
         version,
-        configHash: configFingerprint(config, token),
         token,
+        pid: process.pid,
+        ...relayConfig.helloFields(token),
       };
     },
     spawnDaemon: () => spawnDaemon(entry),
@@ -58,20 +73,37 @@ export async function runRelay(entry: string): Promise<void> {
           `[relay ${process.pid}] this relay (v${version}) is older than the shared process (v${connection.serverVersion}); restart the MCP client to load the current tool list`,
         );
       }
+      configNotice.connected(connection.ignoredConfig);
     },
     log: (message) => logger.info(`[relay ${process.pid}] ${message}`),
   });
 
   const server = createMcpServer({
-    callTool: async (name, args) => {
+    callTool: async (name, args): Promise<CallToolResult> => {
+      const config = relayConfig.usable();
+      if (config instanceof Error) {
+        return { isError: true, content: [{ type: 'text', text: config.message }] };
+      }
       const result = CallToolResultSchema.parse(await link.call('tool', name, args));
-      const text = notice.take();
+      const texts = [notice.take(), configNotice.take()].filter((t): t is string => t !== null);
       // Some clients join text blocks without a separator: start on its own paragraph.
-      return text
-        ? { ...result, content: [...result.content, { type: 'text', text: `\n\n${text}` }] }
+      return texts.length > 0
+        ? {
+            ...result,
+            content: [
+              ...result.content,
+              ...texts.map((text) => ({ type: 'text' as const, text: `\n\n${text}` })),
+            ],
+          }
         : result;
     },
-    readResource: async (uri) => ReadResourceResultSchema.parse(await link.call('resource', uri)),
+    readResource: async (uri) => {
+      const config = relayConfig.usable();
+      if (config instanceof Error) {
+        throw new McpError(ErrorCode.InvalidRequest, config.message);
+      }
+      return ReadResourceResultSchema.parse(await link.call('resource', uri));
+    },
   });
 
   const exit = (reason: string): void => {
@@ -97,7 +129,11 @@ export async function runRelay(entry: string): Promise<void> {
 
   // Warm up in the background: when the client starts, the shared process
   // (FoundryVTT connection, module bridge, headless GM session) should be
-  // up before the first tool call. Failures are retried by that call.
+  // up before the first tool call. Failures are retried by that call. With
+  // no usable configuration there is nothing to start: calls will say so.
+  if (relayConfig.usable() instanceof Error) {
+    return;
+  }
   link.ensureConnected().then(
     (connection) =>
       logger.info(`[relay ${process.pid}] connected to shared process ${connection.serverPid}`),

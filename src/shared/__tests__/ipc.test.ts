@@ -131,15 +131,15 @@ describe('IPC handshake', () => {
   });
 
   it.each([
-    ['version', { version: '2.0.0' }, '2.0.0'],
-    ['config', { configHash: 'other' }, '1.0.0'],
+    ['version', { version: '2.0.0' }, '2.0.0', 'cfg'],
+    ['config', { configHash: 'other' }, '1.0.0', 'other'],
   ] as const)(
     'refuses the relay when a %s mismatch means a restart',
-    async (reason, overrides, relayVersion) => {
+    async (reason, overrides, relayVersion, relayHash) => {
       const onMismatch = vi.fn(() => 'restart' as const);
       const { endpoint } = await startServer({ onMismatch });
       await expect(connect(endpoint, overrides)).rejects.toMatchObject({ reason });
-      expect(onMismatch).toHaveBeenCalledWith(reason, relayVersion);
+      expect(onMismatch).toHaveBeenCalledWith(reason, relayVersion, relayHash);
     },
   );
 
@@ -151,7 +151,7 @@ describe('IPC handshake', () => {
     await expect(connection.request('tool', 'get_users', {})).resolves.toEqual({
       echo: 'get_users',
     });
-    expect(onMismatch).toHaveBeenCalledWith('version', '1.0.0+a');
+    expect(onMismatch).toHaveBeenCalledWith('version', '1.0.0+a', 'cfg');
     expect(server.outdatedRelayVersions).toEqual(['1.0.0+a']);
 
     connection.close();

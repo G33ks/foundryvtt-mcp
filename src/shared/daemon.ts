@@ -4,19 +4,21 @@
  * Owns the single FoundryVTT connection, module bridge and headless GM
  * session ({@link FoundryCore}) and serves tool calls forwarded by relays.
  * It outlives the relays MCP clients start and stop, and exits on `stop`,
- * after a relay from a newer build or with another configuration knocks, or
- * once no relay has been connected for the idle timeout. When the
+ * after a relay from a newer build knocks, after one whose settings match a
+ * changed configuration file knocks (see {@link mismatchDecision}), or once
+ * no relay has been connected for the idle timeout. When the
  * FoundryVTT connection cannot be established (FoundryVTT not started yet,
  * wrong URL…) it stays up and retries on the next call.
  */
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
-import { getConfig } from '../config/index.js';
+import { type Config, configFromSettings, getConfig } from '../config/index.js';
+import { displayValue, KNOWN_SETTINGS, resolveSettings } from '../config/sources.js';
 import type { CoreStatus, FoundryCore } from '../core.js';
 import { logger } from '../utils/logger.js';
 import { isRefusal } from '../utils/refusal.js';
 import { compareBuilds } from './build-order.js';
-import { configFingerprint } from './config-hash.js';
+import { configDigests, configFingerprint } from './config-hash.js';
 import { IpcServer, type MismatchDecision } from './ipc-server.js';
 import { resolveSharedPaths, type SharedPaths } from './paths.js';
 import type { DaemonStatus, IpcError } from './protocol.js';
@@ -36,6 +38,12 @@ export interface SharedProcessOptions {
   version: string;
   token: string;
   configHash: string;
+  /** Per-setting digests of the identity settings (never logged nor shown). */
+  configDigests?: Record<string, string>;
+  /** Fingerprint of the configuration file alone, as on disk now; `null` if unreadable or invalid. */
+  fileConfigHash?: () => string | null;
+  /** This process's own settings for `status`, secrets already masked. */
+  configStatus?: DaemonStatus['config'];
   /** Builds the core once the single-instance lock is held. */
   createCore: () => Promise<SharedCore>;
   exit: (code: number) => void;
@@ -70,19 +78,33 @@ export function toIpcError(error: unknown): IpcError {
 
 /**
  * Whether a relay running another build or configuration restarts this
- * process. Only a strictly newer build does (see build-order.ts): an older
- * or unorderable relay is served as it is. A different configuration still
- * restarts it (the policy for that case belongs to a later change).
+ * process ("the file is authoritative"):
+ *
+ * - a strictly newer build restarts it (see build-order.ts); an older or
+ *   unorderable one is served as it is;
+ * - another configuration restarts it only when the relay's settings are
+ *   those of the configuration file as it is on disk now: the file changed,
+ *   or this process was started by a client whose `env` block overrides it;
+ * - any other difference (a client's `env` block) is served with this
+ *   process's settings, and the relay is told which of its own are ignored;
+ * - with the file unreadable or invalid, nothing restarts.
+ *
+ * @param fileHash - fingerprint of the file alone, `null` when unreadable or invalid
  */
 export function mismatchDecision(
   reason: 'version' | 'config',
   relayVersion: string,
   ownVersion: string,
+  config: { relayHash?: string; ownHash?: string; fileHash?: string | null } = {},
 ): MismatchDecision {
-  if (reason === 'config') {
-    return 'restart';
+  if (reason === 'version') {
+    return compareBuilds(relayVersion, ownVersion) === 'newer' ? 'restart' : 'accept';
   }
-  return compareBuilds(relayVersion, ownVersion) === 'newer' ? 'restart' : 'accept';
+  const { relayHash, ownHash, fileHash } = config;
+  if (!fileHash || relayHash === undefined) {
+    return 'accept';
+  }
+  return relayHash === fileHash && fileHash !== ownHash ? 'restart' : 'accept';
 }
 
 function sleep(ms: number): Promise<void> {
@@ -108,16 +130,23 @@ export class SharedProcess {
       token: options.token,
       version: options.version,
       configHash: options.configHash,
+      ...(options.configDigests ? { configDigests: options.configDigests } : {}),
+      ...(options.configStatus ? { configFile: options.configStatus.file.path } : {}),
       toIpcError,
       log: (level, message) => logger[level](message),
       onRelayCountChange: (count) => this.updateIdleTimer(count),
-      onMismatch: (reason, relayVersion) => {
-        const decision = mismatchDecision(reason, relayVersion, options.version);
+      onMismatch: (reason, relayVersion, relayHash) => {
+        const decision = mismatchDecision(reason, relayVersion, options.version, {
+          relayHash,
+          ownHash: options.configHash,
+          // Re-read now: the file may have changed since this process started.
+          fileHash: reason === 'config' ? (options.fileConfigHash?.() ?? null) : null,
+        });
         if (decision === 'restart') {
           void this.drainAndExit(
             reason === 'version'
               ? `a relay from a newer build (v${relayVersion}) connected`
-              : 'a relay with a different configuration connected',
+              : "a relay with the configuration file's settings connected (the file changed, or this process was started with a client's own settings)",
           );
         }
         return decision;
@@ -246,6 +275,8 @@ export class SharedProcess {
       outdatedRelays: this.ipc.outdatedRelayVersions,
       // Excludes this status request itself.
       inFlight: this.ipc.inFlightCount - 1,
+      ...(this.options.configStatus ? { config: this.options.configStatus } : {}),
+      relayConfigs: this.ipc.relayConfigList,
       startupError: this.startupError ? describe(this.startupError) : null,
       ...coreStatus,
     };
@@ -290,12 +321,46 @@ export async function runDaemon(paths: SharedPaths = resolveSharedPaths()): Prom
   );
 
   const token = loadOrCreateToken(paths.tokenFile);
-  const config = getConfig();
+  let config: Config;
+  try {
+    config = getConfig();
+  } catch (error) {
+    // A relay only starts this process with a usable configuration; the
+    // environment or the file changed in between. Nothing to serve.
+    logger.error(`Shared process cannot start: ${error instanceof Error ? error.message : error}`);
+    process.exit(1);
+  }
+  const settings = resolveSettings();
+  if (settings.file.warning) {
+    logger.warn(settings.file.warning);
+  }
   const shared: SharedProcess = new SharedProcess({
     paths,
     version: buildVersion(),
     token,
     configHash: configFingerprint(config, token),
+    configDigests: configDigests(config, token),
+    fileConfigHash: () => {
+      const fileOnly = resolveSettings({ fileOnly: true });
+      if (!fileOnly.file.found || fileOnly.file.error) {
+        return null;
+      }
+      try {
+        return configFingerprint(configFromSettings(fileOnly), token);
+      } catch {
+        return null;
+      }
+    },
+    configStatus: {
+      file: settings.file,
+      settings: KNOWN_SETTINGS.filter((name) => settings.values[name] !== undefined).map(
+        (name) => ({
+          name,
+          value: displayValue(name, settings.values[name]),
+          source: settings.sources[name],
+        }),
+      ),
+    },
     idleTimeoutMs: config.shared.idleTimeoutMinutes * 60_000,
     // Loaded lazily: Socket.IO, Playwright & co. are not needed to lose the race.
     createCore: async () =>

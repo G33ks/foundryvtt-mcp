@@ -27,6 +27,18 @@ export const IpcErrorCode = {
   InvalidRequest: -32600,
 } as const;
 
+/** Where a setting comes from (see config/sources.ts). */
+export const SettingSourceSchema = z.enum(['env', '.env', 'file', 'default']);
+
+/** A relay setting the shared process does not apply, and where the relay got it. */
+export const IgnoredSettingSchema = z.object({ name: z.string(), source: SettingSourceSchema });
+export type IgnoredSetting = z.infer<typeof IgnoredSettingSchema>;
+
+/*
+ * Fields marked "optional" below were added without bumping PROTOCOL_VERSION:
+ * zod objects drop unknown keys, so an older peer ignores them, and a newer
+ * one copes with their absence.
+ */
 export const HelloSchema = z.object({
   type: z.literal('hello'),
   protocol: z.number().int(),
@@ -36,6 +48,12 @@ export const HelloSchema = z.object({
   version: z.string(),
   configHash: z.string(),
   token: z.string(),
+  /** Optional: the relay's pid, for `status`. */
+  pid: z.number().int().optional(),
+  /** Optional: where each of the relay's settings comes from (no values). */
+  configSources: z.record(z.string(), SettingSourceSchema).optional(),
+  /** Optional: one HMAC per identity setting (config-hash.ts). Never logged nor shown. */
+  configDigests: z.record(z.string(), z.string()).optional(),
 });
 export type Hello = z.infer<typeof HelloSchema>;
 
@@ -49,7 +67,16 @@ export const HelloRejectReasonSchema = z.enum([
 export type HelloRejectReason = z.infer<typeof HelloRejectReasonSchema>;
 
 export const HelloReplySchema = z.discriminatedUnion('ok', [
-  z.object({ type: z.literal('hello'), ok: z.literal(true), pid: z.number(), version: z.string() }),
+  z.object({
+    type: z.literal('hello'),
+    ok: z.literal(true),
+    pid: z.number(),
+    version: z.string(),
+    /** Optional: the relay's identity settings that differ and are not applied. */
+    ignoredConfig: z.array(IgnoredSettingSchema).optional(),
+    /** Optional: the configuration file the shared process reads. */
+    configFile: z.string().optional(),
+  }),
   z.object({
     type: z.literal('hello'),
     ok: z.literal(false),
@@ -97,6 +124,33 @@ export const DaemonStatusSchema = z.object({
    *  (served, but their client should be restarted). Absent from older processes. */
   outdatedRelays: z.array(z.string()).optional(),
   inFlight: z.number(),
+  /** Optional: the shared process's own settings, secrets masked. */
+  config: z
+    .object({
+      file: z.object({
+        path: z.string(),
+        found: z.boolean(),
+        error: z.string().nullable(),
+        warning: z.string().nullable(),
+      }),
+      settings: z.array(
+        z.object({ name: z.string(), value: z.string(), source: SettingSourceSchema }),
+      ),
+    })
+    .optional(),
+  /** Optional: each connected relay's declared provenance and its ignored settings. */
+  relayConfigs: z
+    .array(
+      z.object({
+        pid: z.number().nullable(),
+        version: z.string(),
+        /** `null`: a relay too old to declare it. */
+        sources: z.record(z.string(), SettingSourceSchema).nullable(),
+        /** `null`: differs, but a relay too old to say which settings. */
+        ignored: z.array(IgnoredSettingSchema).nullable(),
+      }),
+    )
+    .optional(),
   writeQueue: z.number().optional(),
   startupError: z.string().nullable(),
   foundryConnected: z.boolean().optional(),

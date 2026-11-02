@@ -7,7 +7,9 @@ import {
   encodeLine,
   type Hello,
   type HelloRejectReason,
+  type HelloReply,
   HelloReplySchema,
+  type IgnoredSetting,
   type IpcError,
   LineDecoder,
   type Op,
@@ -75,14 +77,21 @@ export class IpcConnection {
   readonly serverPid: number;
   /** Build the shared process reported at the handshake. */
   readonly serverVersion: string;
+  /**
+   * This relay's settings the shared process does not apply (it serves its
+   * own), with the file it reads; `null` when none are ignored.
+   */
+  readonly ignoredConfig: { settings: IgnoredSetting[]; configFile: string | null } | null;
 
   private constructor(
     private readonly socket: net.Socket,
-    serverPid: number,
-    serverVersion: string,
+    reply: Extract<HelloReply, { ok: true }>,
   ) {
-    this.serverPid = serverPid;
-    this.serverVersion = serverVersion;
+    this.serverPid = reply.pid;
+    this.serverVersion = reply.version;
+    this.ignoredConfig = reply.ignoredConfig
+      ? { settings: reply.ignoredConfig, configFile: reply.configFile ?? null }
+      : null;
   }
 
   /**
@@ -149,7 +158,7 @@ export class IpcConnection {
           }
           settled = true;
           clearTimeout(timer);
-          connection = new IpcConnection(socket, reply.data.pid, reply.data.version);
+          connection = new IpcConnection(socket, reply.data);
           resolve(connection);
         }
       });

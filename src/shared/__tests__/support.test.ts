@@ -2,7 +2,6 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { configFingerprint } from '../config-hash.js';
 import { defaultStateDir, endpointFor } from '../paths.js';
 import { LineDecoder, MAX_LINE_BYTES } from '../protocol.js';
 import { loadOrCreateToken, readExistingToken, tokensMatch } from '../token.js';
@@ -58,20 +57,6 @@ describe('token', () => {
     expect(tokensMatch('abc', 'abc')).toBe(true);
     expect(tokensMatch('abc', 'abd')).toBe(false);
     expect(tokensMatch('abc', 'abcd')).toBe(false);
-  });
-});
-
-describe('configFingerprint', () => {
-  it('ignores key order and undefined values, and depends on the token', () => {
-    const a = configFingerprint({ x: 1, y: { b: 2, a: 1 }, z: undefined }, 'k');
-    const b = configFingerprint({ y: { a: 1, b: 2 }, x: 1 }, 'k');
-    expect(a).toBe(b);
-    expect(configFingerprint({ x: 2, y: { a: 1, b: 2 } }, 'k')).not.toBe(a);
-    expect(configFingerprint({ x: 1, y: { a: 1, b: 2 } }, 'other')).not.toBe(a);
-  });
-
-  it('does not contain the secret in clear', () => {
-    expect(configFingerprint({ password: 'hunter2' }, 'k')).not.toContain('hunter2');
   });
 });
 

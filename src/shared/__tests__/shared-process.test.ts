@@ -6,7 +6,12 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CoreStatus } from '../../core.js';
 import { RefusedError } from '../../utils/refusal.js';
-import { type SharedCore, SharedProcess, type SharedProcessOptions } from '../daemon.js';
+import {
+  mismatchDecision,
+  type SharedCore,
+  SharedProcess,
+  type SharedProcessOptions,
+} from '../daemon.js';
 import { DaemonLink } from '../daemon-link.js';
 import { IpcConnection } from '../ipc-client.js';
 import type { SharedPaths } from '../paths.js';
@@ -249,7 +254,7 @@ describe('SharedProcess', () => {
     expect(existsSync(paths.stateFile)).toBe(false);
   });
 
-  it('a relay with another config: the running call completes, then a new process takes over', async () => {
+  it('a relay with the changed file config: the running call completes, then a new process takes over', async () => {
     const paths = makePaths();
     let finishWrite!: () => void;
     const oldCore = fakeCore({
@@ -260,7 +265,11 @@ describe('SharedProcess', () => {
           }),
       ),
     });
-    const old = makeProcess(paths, { createCore: async () => oldCore });
+    // The configuration file now holds the relay's settings.
+    const old = makeProcess(paths, {
+      createCore: async () => oldCore,
+      fileConfigHash: () => 'new-cfg',
+    });
     await old.shared.start();
     const write = makeLink(paths, () => {}).call('tool', 'create_scene');
     await vi.waitFor(() => expect(oldCore.callTool).toHaveBeenCalled());
@@ -375,5 +384,109 @@ describe('autostart with concurrent relays', () => {
     const settled = await Promise.all(outcomes);
     expect(settled.filter((o) => o === 'listening')).toHaveLength(1);
     expect(createCore).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('mismatchDecision', () => {
+  it('restarts for a strictly newer build only', () => {
+    expect(mismatchDecision('version', '1.0.0+b', '1.0.0+a')).toBe('restart');
+    expect(mismatchDecision('version', '1.0.0+a', '1.0.0+b')).toBe('accept');
+  });
+
+  it('restarts when the relay has the settings of the file as it is now', () => {
+    expect(
+      mismatchDecision('config', '1', '1', { relayHash: 'F', ownHash: 'ENV', fileHash: 'F' }),
+    ).toBe('restart');
+  });
+
+  it("serves any other difference with the process's own settings", () => {
+    expect(
+      mismatchDecision('config', '1', '1', { relayHash: 'ENV', ownHash: 'F', fileHash: 'F' }),
+    ).toBe('accept');
+    expect(
+      mismatchDecision('config', '1', '1', { relayHash: 'A', ownHash: 'B', fileHash: 'F' }),
+    ).toBe('accept');
+  });
+
+  it('never restarts while the file is unreadable or invalid', () => {
+    expect(
+      mismatchDecision('config', '1', '1', { relayHash: 'F', ownHash: 'ENV', fileHash: null }),
+    ).toBe('accept');
+  });
+});
+
+describe('the configuration file is authoritative', () => {
+  it('serves a relay with its own env block, tells it which settings are ignored, and lists it', async () => {
+    const paths = makePaths();
+    const current = makeProcess(paths, {
+      configHash: 'F',
+      configDigests: { FOUNDRY_URL: 'u', FOUNDRY_WRITE_ENABLED: 'w-false' },
+      fileConfigHash: () => 'F',
+      configStatus: {
+        file: { path: '/cfg/config.env', found: true, error: null, warning: null },
+        settings: [{ name: 'FOUNDRY_URL', value: 'http://x', source: 'file' }],
+      },
+    });
+    await current.shared.start();
+
+    const connection = await IpcConnection.connect(
+      paths.endpoint,
+      hello({
+        configHash: 'ENV',
+        pid: 4242,
+        configSources: { FOUNDRY_URL: 'file', FOUNDRY_WRITE_ENABLED: 'env' },
+        configDigests: { FOUNDRY_URL: 'u', FOUNDRY_WRITE_ENABLED: 'w-true' },
+      }),
+    );
+    expect(connection.ignoredConfig).toEqual({
+      settings: [{ name: 'FOUNDRY_WRITE_ENABLED', source: 'env' }],
+      configFile: '/cfg/config.env',
+    });
+    expect(current.exit).not.toHaveBeenCalled();
+
+    const control = await IpcConnection.connect(paths.endpoint, hello({ role: 'control' }));
+    const status = DaemonStatusSchema.parse(await control.request('status'));
+    control.close();
+    connection.close();
+    expect(status.config?.file.path).toBe('/cfg/config.env');
+    expect(status.relayConfigs).toEqual([
+      {
+        pid: 4242,
+        version: '1.0.0',
+        sources: { FOUNDRY_URL: 'file', FOUNDRY_WRITE_ENABLED: 'env' },
+        ignored: [{ name: 'FOUNDRY_WRITE_ENABLED', source: 'env' }],
+      },
+    ]);
+    expect(JSON.stringify(status)).not.toContain('w-true');
+  });
+
+  it('serves a relay from before the configuration file without a restart loop', async () => {
+    // A phase-1 relay: whole-config fingerprint, no digests nor sources.
+    const paths = makePaths();
+    const current = makeProcess(paths, {
+      version: '1.0.0+b',
+      configHash: 'F',
+      configDigests: { FOUNDRY_URL: 'u' },
+      fileConfigHash: () => 'F',
+    });
+    await current.shared.start();
+    const spawn = vi.fn();
+    const old = makeLink(paths, spawn, { version: '1.0.0+a', configHash: 'whole-config' });
+    await expect(old.call('tool', 'get_users')).resolves.toBeDefined();
+    expect(spawn).not.toHaveBeenCalled();
+    expect(current.exit).not.toHaveBeenCalled();
+  });
+
+  it('a relay matching the changed file restarts the process once', async () => {
+    const paths = makePaths();
+    const current = makeProcess(paths, { configHash: 'OLD', fileConfigHash: () => 'NEW' });
+    await current.shared.start();
+    const spawn = vi.fn(() => {
+      void makeProcess(paths, { configHash: 'NEW', fileConfigHash: () => 'NEW' }).shared.start();
+    });
+    const link = makeLink(paths, spawn, { configHash: 'NEW' });
+    await expect(link.call('tool', 'get_users')).resolves.toBeDefined();
+    expect(current.exit).toHaveBeenCalledWith(0);
+    expect(spawn).toHaveBeenCalledTimes(1);
   });
 });

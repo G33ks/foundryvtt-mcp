@@ -11,10 +11,14 @@
 import { existsSync, rmSync } from 'node:fs';
 import net from 'node:net';
 import { compareBuilds } from './build-order.js';
+import { differingSettings } from './config-hash.js';
 import {
+  type DaemonStatus,
   encodeLine,
+  type Hello,
   type HelloReply,
   HelloSchema,
+  type IgnoredSetting,
   type IpcError,
   IpcErrorCode,
   LineDecoder,
@@ -38,6 +42,10 @@ export interface IpcServerOptions {
   token: string;
   version: string;
   configHash: string;
+  /** Per-setting digests of this process's identity settings (config-hash.ts). */
+  configDigests?: Record<string, string>;
+  /** The configuration file this process reads, told to relays whose settings are ignored. */
+  configFile?: string;
   handler: IpcHandler;
   /** Maps a handler rejection to the error sent back. */
   toIpcError: (error: unknown) => IpcError;
@@ -46,7 +54,11 @@ export interface IpcServerOptions {
    * it so it waits for a restart (`restart`, the default), or serve it as it
    * is (`accept`). The owner restarts itself; this server only answers.
    */
-  onMismatch?: (reason: 'version' | 'config', relayVersion: string) => MismatchDecision | undefined;
+  onMismatch?: (
+    reason: 'version' | 'config',
+    relayVersion: string,
+    relayConfigHash: string,
+  ) => MismatchDecision | undefined;
   /** Number of accepted relay connections changed. */
   onRelayCountChange?: (count: number) => void;
   log?: (level: 'info' | 'warn', message: string) => void;
@@ -61,6 +73,11 @@ export class IpcServer {
   private relays = 0;
   /** Build of each accepted relay running another build than this process. */
   private readonly outdatedRelays = new Map<net.Socket, string>();
+  /** What each accepted relay declared about its settings, for `status`. */
+  private readonly relayConfigs = new Map<
+    net.Socket,
+    NonNullable<DaemonStatus['relayConfigs']>[number]
+  >();
   private inFlight = 0;
   private draining = false;
   private idleWaiters: Array<() => void> = [];
@@ -75,6 +92,11 @@ export class IpcServer {
   /** Builds of the connected relays that run another build than this process. */
   get outdatedRelayVersions(): string[] {
     return [...this.outdatedRelays.values()];
+  }
+
+  /** Each connected relay's declared provenance and the settings of it that are ignored. */
+  get relayConfigList(): NonNullable<DaemonStatus['relayConfigs']> {
+    return [...this.relayConfigs.values()];
   }
 
   /** Requests currently being handled. */
@@ -201,6 +223,7 @@ export class IpcServer {
       clearTimeout(helloTimer);
       this.sockets.delete(socket);
       this.outdatedRelays.delete(socket);
+      this.relayConfigs.delete(socket);
       if (role === 'relay') {
         this.relays--;
         this.options.onRelayCountChange?.(this.relays);
@@ -245,12 +268,13 @@ export class IpcServer {
       );
     }
     let outdated = false;
+    let ignored: IgnoredSetting[] | null = [];
     if (hello.role === 'relay') {
       if (this.draining) {
         return reject('draining', 'The shared process is shutting down');
       }
       if (hello.version !== this.options.version) {
-        if (this.options.onMismatch?.('version', hello.version) === 'accept') {
+        if (this.options.onMismatch?.('version', hello.version, hello.configHash) === 'accept') {
           this.log(
             'warn',
             `Serving relay v${hello.version} although this process runs v${this.options.version}: restart that client to load the current tool list`,
@@ -265,22 +289,56 @@ export class IpcServer {
         }
       }
       if (hello.configHash !== this.options.configHash) {
-        if (this.options.onMismatch?.('config', hello.version) !== 'accept') {
+        if (this.options.onMismatch?.('config', hello.version, hello.configHash) !== 'accept') {
           this.log('info', 'Relay configuration differs from this process; restarting');
           return reject('config', 'Shared process runs with a different configuration');
         }
+        ignored = this.ignoredSettings(hello);
+        this.log(
+          'warn',
+          `Serving relay${hello.pid ? ` ${hello.pid}` : ''} with this process's configuration; its own is ignored (${
+            ignored === null
+              ? 'a relay too old to say which settings differ'
+              : ignored.map((s) => `${s.name} from ${s.source}`).join(', ')
+          })`,
+        );
       }
     }
     if (outdated) {
       this.outdatedRelays.set(socket, hello.version);
+    }
+    if (hello.role === 'relay') {
+      this.relayConfigs.set(socket, {
+        pid: hello.pid ?? null,
+        version: hello.version,
+        sources: hello.configSources ?? null,
+        ignored,
+      });
     }
     write(socket, {
       type: 'hello',
       ok: true,
       pid: process.pid,
       version: this.options.version,
+      ...(ignored === null || ignored.length > 0
+        ? {
+            ignoredConfig: ignored ?? [],
+            ...(this.options.configFile ? { configFile: this.options.configFile } : {}),
+          }
+        : {}),
     } satisfies HelloReply);
     return hello.role;
+  }
+
+  /** The relay's identity settings that differ from this process's; `null` when it cannot say. */
+  private ignoredSettings(hello: Hello): IgnoredSetting[] | null {
+    if (!hello.configDigests || !this.options.configDigests) {
+      return null;
+    }
+    return differingSettings(this.options.configDigests, hello.configDigests).map((name) => ({
+      name,
+      source: hello.configSources?.[name] ?? 'default',
+    }));
   }
 
   private handleRequest(socket: net.Socket, message: unknown): void {
