@@ -34,6 +34,7 @@ import {
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isolatedEnv } from './smoke-isolation.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..');
@@ -222,16 +223,14 @@ function runInstalledServer({ consumer, serverPath }) {
   return new Promise((resolve) => {
     const child = spawn('node', [serverPath], {
       cwd: consumer,
-      env: {
-        ...process.env,
+      // Isolated from the user's configuration and shared process; the
+      // consumer directory has no `.env`.
+      env: isolatedEnv(consumer, {
         FOUNDRY_URL: 'http://127.0.0.1:1',
         FOUNDRY_USERNAME: 'smoke',
         FOUNDRY_PASSWORD: 'smoke',
         LOG_LEVEL: 'error',
-        // All-in-one mode: the default relay would start a background shared
-        // process that outlives this test.
-        FOUNDRY_MCP_SHARED: 'false',
-      },
+      }),
       // Keep stdin open like a real MCP client: the server exits when stdin closes.
       stdio: ['pipe', 'pipe', 'pipe'],
     });

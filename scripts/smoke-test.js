@@ -20,9 +20,11 @@
  */
 
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isolatedEnv } from './smoke-isolation.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..');
@@ -38,18 +40,17 @@ if (!existsSync(serverPath)) {
   process.exit(2);
 }
 
+// Scratch working directory: no `.env`, no configuration file, own state dir.
+const workDir = mkdtempSync(join(tmpdir(), 'fvtt-mcp-smoke-'));
+
 const child = spawn('node', [serverPath], {
-  cwd: repoRoot,
-  env: {
-    ...process.env,
+  cwd: workDir,
+  env: isolatedEnv(workDir, {
     FOUNDRY_URL: 'http://127.0.0.1:1',
     FOUNDRY_USERNAME: 'smoke',
     FOUNDRY_PASSWORD: 'smoke',
     LOG_LEVEL: 'error',
-    // All-in-one mode: the default relay would start a background shared
-    // process that outlives this test.
-    FOUNDRY_MCP_SHARED: 'false',
-  },
+  }),
   // Keep stdin open like a real MCP client: the server exits when stdin closes.
   stdio: ['pipe', 'pipe', 'pipe'],
 });
@@ -112,8 +113,13 @@ function finish(success, message) {
 }
 
 function terminate(exitCode) {
-  if (child.exitCode !== null || child.signalCode !== null) {
+  const cleanup = () => {
+    rmSync(workDir, { recursive: true, force: true });
     process.exit(exitCode);
+  };
+
+  if (child.exitCode !== null || child.signalCode !== null) {
+    cleanup();
     return;
   }
 
@@ -126,6 +132,6 @@ function terminate(exitCode) {
 
   child.once('exit', () => {
     clearTimeout(killTimer);
-    process.exit(exitCode);
+    cleanup();
   });
 }

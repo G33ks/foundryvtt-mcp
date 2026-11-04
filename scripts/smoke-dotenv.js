@@ -27,6 +27,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isolatedEnv } from './smoke-isolation.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(__dirname, '..');
@@ -66,16 +67,11 @@ writeFileSync(
   ].join('\n'),
 );
 
-// Strip every FOUNDRY_*/LOG_LEVEL variable so the dotenv file is the sole
-// source of configuration — an inherited FOUNDRY_URL would make this pass
-// regardless of whether the file was read.
-const childEnv = Object.fromEntries(
-  Object.entries(process.env).filter(
-    ([key]) => !key.startsWith('FOUNDRY_') && key !== 'LOG_LEVEL',
-  ),
-);
-// Nor may the user's configuration file supply it: point at a missing one.
-childEnv.FOUNDRY_MCP_CONFIG = join(workDir, 'no-config.env');
+// The dotenv file must be the sole source of the Foundry settings: an
+// inherited FOUNDRY_URL, or the user's configuration file, would make this
+// pass regardless of whether the file was read. `isolatedEnv` strips the
+// former and points at a missing file for the latter.
+const childEnv = isolatedEnv(workDir);
 
 const child = spawn('node', [serverPath], {
   cwd: workDir,
