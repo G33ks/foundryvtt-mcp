@@ -2,7 +2,7 @@
  * @fileoverview Tests for the caching system
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CacheService } from '../cache.js';
 
 describe('CacheService', () => {
@@ -58,12 +58,21 @@ describe('CacheService', () => {
   });
 
   describe('LRU Eviction', () => {
-    it('should evict least recently used entries when max size exceeded', async () => {
+    // Simulated clock: a real setTimeout(1) can resolve before Date.now()
+    // advances, leaving entries with equal timestamps.
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('should evict least recently used entries when max size exceeded', () => {
       cache.set('key1', 'value1');
-      // Small delay to ensure different timestamps
-      await new Promise((resolve) => setTimeout(resolve, 1));
+      vi.advanceTimersByTime(1);
       cache.set('key2', 'value2');
-      await new Promise((resolve) => setTimeout(resolve, 1));
+      vi.advanceTimersByTime(1);
       cache.set('key3', 'value3');
 
       // Access key1 and key3 to make them recently used
