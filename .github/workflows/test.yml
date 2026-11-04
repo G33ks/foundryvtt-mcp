@@ -2,41 +2,57 @@ name: Test
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [22, 24]
 
     steps:
-    - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
-    - name: Setup Bun
-      uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
 
-    - name: Install dependencies
-      run: bun install
+      - name: Install dependencies
+        run: npm ci
 
-    - name: Build
-      run: bun run build
+      - name: Build
+        run: npm run build
 
-    - name: Run tests
-      run: bun run test
-      env:
-        NODE_ENV: test
-        FOUNDRY_URL: http://localhost:30000
-        LOG_LEVEL: error
+      - name: Run tests
+        run: npm test
+        env:
+          NODE_ENV: test
+          FOUNDRY_URL: http://localhost:30000
+          LOG_LEVEL: error
 
-    - name: Startup smoke test
-      run: bun run smoke
+      - name: Run linter
+        run: npm run lint
 
-    - name: Dotenv load-order smoke test
-      run: bun run smoke:dotenv
+      - name: Startup smoke test
+        run: npm run smoke
 
-    - name: Pack smoke test
-      run: bun run smoke:pack
+      - name: Dotenv load-order smoke test
+        run: npm run smoke:dotenv
 
-    - name: Run linter
-      run: bun run lint
+      - name: Pack smoke test
+        run: npm run smoke:pack
