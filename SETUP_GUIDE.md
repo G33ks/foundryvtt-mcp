@@ -7,7 +7,7 @@ This guide walks you through setting up and configuring the FoundryVTT Model Con
 ## ⚡ Quick Start
 
 ### 1. Prerequisites
-- **Node.js 22 or newer** (current LTS recommended; `node --version` shows yours). The server itself needs at least Node.js 20, which is no longer maintained.
+- **Node.js 22 or newer** (current LTS recommended) — `node --version` shows yours.
 - **Git**, to download the server.
 - **FoundryVTT v13 or v14** (the versions the server handles explicitly; older versions are not verified) running with an **active world** (not on the world selection/setup screen), which you can open as its Gamemaster. Foundry may run on the same computer or on a server.
 - An MCP client: Claude desktop or Claude Code (others such as Oh My Pi, VS Code or Cursor work the same way).
