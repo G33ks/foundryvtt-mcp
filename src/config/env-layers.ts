@@ -26,9 +26,12 @@ export function isWindowsSystemDir(
   if (platform !== 'win32') {
     return false;
   }
+  // Windows path rules whatever the host, so `platform` decides alone.
   const root = env.SystemRoot ?? env.windir ?? 'C:\\Windows';
-  const resolved = path.resolve(cwd).toLowerCase();
-  return ['System32', 'SysWOW64'].some((dir) => resolved === path.join(root, dir).toLowerCase());
+  const resolved = path.win32.resolve(cwd).toLowerCase();
+  return ['System32', 'SysWOW64'].some(
+    (dir) => resolved === path.win32.join(root, dir).toLowerCase(),
+  );
 }
 
 /** Settings of the `.env` file in `cwd`; empty when there is none (or `cwd` is System32). */
