@@ -1,20 +1,7 @@
 title = "foundryvtt-mcp gitleaks configuration"
 
 # Without this, a custom configuration replaces the built-in rules and the
-# scan has no rule to apply.
+# scan has no rule to apply. Known false positives are listed one by one,
+# by fingerprint, in .gitleaksignore.
 [extend]
   useDefault = true
-
-[allowlist]
-  description = "Allow test fixtures and example files"
-  paths = [
-    '''src/__tests__/''',
-    '''src/.+/__tests__/''',
-    '''tests/''',
-    '''\.env\.example$''',
-    '''\.env\.integration\.example$''',
-  ]
-  # Documentation placeholders (curl examples), not credentials.
-  regexes = [
-    '''^YOUR_API_KEY$''',
-  ]
