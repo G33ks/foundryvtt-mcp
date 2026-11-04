@@ -1,5 +1,10 @@
 title = "foundryvtt-mcp gitleaks configuration"
 
+# Without this, a custom configuration replaces the built-in rules and the
+# scan has no rule to apply.
+[extend]
+  useDefault = true
+
 [allowlist]
   description = "Allow test fixtures and example files"
   paths = [
@@ -8,4 +13,8 @@ title = "foundryvtt-mcp gitleaks configuration"
     '''tests/''',
     '''\.env\.example$''',
     '''\.env\.integration\.example$''',
+  ]
+  # Documentation placeholders (curl examples), not credentials.
+  regexes = [
+    '''^YOUR_API_KEY$''',
   ]
