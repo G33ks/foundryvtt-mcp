@@ -1,5 +1,54 @@
 # Changelog
 
+## Unreleased
+
+Changes since 1.5.2, in this fork and in the forks it continues (RN0000, duckpuppy).
+
+### Added
+
+- **Tools**: the catalogue grows to 114 tools — canvas placeables (walls, lights, sounds, templates, drawings, notes, tiles, regions), scenes and weather, playlists, macros, roll tables, folders, ownership, world settings, active effects, targeting, an event stream (`watch_events`), compendium content and imports, asset upload, and journal page editing.
+- **Companion module and invisible GM session**: a Foundry module (`foundry-module/`) serves what only a real Foundry page can do (canvas capture, native rolls, compendium documents, uploads, pause, pings, targets), hosted by a headless browser the connector starts on the connector's own account. Installed Chromium-based browsers are detected by their usual paths.
+- **Shared process**: MCP clients start lightweight relays that share one background process holding the FoundryVTT connection, the bridge and the GM session, over a named pipe or Unix socket with a per-user token. It stops after an idle delay, is replaced after a rebuild, and is controlled with `status` and `stop`. Write tools run one at a time through a queue.
+- **Authenticated bridge**: the module bridge listens on loopback only, checks the `Origin`, and the server and the module prove their identity to each other (HMAC challenge and response) before any command.
+- **Journal integrity**: page version tokens, writes checked against the server copy, a watch for overwrites, local copies of page bodies in the state directory, and overwrite notices whispered to the GMs and listed in the health status.
+- **Diagnostics**: `status` and `get_health_status` report the bridge, the module's authentication, the GM session, the browser, the account and the configuration with the source of each setting.
+- **Single account and reconnection**: the GM page shares the connector's Foundry session; the connector owns that session and logs in again when Foundry forgets it.
+- **Configuration file and `init`**: one `config.env` shared by every MCP client, authoritative across them; `init` writes it after checking each answer against Foundry, and `init --check` checks it later.
+- **Module releases by manifest URL**: `bridge-vX.Y.Z` tags publish the module on GitHub; Foundry installs and updates it from a stable manifest URL.
+- **Community files**: contributing guide, security policy, code of conduct, issue and pull request templates.
+
+### Changed
+
+- **npm** replaces Bun as the package manager; Node.js 22 or newer is required.
+- **CI** runs build, tests, lint and three smoke tests on Linux, Windows and macOS with Node 22 and 24, plus a production dependency audit, CodeQL and a full-history secret scan; Dependabot is configured for weekly updates.
+- The repository, homepage, issue links and maintainer metadata point at G33ks/foundryvtt-mcp.
+- The pre-commit hook warns instead of failing when gitleaks is not installed.
+
+### Fixed
+
+- FoundryVTT v14: login (`POST /join`) and the GM page's join form.
+- The connector exits when the MCP client closes its input, and a forced shutdown exits non-zero.
+- The headless GM session reports its real browser launch error, retries `/game` after a network error, and is no longer read as logged in while loading or on "No Active Game".
+- `status` reports the bridge and the GM session as they are, and no longer reports an old bridge's module as authenticated.
+- The world cache follows `modifyDocumentBatch` broadcasts and side-effect acknowledgements.
+- The build and the smoke tests run on Windows; the smoke tests no longer read the user's configuration or touch the usual shared process.
+- Windows system directories are recognised by Windows path rules on every host.
+
+### Removed
+
+- Bun, `just` and `make`; release-please and the inherited workflows; TypeDoc and the generated API docs.
+- The setup wizard and `test-connection` script, replaced by `init`.
+- The previous maintainer's personal tooling and the Cyberpunk RED co-GM skill.
+
+### Security
+
+- CodeQL prototype-pollution and HTML sanitisation alerts resolved.
+- The module bridge is restricted to loopback and authenticated (see Added).
+- Journal page and chat message text is kept out of the tool log.
+- Dependencies updated: `npm audit` reports no known vulnerability.
+
+The entries below, from 1.5.2 down, come from the original project, [laurigates/foundryvtt-mcp](https://github.com/laurigates/foundryvtt-mcp), and its release tooling; their links point there.
+
 ## [1.5.2](https://github.com/laurigates/foundryvtt-mcp/compare/foundryvtt-mcp-v1.5.1...foundryvtt-mcp-v1.5.2) (2026-08-23)
 
 
