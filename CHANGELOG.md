@@ -1,11 +1,15 @@
 # Changelog
 
-## Unreleased
+## 2.0.0 — 2026-11-05
+
+First release under the new name; earlier entries are from the original project.
 
 Changes since 1.5.2, in this fork and in the forks it continues (RN0000, duckpuppy).
 
 ### Added
 
+- **npm package `@g33ks/foundryvtt-mcp`**: install with `npm install -g @g33ks/foundryvtt-mcp`; the command stays `foundryvtt-mcp`. The unscoped `foundryvtt-mcp` package on npm is the original project's. Releases come from `vX.Y.Z` tags through a release workflow (tests, smoke tests, tarball with its SHA-256, GitHub release).
+- **`--version`** (also `-v` and `version`) prints the package version without reading the configuration or connecting.
 - **Tools**: the catalogue grows to 114 tools — canvas placeables (walls, lights, sounds, templates, drawings, notes, tiles, regions), scenes and weather, playlists, macros, roll tables, folders, ownership, world settings, active effects, targeting, an event stream (`watch_events`), compendium content and imports, asset upload, and journal page editing.
 - **Companion module and invisible GM session**: a Foundry module (`foundry-module/`) serves what only a real Foundry page can do (canvas capture, native rolls, compendium documents, uploads, pause, pings, targets), hosted by a headless browser the connector starts on the connector's own account. Installed Chromium-based browsers are detected by their usual paths.
 - **Shared process**: MCP clients start lightweight relays that share one background process holding the FoundryVTT connection, the bridge and the GM session, over a named pipe or Unix socket with a per-user token. It stops after an idle delay, is replaced after a rebuild, and is controlled with `status` and `stop`. Write tools run one at a time through a queue.
@@ -23,10 +27,14 @@ Changes since 1.5.2, in this fork and in the forks it continues (RN0000, duckpup
 - **CI** runs build, tests, lint and three smoke tests on Linux, Windows and macOS with Node 22 and 24, plus a production dependency audit, CodeQL and a full-history secret scan; Dependabot is configured for weekly updates.
 - The repository, homepage, issue links and maintainer metadata point at G33ks/foundryvtt-mcp.
 - The pre-commit hook warns instead of failing when gitleaks is not installed.
+- **`init` commands**: the Claude desktop and Claude Code entries name Node.js and the server by absolute path (run `init` again after changing Node.js); terminal commands are `foundryvtt-mcp …` for an installed package and `node "<path>/dist/index.js" …` for a clone. Run from npx's cache, `init` prints no client entry and says to install the package globally.
+- The package ships only the compiled JavaScript, README and LICENSE: no source maps, declaration files or `main` entry.
 
 ### Fixed
 
 - FoundryVTT v14: login (`POST /join`) and the GM page's join form.
+- `initialize` announces the package version instead of `0.1.0`; the `MCP_SERVER_VERSION` setting is gone (a configuration file that still sets it loads as before).
+- Connector builds are ordered by version first, then by build stamp: an older version installed later (npx cache, second prefix) no longer replaces a shared process running a newer one.
 - The connector exits when the MCP client closes its input, and a forced shutdown exits non-zero.
 - The headless GM session reports its real browser launch error, retries `/game` after a network error, and is no longer read as logged in while loading or on "No Active Game".
 - `status` reports the bridge and the GM session as they are, and no longer reports an old bridge's module as authenticated.
