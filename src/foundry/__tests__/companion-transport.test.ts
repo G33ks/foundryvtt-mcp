@@ -154,8 +154,9 @@ describe('companion transport against a fake server', () => {
     expect(prove).toHaveBeenCalledWith(NONCE);
     expect(onCommand).not.toHaveBeenCalled();
     expect(transport.authenticated).toBe(false);
-    // Back to the usual reconnect cycle.
-    expect(transport.reconnectTimer).not.toBeNull();
+    // Back to the usual reconnect cycle. The client's onclose, which arms the
+    // timer, can run after the server has already seen the close.
+    await waitFor(() => transport.reconnectTimer !== null);
   });
 
   it('runs no command sent before auth_ok', async () => {
