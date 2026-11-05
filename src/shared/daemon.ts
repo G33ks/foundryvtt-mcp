@@ -111,7 +111,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function describe(error: unknown): string {
+function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -277,7 +277,7 @@ export class SharedProcess {
       inFlight: this.ipc.inFlightCount - 1,
       ...(this.options.configStatus ? { config: this.options.configStatus } : {}),
       relayConfigs: this.ipc.relayConfigList,
-      startupError: this.startupError ? describe(this.startupError) : null,
+      startupError: this.startupError ? errorText(this.startupError) : null,
       ...coreStatus,
     };
   }
@@ -295,7 +295,7 @@ export class SharedProcess {
     if (this.startupError) {
       throw new McpError(
         ErrorCode.InternalError,
-        `The shared process could not connect to FoundryVTT: ${describe(this.startupError).replace(
+        `The shared process could not connect to FoundryVTT: ${errorText(this.startupError).replace(
           /\.$/,
           '',
         )}. The next call retries. Log: ${this.options.paths.daemonLog}`,
