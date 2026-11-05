@@ -7,7 +7,7 @@ Every MCP client on the machine reads one configuration file:
 - **Windows**: `%LOCALAPPDATA%\foundryvtt-mcp\config.env`
 - **macOS, Linux**: `$XDG_CONFIG_HOME/foundryvtt-mcp/config.env`, or `~/.config/foundryvtt-mcp/config.env`
 
-`node dist/index.js init` writes it, checking each answer against your FoundryVTT (see the [Setup Guide](../../SETUP_GUIDE.md#5-run-init)); `node dist/index.js init --check` checks it again later. To edit it by hand, put one `KEY='value'` per line, then run `node dist/index.js stop` so that the next tool call starts the shared process with the new settings. `node dist/index.js status` shows the file and where each setting comes from.
+`foundryvtt-mcp init` writes it, checking each answer against your FoundryVTT (see the [Setup Guide](../../SETUP_GUIDE.md#5-run-init)); `foundryvtt-mcp init --check` checks it again later. To edit it by hand, put one `KEY='value'` per line, then run `foundryvtt-mcp stop` so that the next tool call starts the shared process with the new settings. `foundryvtt-mcp status` shows the file and where each setting comes from.
 
 An MCP client's `env` block, the system environment and a `.env` in the working directory (for development, see `.env.example`) can also set these names, but the shared process serves every client with one configuration: keep the settings in the file.
 
@@ -47,7 +47,7 @@ The MCP server connects to FoundryVTT via Socket.IO using a standard user accoun
 
 1. Ensure FoundryVTT is running with an active world (not on the setup screen)
 2. Create a dedicated FoundryVTT user account with the Assistant GM role
-3. Run `node dist/index.js init`, which writes the credentials to the configuration file
+3. Run `foundryvtt-mcp init`, which writes the credentials to the configuration file
 
 ### Authentication Flow
 
@@ -72,7 +72,7 @@ Installing the **Foundry Local REST API** module adds server monitoring: `get_re
 
 1. Install the Foundry Local REST API module in FoundryVTT (**Setup** > **Add-on Modules** > **Install Module**). It is a separate project, not distributed by this repository: the upstream `releases/latest` manifest URL formerly given here no longer serves it. This is not the companion module **FoundryVTT MCP Bridge**, whose installation is in the [Setup Guide](../../SETUP_GUIDE.md#2-install-companion-module-foundryvtt-mcp-bridge).
 2. Enable the module in your world and copy the generated API key
-3. Add it to the configuration file, then run `node dist/index.js stop`:
+3. Add it to the configuration file, then run `foundryvtt-mcp stop`:
    ```env
    FOUNDRY_API_KEY='your_api_key_here'
    ```

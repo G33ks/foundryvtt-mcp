@@ -52,17 +52,16 @@ suite cannot. They are isolated from your own configuration and connector
 ```bash
 npm run smoke         # Spawn dist/index.js, verify the startup banner on stderr
 npm run smoke:dotenv  # Configuration from a .env file is read before it is needed
-npm run smoke:pack    # npm pack -> install into a fresh consumer -> verify banner
+npm run smoke:pack    # npm pack -> check contents -> install into a fresh consumer -> bin --version -> verify banner
 ```
 
 `smoke` covers construction-time and import-time regressions (SDK shape
 changes, ESM resolution). `smoke:pack` additionally validates that the
 `package.json` `files` glob ships every runtime path the entrypoint needs —
 the kind of regression that only surfaces for users who install the published
-package, not for anyone running the source tree (`node dist/index.js` from a
-clone).
-
-> **TODO:** npm package name to be decided (phase 6).
+package (`@g33ks/foundryvtt-mcp`), not for anyone running the source tree
+(`node dist/index.js` from a clone). It also fails on a source map, a
+declaration file, or a compiled file left in `dist/` without its source.
 
 ## Building
 
