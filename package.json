@@ -46,7 +46,11 @@
     "tabletop",
     "rpg"
   ],
-  "author": "Lauri Gates",
+  "author": "G33ks",
+  "contributors": [
+    "Lauri Gates",
+    "Rafael Niehaus"
+  ],
   "license": "MIT",
   "repository": {
     "type": "git",
