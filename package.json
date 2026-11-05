@@ -1,8 +1,7 @@
 {
-  "name": "foundryvtt-mcp",
-  "version": "1.5.2",
+  "name": "@g33ks/foundryvtt-mcp",
+  "version": "2.0.0",
   "description": "Model Context Protocol server for FoundryVTT integration",
-  "main": "dist/index.js",
   "bin": {
     "foundryvtt-mcp": "dist/index.js"
   },
@@ -36,7 +35,7 @@
     "clean": "rimraf dist",
     "setup": "npm run clean && npm run build && node dist/index.js init --check",
     "prepare": "husky",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run clean && npm run build"
   },
   "keywords": [
     "foundry",
@@ -44,7 +43,12 @@
     "mcp",
     "ai",
     "tabletop",
-    "rpg"
+    "rpg",
+    "foundryvtt",
+    "foundry-vtt",
+    "model-context-protocol",
+    "mcp-server",
+    "claude"
   ],
   "author": "G33ks",
   "contributors": [
@@ -65,10 +69,6 @@
   },
   "files": [
     "dist/**/*.js",
-    "dist/**/*.js.map",
-    "dist/**/*.d.ts",
-    "dist/**/*.d.ts.map",
-    "!dist/index-old.*",
     "README.md",
     "LICENSE"
   ],
