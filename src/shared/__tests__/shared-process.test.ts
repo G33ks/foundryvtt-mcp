@@ -393,6 +393,11 @@ describe('mismatchDecision', () => {
     expect(mismatchDecision('version', '1.0.0+a', '1.0.0+b')).toBe('accept');
   });
 
+  it('keeps a newer version running for an older version installed later', () => {
+    expect(mismatchDecision('version', '2.0.0+zzzzzzzz', '2.1.0+aaaaaaaa')).toBe('accept');
+    expect(mismatchDecision('version', '2.1.0+aaaaaaaa', '2.0.0+zzzzzzzz')).toBe('restart');
+  });
+
   it('restarts when the relay has the settings of the file as it is now', () => {
     expect(
       mismatchDecision('config', '1', '1', { relayHash: 'F', ownHash: 'ENV', fileHash: 'F' }),
