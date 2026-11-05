@@ -1,0 +1,48 @@
+name: Feature request
+description: A new tool, or a change to what an existing tool or command does.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a question about using the connector, use [Discussions](https://github.com/G33ks/foundryvtt-mcp/discussions) instead.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you are trying to do
+      description: The situation at the table or in preparation, and what is missing or awkward today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: The tool, argument or behaviour you have in mind, and what it would return or change in the world.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: changes-world
+    attributes:
+      label: Does it change the world?
+      description: Tools that create, change or delete documents need FOUNDRY_WRITE_ENABLED and run in the write queue.
+      options:
+        - "No, it only reads"
+        - "Yes, it creates, changes or deletes documents"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: input
+    id: game-system
+    attributes:
+      label: Game system, if it is system-specific
+      placeholder: "dnd5e, pf2e…"
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+      description: Existing tools or workarounds, and why they fall short.

@@ -1,0 +1,126 @@
+name: Bug report
+description: Something in the connector or the companion module does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this. For a question, use [Discussions](https://github.com/G33ks/foundryvtt-mcp/discussions) instead; for a security problem, [report it privately](https://github.com/G33ks/foundryvtt-mcp/security/advisories/new), never here.
+
+  - type: input
+    id: connector-version
+    attributes:
+      label: Connector version
+      description: |
+        The commit of your clone (`git rev-parse --short HEAD` in the folder you cloned) and, while the connector runs, the `Version:` line of `node dist/index.js status`.
+      placeholder: "57eb27e, Version: 1.5.2+mw1yvzo3"
+    validations:
+      required: true
+
+  - type: input
+    id: foundry-version
+    attributes:
+      label: FoundryVTT version and build
+      description: Shown on Foundry's Setup screen, or in Settings → Support details.
+      placeholder: "13, build 351"
+    validations:
+      required: true
+
+  - type: input
+    id: game-system
+    attributes:
+      label: Game system and its version
+      placeholder: "dnd5e 5.1.2"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: hosting
+    attributes:
+      label: Where FoundryVTT is hosted
+      options:
+        - Self-hosted, same computer as the connector
+        - Self-hosted, another computer or server
+        - The Forge
+        - Molten Hosting
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: os
+    attributes:
+      label: Operating system of the computer running the connector
+      placeholder: "Windows 11 24H2 / macOS 15.5 / Ubuntu 24.04"
+    validations:
+      required: true
+
+  - type: input
+    id: node-version
+    attributes:
+      label: Node.js version
+      description: "`node --version`"
+      placeholder: "v22.23.2"
+    validations:
+      required: true
+
+  - type: input
+    id: mcp-client
+    attributes:
+      label: MCP client and its version
+      placeholder: "Claude Desktop 1.0.0 / Claude Code 2.1.0"
+    validations:
+      required: true
+
+  - type: input
+    id: module-version
+    attributes:
+      label: Companion module version
+      description: "Foundry's Setup screen → Add-on Modules → FoundryVTT MCP Bridge. Write \"not installed\" if it is not."
+      placeholder: "0.5.1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: The tool or command you used, with its arguments, and what you saw. Include error messages as text.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: markdown
+    attributes:
+      value: |
+        **Before pasting the output below, mask what identifies you or your server:**
+        - the FoundryVTT address (`FOUNDRY_URL`, `Bridge origin`, "answers at …") — write `https://<foundry>`;
+        - account names (`FOUNDRY_USERNAME`, `Account:`, "Logged in as …");
+        - your user name inside paths (configuration file, log, browser path) and in the pipe name (`foundryvtt-mcp-<user>`);
+        - world titles and journal names, if they are private.
+
+        Passwords are never printed (`<set>`), but check anyway.
+
+  - type: textarea
+    id: status-output
+    attributes:
+      label: Output of `node dist/index.js status`
+      render: text
+
+  - type: textarea
+    id: check-output
+    attributes:
+      label: Output of `node dist/index.js init --check`
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Relevant lines of the log named by `status` (masked the same way), and whether it happens every time.

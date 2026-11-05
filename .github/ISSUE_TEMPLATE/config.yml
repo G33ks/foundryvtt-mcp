@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or help
+    url: https://github.com/G33ks/foundryvtt-mcp/discussions/categories/q-a
+    about: Ask how to install, configure or use the connector in Discussions (Q&A).
+  - name: Security vulnerability
+    url: https://github.com/G33ks/foundryvtt-mcp/security/advisories/new
+    about: Report it privately. Never open a public issue for a vulnerability.
