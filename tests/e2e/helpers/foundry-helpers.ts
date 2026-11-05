@@ -170,7 +170,7 @@ export class FoundryTestHelpers {
   }
 
   /**
-   * Validate JSON array format specifically for issue #7 debugging
+   * Validate JSON array format specifically for issue laurigates/foundryvtt-mcp#7 debugging
    */
   async validateJsonArrayFormat(rawJson: string): Promise<{
     isValid: boolean;

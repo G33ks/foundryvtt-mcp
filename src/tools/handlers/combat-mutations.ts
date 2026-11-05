@@ -33,7 +33,7 @@ interface CombatantSeed {
  *
  * `Combat#turn` is an index into the **initiative-sorted** turn order (see
  * `combat-order.ts`), *not* into the stored/creation order of
- * `combat.combatants` — the same order `get_combat_state` renders (#214).
+ * `combat.combatants` — the same order `get_combat_state` renders (laurigates/foundryvtt-mcp#214).
  *
  * When `skipDefeated` is true, `defeated` combatants are skipped — mirroring
  * Foundry's `Combat#nextTurn`/`nextRound` with the `skipDefeated` setting. If
@@ -144,7 +144,7 @@ The active combat encounter has been removed.`,
  * `combatId` defaults to the active combat when omitted.
  *
  * Writing an initiative re-sorts the turn order underneath the stored
- * `Combat#turn`, which indexes that order (#214) — so a different combatant can
+ * `Combat#turn`, which indexes that order (laurigates/foundryvtt-mcp#214) — so a different combatant can
  * slide under the stored index. FoundryVTT's `Combat#setupTurns` re-finds the
  * combatant that was acting and re-points `turn` at its new index; this handler
  * mirrors that, so the MCP and Foundry never disagree about whose turn it is
@@ -211,7 +211,7 @@ export async function handleSetInitiative(
 }
 
 /**
- * Starts a new combat encounter, seeding combatants from tokens (FR-018, #172).
+ * Starts a new combat encounter, seeding combatants from tokens (FR-018, laurigates/foundryvtt-mcp#172).
  *
  * Resolves the target scene (explicit `sceneId`, else the active scene), then
  * builds combatant seeds from the requested `tokenIds` (or every token on the

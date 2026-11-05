@@ -1,5 +1,5 @@
 /**
- * Integration tests for the actor write tools (#142–144): item CRUD and
+ * Integration tests for the actor write tools (laurigates/foundryvtt-mcp#142–144): item CRUD and
  * attribute mutation over the FoundryVTT `modifyDocument` Socket.IO protocol.
  *
  * Unlike the handler unit tests (which mock the client), these drive real
@@ -9,7 +9,7 @@
  *   - the connected user to hold GM/owner permission (writes are GM-gated).
  *
  * When no mutable actor is present — e.g. the fresh, world-less CI instance
- * (issue #140) or a non-dnd5e system — the suite skips rather than failing,
+ * (issue laurigates/foundryvtt-mcp#140) or a non-dnd5e system — the suite skips rather than failing,
  * matching the live-world precondition shared by the other integration specs.
  *
  * Every mutation is reverted: the created item is deleted and the poked

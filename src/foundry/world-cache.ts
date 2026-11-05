@@ -1,7 +1,7 @@
 /**
  * @fileoverview Applies FoundryVTT `modifyDocument` broadcasts to the cached world state.
  *
- * `worldData` is loaded once at connect time (ADR-004) and was, until #205, never
+ * `worldData` is loaded once at connect time (ADR-004) and was, until laurigates/foundryvtt-mcp#205, never
  * updated afterwards — so a write followed by a read returned pre-write data, and
  * changes made by other users (a player moving a token, the GM editing in the
  * Foundry UI) were invisible for the life of the connection.
@@ -398,7 +398,7 @@ export function applyDocumentBroadcast(
 }
 
 // ============================================================================
-// User presence (`userActivity`) — #218
+// User presence (`userActivity`) — laurigates/foundryvtt-mcp#218
 // ============================================================================
 
 /** A validated `userActivity` broadcast: who, and whether they are present. */
@@ -418,7 +418,7 @@ export interface UserActivity {
 const UserActivityDataSchema = z.object({ active: z.boolean().optional() });
 
 /**
- * Validates a raw `userActivity` socket payload (#218).
+ * Validates a raw `userActivity` socket payload (laurigates/foundryvtt-mcp#218).
  *
  * This is untrusted network data, so it is schema-checked rather than cast.
  * Returns `null` for anything unrecognized, leaving presence as it was.
@@ -443,7 +443,7 @@ export function parseUserActivity(userId: unknown, activityData: unknown): UserA
  *
  * `activeUsers` is a top-level `WorldData` field rather than a document
  * collection, which is exactly why `modifyDocument` broadcasts never reached it
- * and presence stayed frozen at the connect-time snapshot (#218).
+ * and presence stayed frozen at the connect-time snapshot (laurigates/foundryvtt-mcp#218).
  *
  * @returns true if the active-user list changed
  */

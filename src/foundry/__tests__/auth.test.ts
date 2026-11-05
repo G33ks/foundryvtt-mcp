@@ -1,5 +1,5 @@
 /**
- * Unit tests for src/foundry/auth.ts edge cases (Issue #136).
+ * Unit tests for src/foundry/auth.ts edge cases (Issue laurigates/foundryvtt-mcp#136).
  *
  * Covers:
  * - CN-3: plaintext HTTP warning emitted for non-localhost hosts only.

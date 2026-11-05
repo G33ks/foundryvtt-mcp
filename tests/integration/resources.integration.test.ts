@@ -17,7 +17,7 @@
  * contents[] entry whose JSON parses successfully) rather than presence of
  * a particular collection.
  *
- * Tracks issue: #135
+ * Tracks issue: laurigates/foundryvtt-mcp#135
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { DiagnosticsClient } from '../../src/diagnostics/client.js';

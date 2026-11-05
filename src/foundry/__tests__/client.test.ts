@@ -9,7 +9,7 @@ vi.mock('../auth.js', () => ({
     .fn()
     .mockResolvedValue({ session: 'test-session', userId: 'test-user-id' }),
   // Real implementation — connectAndLoadWorld's handshake options are the
-  // subject of the #206 regression test below.
+  // subject of the laurigates/foundryvtt-mcp#206 regression test below.
   sessionSocketOptions: (session: string) => ({
     transports: ['websocket'],
     query: { session },
@@ -161,7 +161,7 @@ describe('FoundryClient', () => {
     });
 
     /**
-     * #217, in the transport that still had it: `_isConnected` latched true at
+     * laurigates/foundryvtt-mcp#217, in the transport that still had it: `_isConnected` latched true at
      * the connect probe and cleared only inside `disconnect()`, so a server
      * restart went on reading as "✅ Connected" forever. There is no socket to
      * ask here, so liveness follows the outcome of the REST requests that do
@@ -360,7 +360,7 @@ describe('FoundryClient', () => {
   });
 
   /**
-   * CN-6: retry/backoff matrix (Issue #136).
+   * CN-6: retry/backoff matrix (Issue laurigates/foundryvtt-mcp#136).
    *
    * Verifies the documented exception list:
    *   - 4xx errors (except 429) fail fast — no retry.
@@ -623,7 +623,7 @@ describe('FoundryClient', () => {
     });
 
     /**
-     * Issue #219 — the old parser only captured a modifier glued directly to a
+     * Issue laurigates/foundryvtt-mcp#219 — the old parser only captured a modifier glued directly to a
      * dice term, so every formula below returned a plausible-but-wrong total
      * with the unparsed part silently dropped. RNG is pinned so the totals are
      * exact rather than ranges.
@@ -678,7 +678,7 @@ describe('FoundryClient', () => {
      * The transports do not accept the same grammar, and that is deliberate.
      * REST hands the formula to FoundryVTT's own `Roll` engine, which
      * understands more than the local fallback parser does; capping REST at
-     * the fallback's grammar would drop a capability #219 never asked to lose.
+     * the fallback's grammar would drop a capability laurigates/foundryvtt-mcp#219 never asked to lose.
      * Both transports still refuse anything outside the dice alphabet.
      */
     describe('per-transport formula grammar', () => {
@@ -848,7 +848,7 @@ describe('FoundryClient', () => {
   });
 
   /**
-   * Issue #217 — liveness must come from the socket, not a latched flag.
+   * Issue laurigates/foundryvtt-mcp#217 — liveness must come from the socket, not a latched flag.
    *
    * `_isConnected` used to be cleared only by an explicit `disconnect()`, so a
    * socket that dropped on its own (server restart, network loss) still read as
@@ -1038,7 +1038,7 @@ describe('FoundryClient', () => {
     /**
      * And the flag has to reach a human. A reconnected client that reports
      * "✅ Connected" while serving a cache that missed every broadcast from the
-     * outage is the sharper version of #217's second impact bullet.
+     * outage is the sharper version of laurigates/foundryvtt-mcp#217's second impact bullet.
      */
     it('get_health_status marks the cache stale after a drop and a reconnect', async () => {
       const { handleGetHealthStatus } = await import('../../tools/handlers/diagnostics.js');
@@ -1114,7 +1114,7 @@ describe('FoundryClient', () => {
     });
 
     /**
-     * Issue #218 — presence used to be frozen at the world snapshot: nothing
+     * Issue laurigates/foundryvtt-mcp#218 — presence used to be frozen at the world snapshot: nothing
      * subscribed to `userActivity`, and `modifyDocument` maps onto document
      * collections, never the top-level `activeUsers` field.
      */

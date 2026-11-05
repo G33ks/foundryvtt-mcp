@@ -8,7 +8,7 @@
 
 ## Context
 
-The MCP server is read-only today. Every existing tool reads from the in-memory `worldData` snapshot (see [ADR-004](../blueprint/adrs/ADR-004-in-memory-world-state-cache.md)) cached over the Socket.IO connection ([ADR-001](../blueprint/adrs/ADR-001-socketio-for-foundry-communication.md)). Issues #142 and #143 propose adding the first mutation surface — actor item CRUD plus actor attribute updates — to unblock AI-assisted workflows (D&D 5e 2014→2024 migration, end-of-session bookkeeping, party-wide updates). #144 is read-only but its result shape feeds #142's `create_actor_item({ source: { type: "compendium", … } })`, so the conventions established here apply to its handler contract too.
+The MCP server is read-only today. Every existing tool reads from the in-memory `worldData` snapshot (see [ADR-004](../blueprint/adrs/ADR-004-in-memory-world-state-cache.md)) cached over the Socket.IO connection ([ADR-001](../blueprint/adrs/ADR-001-socketio-for-foundry-communication.md)). Issues laurigates/foundryvtt-mcp#142 and laurigates/foundryvtt-mcp#143 propose adding the first mutation surface — actor item CRUD plus actor attribute updates — to unblock AI-assisted workflows (D&D 5e 2014→2024 migration, end-of-session bookkeeping, party-wide updates). laurigates/foundryvtt-mcp#144 is read-only but its result shape feeds laurigates/foundryvtt-mcp#142's `create_actor_item({ source: { type: "compendium", … } })`, so the conventions established here apply to its handler contract too.
 
 The decisions below set the conventions that every Wave 4 mutation tool will inherit. They are deliberately scoped to *conventions* (tool shape, patch semantics, validation strategy, audit/permission posture, response contract, idempotency, concurrency) rather than implementation detail (which Foundry RPC event to emit, exact wire format), since those should be settled inside the PRP for the first concrete tool that lands.
 
@@ -46,7 +46,7 @@ Two distinct patch styles, picked per tool to match the natural shape of the cha
 
 **Rationale**:
 
-- **Attributes are leaf-valued and orthogonal**: bumping HP doesn't logically touch currency. Dot-paths let the caller hit several leaves in one call without spelling out shared parent objects. They also let the post-update response report each path's new value cleanly (acceptance criterion in #143).
+- **Attributes are leaf-valued and orthogonal**: bumping HP doesn't logically touch currency. Dot-paths let the caller hit several leaves in one call without spelling out shared parent objects. They also let the post-update response report each path's new value cleanly (acceptance criterion in laurigates/foundryvtt-mcp#143).
 - **Item updates are tree-shaped**: adding a `damage` activity with consumption rules means adding a nested subtree to `item.system.activities.<uuid>`. JSON merge-patch (RFC 7396 semantics — keys merge, `null` deletes, arrays replace) maps directly onto how Foundry's `Document#update` already behaves. Forcing dot-paths here would either drop the LLM into a corner (it can't emit a single dot-path for a whole new object) or force flattening that defeats the point.
 - **`update_actor_item` envelope is restricted**: top-level keys are a closed allowlist of `{ name, img, system, flags }` (vs the earlier permissive `Record<string, unknown>`). The Zod schema enforces this. The `system` key still accepts an arbitrary tree — the restriction reduces stray top-level writes (`type`, `_id`, etc.) without heavy schema work over `item.system`.
 - **Full-replace rejected** for both: too easy to wipe unrelated state by accident, and noisy for the LLM to produce.
@@ -244,7 +244,7 @@ Wave 4 does not ship an undo tool. The structured audit flags (Decision 4) delib
 ### Tool granularity
 
 - **Unified `mutate_resource({ resource, action, payload })`** — rejected. The discriminated payload either loses schema-level validation or becomes a giant `oneOf` that's harder for the LLM to navigate than four distinct tools.
-- **Per-attribute tools (`apply_damage`, `consume_spell_slot`, `spend_resource`)** as suggested in #143's "Notes" — rejected for Wave 4. Higher discoverability, but a much larger tool count and harder to keep complete. A general `update_actor_attribute` covers the common ground; we can layer convenience tools later if a clear win emerges.
+- **Per-attribute tools (`apply_damage`, `consume_spell_slot`, `spend_resource`)** as suggested in laurigates/foundryvtt-mcp#143's "Notes" — rejected for Wave 4. Higher discoverability, but a much larger tool count and harder to keep complete. A general `update_actor_attribute` covers the common ground; we can layer convenience tools later if a clear win emerges.
 
 ### Patch semantics
 

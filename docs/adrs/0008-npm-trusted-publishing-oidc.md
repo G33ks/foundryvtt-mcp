@@ -4,7 +4,7 @@
 > longer applies to this fork. It is kept as a historical record.
 
 **Status**: Accepted
-**Date**: 2026-03-07 (commit cf64b93, PR #113)
+**Date**: 2026-03-07 (commit cf64b93, PR laurigates/foundryvtt-mcp#113)
 **Confidence**: 9/10
 
 ## Context
@@ -26,9 +26,9 @@ Replace `NODE_AUTH_TOKEN`-based npm authentication with OIDC trusted publishing:
 
 ## Evidence from Git History
 
-- `cf64b93` `feat(ci): migrate to npm trusted publishing (OIDC) (#113)` — full migration
-- `39a41f7` `feat(justfile): add npm-token and publish-dry-run recipes (#111)` — prior token-based tooling
-- `6f46e26` `chore: configure npm publishing via CI (#110)` — initial CI publishing setup
+- `cf64b93` `feat(ci): migrate to npm trusted publishing (OIDC) (laurigates/foundryvtt-mcp#113)` — full migration
+- `39a41f7` `feat(justfile): add npm-token and publish-dry-run recipes (laurigates/foundryvtt-mcp#111)` — prior token-based tooling
+- `6f46e26` `chore: configure npm publishing via CI (laurigates/foundryvtt-mcp#110)` — initial CI publishing setup
 
 Commit message body:
 > Replace token-based npm authentication with OIDC trusted publishing.

@@ -504,7 +504,7 @@ describe('FoundryClient combat mutations', () => {
 });
 
 // --------------------------------------------------------------------------
-// #214: `Combat#turn` indexes the INITIATIVE-sorted turn order, not the stored
+// laurigates/foundryvtt-mcp#214: `Combat#turn` indexes the INITIATIVE-sorted turn order, not the stored
 // (creation) order of `combat.combatants`. The read tool (get_combat_state) and
 // the write tool (next_turn) must agree on that ordering.
 // --------------------------------------------------------------------------
@@ -681,7 +681,7 @@ describe('initiative-ordered turn semantics (#214)', () => {
 });
 
 // --------------------------------------------------------------------------
-// #214 follow-up: changing any initiative re-sorts the turn order underneath
+// laurigates/foundryvtt-mcp#214 follow-up: changing any initiative re-sorts the turn order underneath
 // the stored `turn` index. FoundryVTT's `Combat#setupTurns` re-finds the
 // combatant that was acting and re-points `turn` at its new index; without the
 // same re-anchor here the MCP and Foundry disagree about whose turn it is.

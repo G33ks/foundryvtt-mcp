@@ -198,7 +198,7 @@ async function getUsersResource(foundryClient: FoundryClient) {
 }
 
 /**
- * Serves the active combat encounter (#214 follow-up).
+ * Serves the active combat encounter (laurigates/foundryvtt-mcp#214 follow-up).
  *
  * `Combat#turn` indexes the **initiative-sorted** turn order, and this resource
  * is the id-bearing companion to `get_combat_state`, whose ordinals are printed

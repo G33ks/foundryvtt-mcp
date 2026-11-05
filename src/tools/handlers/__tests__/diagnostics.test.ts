@@ -217,7 +217,7 @@ describe('handleGetRecentLogs', () => {
 });
 
 // ============================================================================
-// System health handlers (#216)
+// System health handlers (laurigates/foundryvtt-mcp#216)
 //
 // `SystemHealthSchema.parse()` strips unknown keys, so the fixtures below are
 // deliberately run through the real schema: anything the handlers read must be
@@ -484,7 +484,7 @@ describe('handleGetHealthStatus', () => {
   });
 
   /**
-   * #217's second impact bullet: after the socket drops, reads keep being
+   * laurigates/foundryvtt-mcp#217's second impact bullet: after the socket drops, reads keep being
    * served from the cache. Rendering that snapshot with no marker presents a
    * point-in-time copy as though it were live — and after an automatic
    * reconnect the connection line reads "✅ Connected" again while the cache is

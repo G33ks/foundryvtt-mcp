@@ -1,5 +1,5 @@
 /**
- * @fileoverview Actor attribute mutation tool handlers (#143)
+ * @fileoverview Actor attribute mutation tool handlers (laurigates/foundryvtt-mcp#143)
  *
  * Handles patching attributes on an actor's `system` object via dot-paths.
  * WRITE operation — requires FOUNDRY_WRITE_ENABLED=true and an active Socket.IO

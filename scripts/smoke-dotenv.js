@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Regression smoke test for dotenv load ordering (issue #206).
+ * Regression smoke test for dotenv load ordering (issue laurigates/foundryvtt-mcp#206).
  *
  * The documented configuration path — a `.env` file in the working directory —
  * was silently dead. `src/index.ts` called `dotenv.config()` in its module

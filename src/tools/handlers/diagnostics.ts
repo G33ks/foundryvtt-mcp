@@ -24,7 +24,7 @@ const MAX_LOG_LIMIT = 1000;
 const DEFAULT_SEARCH_LIMIT = 50;
 
 /**
- * Shown whenever `FoundryClient.isWorldDataStale()` is set (#217): the cached
+ * Shown whenever `FoundryClient.isWorldDataStale()` is set (laurigates/foundryvtt-mcp#217): the cached
  * world snapshot is still being served, but it stopped following live document
  * changes when the socket dropped and nothing replays the gap.
  */
@@ -388,7 +388,7 @@ ${errorLines}`,
  * for it and hard-codes 0.
  *
  * The world section carries {@link STALE_WORLD_DATA_NOTICE} whenever the cache
- * has stopped following live document changes (#217). Reads keep being served
+ * has stopped following live document changes (laurigates/foundryvtt-mcp#217). Reads keep being served
  * from that snapshot, which is the right call — a flagged answer beats no
  * answer — but rendering it bare presents a point-in-time copy as though it
  * were live. It matters most right after an automatic reconnect, where the

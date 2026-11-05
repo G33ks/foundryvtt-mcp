@@ -4,7 +4,7 @@
 > longer applies to this fork. It is kept as a historical record.
 
 **Status**: Accepted
-**Date**: 2026-03-07 (commit fdc5b60, PR #114)
+**Date**: 2026-03-07 (commit fdc5b60, PR laurigates/foundryvtt-mcp#114)
 **Confidence**: 9/10
 
 ## Context
@@ -30,7 +30,7 @@ Rename the package from `foundry-mcp-server` to `foundryvtt-mcp` and add a `bin`
 
 ## Evidence from Git History
 
-- `fdc5b60` `feat: rename package to foundryvtt-mcp and add bin entry (#114)` — full rename
+- `fdc5b60` `feat: rename package to foundryvtt-mcp and add bin entry (laurigates/foundryvtt-mcp#114)` — full rename
 - Multiple earlier release tags use `foundry-mcp-server-v*` prefix (e.g., `foundry-mcp-server-v0.11.0`)
 - v1.0.0 release tag uses new prefix: `foundryvtt-mcp-v1.0.0`
 

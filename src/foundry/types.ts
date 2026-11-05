@@ -652,7 +652,7 @@ export interface JournalEntryUpdate {
 }
 
 /**
- * Default visibility for a newly created document (#204).
+ * Default visibility for a newly created document (laurigates/foundryvtt-mcp#204).
  *
  * FoundryVTT ownership levels are `NONE 0`, `LIMITED 1`, `OBSERVER 2`,
  * `OWNER 3`. A document created without an explicit `ownership` defaults to
@@ -738,7 +738,7 @@ export interface ActorEffectInput {
 }
 
 /**
- * Result structure for an actor attribute update (#143).
+ * Result structure for an actor attribute update (laurigates/foundryvtt-mcp#143).
  *
  * Returned by `FoundryClient.updateActorAttribute`. The `updatedAttributes`
  * map echoes back the post-update value for every patched dot-path so callers

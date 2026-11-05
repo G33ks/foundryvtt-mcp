@@ -365,7 +365,7 @@ describe('applyDocumentBroadcast — embedded documents', () => {
 });
 
 /**
- * Issue #218 — `activeUsers` is a top-level `WorldData` field, not a document
+ * Issue laurigates/foundryvtt-mcp#218 — `activeUsers` is a top-level `WorldData` field, not a document
  * collection, so `modifyDocument` never touches it. FoundryVTT signals presence
  * on the separate `userActivity` event instead.
  */

@@ -1,5 +1,5 @@
 /**
- * @fileoverview Dice formula parsing and evaluation for the local roller (#219).
+ * @fileoverview Dice formula parsing and evaluation for the local roller (laurigates/foundryvtt-mcp#219).
  *
  * The local roller used to scan a formula with `/(\d+)d(\d+)([+-]\d+)?/g`, which
  * only captures a modifier glued directly to a dice term. Everything else the

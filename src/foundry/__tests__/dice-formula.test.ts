@@ -1,5 +1,5 @@
 /**
- * @fileoverview Unit tests for the dice formula parser/evaluator (#219).
+ * @fileoverview Unit tests for the dice formula parser/evaluator (laurigates/foundryvtt-mcp#219).
  *
  * The old `fallbackDiceRoll` regex only captured a modifier glued directly to a
  * dice term, so anything else the character-class validator let through was
@@ -43,7 +43,7 @@ describe('parseDiceFormula', () => {
 });
 
 /**
- * The exact table from issue #219: every one of these used to return a
+ * The exact table from issue laurigates/foundryvtt-mcp#219: every one of these used to return a
  * plausible-but-wrong number.
  */
 describe.each([

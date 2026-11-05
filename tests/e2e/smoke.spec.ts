@@ -10,7 +10,7 @@ import { test, expect } from '@playwright/test';
  * The test skips gracefully when FoundryVTT is not reachable so it remains
  * green in CI environments without the live VTT instance / credentials.
  *
- * Tracked by issue #137.
+ * Tracked by issue laurigates/foundryvtt-mcp#137.
  */
 
 const FOUNDRY_URL = process.env.FOUNDRY_URL || 'http://localhost:30000';

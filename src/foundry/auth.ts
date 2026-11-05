@@ -21,7 +21,7 @@ import { RefusedError } from '../utils/refusal.js';
  * handshake request; the `session` query parameter alone leaves the socket
  * anonymous. An anonymous socket still connects at the transport level — it
  * simply never answers `getJoinData` and emits `session` as `null` — so the
- * only symptom is a bare timeout with no `connect_error` (#206).
+ * only symptom is a bare timeout with no `connect_error` (laurigates/foundryvtt-mcp#206).
  *
  * `extraHeaders` is honoured by socket.io-client in Node.js for both the
  * WebSocket and polling handshakes; the query parameter is kept for servers
@@ -242,7 +242,7 @@ export async function authenticateFoundry(
       // Accept 200 (success JSON), 302 (redirect to /game on success) and 401
       // (bad password). 401 carries FoundryVTT's own explanation in the body;
       // letting axios throw on it would surface a bare
-      // "Request failed with status code 401" instead (#206).
+      // "Request failed with status code 401" instead (laurigates/foundryvtt-mcp#206).
       validateStatus: (status) => status === 200 || status === 302 || status === 401,
     },
   );

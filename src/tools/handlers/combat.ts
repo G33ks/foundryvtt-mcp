@@ -20,7 +20,7 @@ export async function handleGetCombatState(
     }
 
     // `combat` is a live reference into the world-data cache: sort a COPY via
-    // the shared helper so a read never reorders cached state (#214). The same
+    // the shared helper so a read never reorders cached state (laurigates/foundryvtt-mcp#214). The same
     // helper backs `next_turn`, so both tools agree on what `combat.turn` means.
     const combatants = getTurnOrder(combat)
       .map((c, i) => {

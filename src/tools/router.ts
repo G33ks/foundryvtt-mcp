@@ -222,7 +222,7 @@ export async function routeToolRequest(
       }
       return handleGetActorInventory(args as { actorId: string }, foundryClient);
 
-    // Actor mutation tools (#143) — WRITE via the Socket.IO modifyDocument
+    // Actor mutation tools (laurigates/foundryvtt-mcp#143) — WRITE via the Socket.IO modifyDocument
     // protocol (foundryClient); require FOUNDRY_WRITE_ENABLED=true + a GM user.
     case 'update_actor_attributes':
       if (!('actorId' in args) || typeof args.actorId !== 'string') {
@@ -273,7 +273,7 @@ export async function routeToolRequest(
     case 'search_items':
       return handleSearchItems(args, foundryClient);
 
-    // Compendium tools (#144)
+    // Compendium tools (laurigates/foundryvtt-mcp#144)
     case 'search_compendium':
       if (!('query' in args) || typeof args.query !== 'string') {
         throw new Error('Missing required parameter: query');

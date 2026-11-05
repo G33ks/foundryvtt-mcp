@@ -8,7 +8,7 @@ const COMBAT_ID = 'cccccccccccccccc';
 
 /**
  * Stored (creation) order deliberately differs from initiative order — the
- * same fixture the #214 combat specs use:
+ * same fixture the laurigates/foundryvtt-mcp#214 combat specs use:
  *   stored:           Bob (5), Alice (18), Charlie (12)
  *   initiative order: Alice (18), Charlie (12), Bob (5)
  */
@@ -43,7 +43,7 @@ const readJson = async (uri: string, client: Partial<FoundryClient>) => {
 };
 
 // --------------------------------------------------------------------------
-// #214 follow-up: `foundry://combat` is the id-bearing companion to
+// laurigates/foundryvtt-mcp#214 follow-up: `foundry://combat` is the id-bearing companion to
 // `get_combat_state`, whose ordinals are initiative-ordered. Emitting the raw
 // cached `combatants` array (creation order) next to a `turn` that indexes the
 // initiative order makes `combatants[turn]` — and "the Nth name I just read" —

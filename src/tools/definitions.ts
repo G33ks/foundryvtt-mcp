@@ -121,7 +121,7 @@ export const actorTools = [
 ];
 
 /**
- * Actor attribute mutation tool definitions (#143)
+ * Actor attribute mutation tool definitions (laurigates/foundryvtt-mcp#143)
  *
  * WRITE operations — require FOUNDRY_WRITE_ENABLED=true and an active
  * Socket.IO connection (mutations use the core `modifyDocument` protocol).
@@ -292,7 +292,7 @@ export const itemTools = [
 ];
 
 /**
- * Compendium search tool definitions (#144)
+ * Compendium search tool definitions (laurigates/foundryvtt-mcp#144)
  */
 export const compendiumTools = [
   {

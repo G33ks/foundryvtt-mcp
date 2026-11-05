@@ -1,7 +1,7 @@
 name: Integration Tests
 
 # ----------------------------------------------------------------------------
-# CI GATE (issue #140): this workflow needs FoundryVTT credentials that are not
+# CI GATE (issue laurigates/foundryvtt-mcp#140): this workflow needs FoundryVTT credentials that are not
 # currently configured on the repo:
 #
 #   - FOUNDRY_LICENSE_KEY

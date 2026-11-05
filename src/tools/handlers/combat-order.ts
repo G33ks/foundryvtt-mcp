@@ -1,5 +1,5 @@
 /**
- * @fileoverview Shared combatant turn-order helper (#214).
+ * @fileoverview Shared combatant turn-order helper (laurigates/foundryvtt-mcp#214).
  *
  * FoundryVTT resolves `Combat#turn` against the **initiative-sorted** turn
  * order, not the stored (creation) order of `Combat#combatants`. Every handler

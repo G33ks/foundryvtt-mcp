@@ -14,8 +14,8 @@ Add write operations to foundryvtt-mcp, starting with combat management (FR-018)
 |------|--------|
 | Write guard (`FOUNDRY_WRITE_ENABLED`) | ✅ Shipped — `assertWriteable()` in `src/foundry/client.ts`, config `writeEnabled` in `src/config/index.ts` |
 | Socket.IO write transport | ✅ Shipped — `modifyDocument()` (NOT the generic `emitWrite` originally sketched below); see "Design correction" |
-| Actor attribute mutation (FR-021) | ✅ Shipped — `update_actor_attributes` (#143) |
-| Actor item CRUD (FR-021) | ✅ Shipped — `create_actor_item` / `update_actor_item` / `delete_actor_item` (#142, #159) |
+| Actor attribute mutation (FR-021) | ✅ Shipped — `update_actor_attributes` (laurigates/foundryvtt-mcp#143) |
+| Actor item CRUD (FR-021) | ✅ Shipped — `create_actor_item` / `update_actor_item` / `delete_actor_item` (laurigates/foundryvtt-mcp#142, laurigates/foundryvtt-mcp#159) |
 | Combat write — `next_turn`, `end_combat`, `set_initiative` (FR-018) | ✅ Shipped — Phase 1a, this PRP |
 | Combat write — `start_combat` (FR-018) | ✅ Shipped — [#172](https://github.com/laurigates/foundryvtt-mcp/issues/172) |
 | `next_turn` skipDefeated refinement | ✅ Shipped — [#173](https://github.com/laurigates/foundryvtt-mcp/issues/173) |
@@ -72,7 +72,7 @@ Client methods: `updateCombat`, `endCombat`, `setCombatantInitiative`, `startCom
 - [x] Unit: all write handlers tested with mocked Socket.IO
 - [x] Unit: write guard returns error when `FOUNDRY_WRITE_ENABLED=false`
 - [x] Unit: emitted `modifyDocument` wire shape asserted (Combat update / delete, Combatant `parentUuid`)
-- [~] Integration: `set_initiative` + `next_turn` live round-trip+restore — gated; skips when no active GM combat or no licensed test instance (CI gap #140)
+- [~] Integration: `set_initiative` + `next_turn` live round-trip+restore — gated; skips when no active GM combat or no licensed test instance (CI gap laurigates/foundryvtt-mcp#140)
 
 ## Deferred (separate issues)
 

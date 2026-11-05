@@ -189,7 +189,7 @@ const MAX_DICE_FORMULA_LENGTH = 100;
  * REST *does* support, so for `(1d20+5)*2` it would name the wrong problem.
  * This scans for the first character the alphabet does not admit and reports
  * it by name and position, so the REST path is as specific about what it
- * refused as the local one (#219).
+ * refused as the local one (laurigates/foundryvtt-mcp#219).
  */
 function alphabetViolation(formula: string): Error {
   if (formula === '') {
@@ -379,7 +379,7 @@ export interface CompendiumSearchParams {
 }
 
 /**
- * Shallow attribute patch for {@link FoundryClient.updateActorAttribute} (#143).
+ * Shallow attribute patch for {@link FoundryClient.updateActorAttribute} (laurigates/foundryvtt-mcp#143).
  *
  * Keys are dot-paths into the actor's `system` object (e.g.
  * `attributes.hp.value`, `currency.gp`, `spells.spell1.value`,
@@ -645,11 +645,11 @@ export class FoundryClient {
   /** The transport reconnected; FoundryVTT's `session` answer is pending. */
   private awaitingSession = false;
   private worldData: WorldData | null = null;
-  /** Set when the socket drops with a cache still loaded (#217). */
+  /** Set when the socket drops with a cache still loaded (laurigates/foundryvtt-mcp#217). */
   private worldDataStale = false;
   /**
    * Last observed outcome of a REST request: false once one failed to reach
-   * FoundryVTT at all (#217). Unused in Socket.IO mode.
+   * FoundryVTT at all (laurigates/foundryvtt-mcp#217). Unused in Socket.IO mode.
    */
   private restLinkLive = true;
   /** Records every observed document/presence/module broadcast for `watch_events`. */
@@ -709,7 +709,7 @@ export class FoundryClient {
       });
 
       // REST mode has no socket to ask about liveness, so every request that
-      // does happen doubles as the probe (#217). See `isConnected()`.
+      // does happen doubles as the probe (laurigates/foundryvtt-mcp#217). See `isConnected()`.
       this.http.interceptors.response.use(
         (response) => {
           this.restLinkLive = true;
@@ -1077,18 +1077,18 @@ export class FoundryClient {
               issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
             });
           }
-          // Keep the snapshot live from here on (#205). Attached only after a
+          // Keep the snapshot live from here on (laurigates/foundryvtt-mcp#205). Attached only after a
           // successful handshake so the reject paths have no listener to leak.
           this.socket?.on('modifyDocument', this.onDocumentBroadcast);
           // Batches and operations with server-side side effects arrive here
           // instead, never on both channels.
           this.socket?.on('modifyDocumentBatch', this.onDocumentBatchBroadcast);
-          // Presence (#218): `activeUsers` is not a document collection, so it
+          // Presence (laurigates/foundryvtt-mcp#218): `activeUsers` is not a document collection, so it
           // only moves on this event.
           this.socket?.on('userActivity', this.onUserActivity);
           // Collaborative-editor autosaves bypass `modifyDocument` entirely.
           this.socket?.on('pm.autosave', this.onEditorAutosave);
-          // Liveness (#217): a socket that drops on its own must stop reading
+          // Liveness (laurigates/foundryvtt-mcp#217): a socket that drops on its own must stop reading
           // as connected, and one that socket.io reconnects must read as
           // connected again. Both are removed in `disconnect()`.
           this.socket?.on('connect', this.onSocketConnect);
@@ -1116,7 +1116,7 @@ export class FoundryClient {
   }
 
   /**
-   * Applies a FoundryVTT `modifyDocument` broadcast to the cached world state (#205).
+   * Applies a FoundryVTT `modifyDocument` broadcast to the cached world state (laurigates/foundryvtt-mcp#205).
    *
    * Bound field rather than a method so the same reference can be passed to
    * `socket.off()` on teardown. Never throws: a malformed or unmodelled payload
@@ -1377,7 +1377,7 @@ export class FoundryClient {
   }
 
   /**
-   * Applies a FoundryVTT `userActivity` broadcast to cached presence (#218).
+   * Applies a FoundryVTT `userActivity` broadcast to cached presence (laurigates/foundryvtt-mcp#218).
    *
    * Foundry emits this on login, on logout, and on ordinary activity, and it is
    * the only signal that moves `worldData.activeUsers` — that field is a
@@ -1417,7 +1417,7 @@ export class FoundryClient {
 
   /**
    * Reacts to the socket dropping on its own — server restart, network loss,
-   * an idle timeout (#217).
+   * an idle timeout (laurigates/foundryvtt-mcp#217).
    *
    * Moves the link to `disconnected` so `isConnected()` and `get_health_status` stop
    * claiming a live link, and marks the cached snapshot stale: nothing is
@@ -1431,7 +1431,7 @@ export class FoundryClient {
    * Bound field rather than a method so the same reference reaches `socket.off()`.
    */
   /**
-   * Reacts to socket.io bringing the link back up on its own (#217).
+   * Reacts to socket.io bringing the link back up on its own (laurigates/foundryvtt-mcp#217).
    *
    * `sessionSocketOptions` leaves socket.io-client's default
    * `reconnection: true` in place, so after a transient drop the manager
@@ -1546,7 +1546,7 @@ export class FoundryClient {
   }
 
   /**
-   * Reports whether the client currently has a live link to FoundryVTT (#217).
+   * Reports whether the client currently has a live link to FoundryVTT (laurigates/foundryvtt-mcp#217).
    *
    * Socket.IO mode answers from the socket itself rather than from a latched
    * flag, so a link that dropped without an explicit `disconnect()` — server
@@ -1566,7 +1566,7 @@ export class FoundryClient {
    */
   isConnected(): boolean {
     // A socket, once established, is the more informative signal (reacts to
-    // drops/reconnects immediately — see #217) — prefer it even when an
+    // drops/reconnects immediately — see laurigates/foundryvtt-mcp#217) — prefer it even when an
     // apiKey is also configured (REST is additive; see `connect()`).
     // A connected but anonymous socket (FoundryVTT forgot the session) does
     // not count: nothing it sends is executed as the connector's user.
@@ -1581,7 +1581,7 @@ export class FoundryClient {
 
   /**
    * True when the cached snapshot is no longer being kept live by broadcasts —
-   * i.e. the socket dropped after a world load (#217). Reads still answer from
+   * i.e. the socket dropped after a world load (laurigates/foundryvtt-mcp#217). Reads still answer from
    * the cache; this flags that the answer is a point-in-time copy.
    */
   isWorldDataStale(): boolean {
@@ -1833,7 +1833,7 @@ export class FoundryClient {
   }
 
   /**
-   * Patches attributes on an actor's `system` object (#143). WRITE — Socket.IO.
+   * Patches attributes on an actor's `system` object (laurigates/foundryvtt-mcp#143). WRITE — Socket.IO.
    *
    * `patch` keys are dot-paths into `actor.system` (e.g. `attributes.hp.value`,
    * `currency.gp`, `spells.spell1.value`, `attributes.exhaustion`). Each key is
@@ -2448,7 +2448,7 @@ export class FoundryClient {
   }
 
   /**
-   * Starts a new combat encounter and seeds its combatants (FR-018, #172).
+   * Starts a new combat encounter and seeds its combatants (FR-018, laurigates/foundryvtt-mcp#172).
    *
    * Two-step `modifyDocument` flow:
    *   1. Create the top-level `Combat` document (no `parentUuid`), activated on
@@ -3106,7 +3106,7 @@ export class FoundryClient {
    * @param name - journal entry title
    * @param pages - one or more pages (name + content); at least one required
    * @param folder - optional 16-char Folder document id to file the entry under
-   * @param visibility - who can see the entry (#204); omitted means GM-only,
+   * @param visibility - who can see the entry (laurigates/foundryvtt-mcp#204); omitted means GM-only,
    *   which is FoundryVTT's default for a newly created document
    * @returns the newly created journal entry document
    */
@@ -6194,7 +6194,7 @@ export class FoundryClient {
    * Rolls a dice formula.
    *
    * Validation is deliberately **per transport**, because the two transports
-   * are not equally capable (#219):
+   * are not equally capable (laurigates/foundryvtt-mcp#219):
    *
    *  - **REST (`FOUNDRY_API_KEY`)** posts the formula to `/api/dice/roll`,
    *    where FoundryVTT's own `Roll` engine evaluates it. That engine
@@ -6256,7 +6256,7 @@ export class FoundryClient {
    * Rolls locally, when FoundryVTT is not doing it for us.
    *
    * Delegates the whole formula to {@link evaluateDiceFormula}, which consumes
-   * the input end to end and throws on any leftover it cannot represent (#219).
+   * the input end to end and throws on any leftover it cannot represent (laurigates/foundryvtt-mcp#219).
    */
   private fallbackDiceRoll(formula: string, reason?: string): DiceRoll {
     const { total, breakdown } = evaluateDiceFormula(formula);
@@ -6883,7 +6883,7 @@ function extractString(obj: Record<string, unknown>, ...keys: string[]): string 
 }
 
 // ============================================================================
-// Attribute-patch helpers (#143)
+// Attribute-patch helpers (laurigates/foundryvtt-mcp#143)
 // ============================================================================
 
 /**

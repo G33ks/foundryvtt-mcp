@@ -8,7 +8,7 @@ import { journalVersion } from '../../foundry/journal-integrity.js';
 import { stripHtml } from '../../utils/sanitize.js';
 import { withJournalWarnings, withToolError } from './utils.js';
 
-/** Shown on cache-served journal reads while the snapshot is stale (#217). */
+/** Shown on cache-served journal reads while the snapshot is stale (laurigates/foundryvtt-mcp#217). */
 const STALE_JOURNAL_NOTICE =
   '⚠️ **Stale:** this comes from a cached snapshot that stopped following live changes when ' +
   'the connection dropped. Use `raw: true` to read the entry from the server, or ' +
