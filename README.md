@@ -1,9 +1,10 @@
 # FoundryVTT MCP Server
 
+[![Test](https://github.com/G33ks/foundryvtt-mcp/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/G33ks/foundryvtt-mcp/actions/workflows/test.yml)
+[![Security](https://github.com/G33ks/foundryvtt-mcp/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/G33ks/foundryvtt-mcp/actions/workflows/security.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-green.svg)](https://nodejs.org/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0%2B-blue.svg)](https://www.typescriptlang.org/)
-[![Vitest](https://img.shields.io/badge/Tests-1227%20passing-brightgreen.svg)](https://vitest.dev/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-6-blue.svg)](https://www.typescriptlang.org/)
 [![Tools](https://img.shields.io/badge/MCP%20Tools-114-purple.svg)](https://modelcontextprotocol.io/)
 
 A comprehensive, production-grade [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for **Foundry Virtual Tabletop (FoundryVTT)**.
@@ -419,6 +420,24 @@ npm run dev
 ```
 
 `npm run lint && npx tsc --noEmit && npm test` runs the lint, type check and unit tests in one go.
+
+---
+
+## 🤝 Contributing & Community
+
+- **Questions and help**: [GitHub Discussions](https://github.com/G33ks/foundryvtt-mcp/discussions) (Q&A).
+- **Bugs and feature requests**: [issues](https://github.com/G33ks/foundryvtt-mcp/issues/new/choose).
+- **Contributing**: [CONTRIBUTING.md](CONTRIBUTING.md) — setup, checks, testing against a real world.
+- **Security**: report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md).
+- **Code of Conduct**: [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+
+---
+
+## 🌱 Origins
+
+This project was started by Lauri Gates as [laurigates/foundryvtt-mcp](https://github.com/laurigates/foundryvtt-mcp). It was continued in [RN0000/foundryvtt-mcp](https://github.com/RN0000/foundryvtt-mcp), then forked as [duckpuppy/foundryvtt-mcp](https://github.com/duckpuppy/foundryvtt-mcp), from which this repository, [G33ks/foundryvtt-mcp](https://github.com/G33ks/foundryvtt-mcp), was forked. It now continues independently.
+
+Thanks to everyone who built the earlier versions. Their work is kept in this repository's history and in [CHANGELOG.md](CHANGELOG.md); issue numbers from before the fork refer to the laurigates tracker.
 
 ---
 
