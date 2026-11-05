@@ -17,7 +17,7 @@ Any module reading configuration at **module scope** locks in the pre-dotenv
 values, and nothing about the code looks wrong — the import is right there,
 the dependency is installed, the call is present.
 
-## The cost (real: issue #206, fixed in #210)
+## The cost (real: issue laurigates/foundryvtt-mcp#206, fixed in laurigates/foundryvtt-mcp#210)
 
 `src/index.ts` called `dotenv.config({ quiet: true })` in its body.
 `src/utils/logger.ts` builds its logger at module scope:
@@ -52,7 +52,7 @@ natural guess.
   directly: `config`/`getConfig()` for validated values, `resolveSettings()`
   (or `processSettings()` for `FOUNDRY_MCP_STATE_DIR`/`FOUNDRY_MCP_CONFIG`)
   for raw ones. A direct read misses `.env` and the file — the same symptom
-  as #206. Known exceptions left for later: `scripts/diagnose-api.ts`,
+  as laurigates/foundryvtt-mcp#206. Known exceptions left for later: `scripts/diagnose-api.ts`,
   `scripts/run-e2e-tests.ts`.
 
 - **Never inject.** The relay hands its own environment to the shared process

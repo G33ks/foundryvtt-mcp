@@ -45,7 +45,7 @@ Mutations go over the existing authenticated socket (no bridge), per PRD-003
 - Actor `system` updates take **dot-notation keys prefixed with `system.`**
   (e.g. `"system.attributes.hp.value"`); Foundry merges recursively.
 
-## The cache follows writes automatically (#205)
+## The cache follows writes automatically (laurigates/foundryvtt-mcp#205)
 
 `worldData` is no longer a connect-time snapshot. `client.ts` subscribes to the
 `modifyDocument` **broadcast** — the same event, arriving unsolicited — and

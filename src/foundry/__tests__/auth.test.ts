@@ -225,7 +225,7 @@ describe('authenticateFoundry — warn-and-continue (CN-7 analogue)', () => {
   });
 });
 
-describe('authenticateFoundry — session cookie on the Socket.IO handshake (#206)', () => {
+describe('authenticateFoundry — session cookie on the Socket.IO handshake (laurigates/foundryvtt-mcp#206)', () => {
   /**
    * FoundryVTT resolves the session from the `session` cookie on the handshake
    * request. Sending it only as a query parameter leaves the socket anonymous:
@@ -312,7 +312,7 @@ describe('authenticateFoundry — POST /join compatibility with FoundryVTT v14',
   });
 });
 
-describe('sessionSocketOptions (#206)', () => {
+describe('sessionSocketOptions (laurigates/foundryvtt-mcp#206)', () => {
   it('carries the session in both the Cookie header and the query param', () => {
     expect(sessionSocketOptions('abc123')).toEqual({
       transports: ['websocket'],
@@ -322,7 +322,7 @@ describe('sessionSocketOptions (#206)', () => {
   });
 });
 
-describe('authenticateFoundry — rejected /join is reported, not thrown raw (#206)', () => {
+describe('authenticateFoundry — rejected /join is reported, not thrown raw (laurigates/foundryvtt-mcp#206)', () => {
   /**
    * FoundryVTT v13+ answers a rejected /join with HTTP 401 and a plain-text
    * i18n key body (e.g. "JOIN.ErrorInvalidPassword"). Without 401 in

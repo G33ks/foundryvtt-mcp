@@ -7,7 +7,7 @@ helper script calls a nonexistent method or reads a property that doesn't
 exist — the failure only appears at **runtime**, when you actually run the
 script.
 
-## The cost (real: PR #193)
+## The cost (real: PR laurigates/foundryvtt-mcp#193)
 
 `scripts/test-connection.ts` (since removed, replaced by `init --check`) carried two latent bugs that the build never
 caught because the file isn't in the `tsc` set:

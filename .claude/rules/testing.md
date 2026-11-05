@@ -27,7 +27,7 @@ reference).
   already running and otherwise blocks ~120s before failing in global-setup.
 - The test container uses tmpfs `/data` + `CONTAINER_PRESERVE_CONFIG=false`, so
   it starts world-less; Socket.IO auth specs need a bootstrapped world (still
-  manual — the CI wiring for this tier is gated on `FOUNDRY_*` secrets, issue #140).
+  manual — the CI wiring for this tier is gated on `FOUNDRY_*` secrets, issue laurigates/foundryvtt-mcp#140).
 - **Write-tool tests** (`mutations.integration.test.ts`) exercise the
   `modifyDocument` write protocol: they require `writeEnabled: true` and a world
   **GM** user, target an actor with a mutable attribute, and **revert every
@@ -36,7 +36,7 @@ reference).
   integration specs.
 - The bridge/REST path is **read-only**; `search_compendium` integration
   coverage is blocked on the bridge implementing `/api/compendium/search`.
-- CI runs this tier only once the `FOUNDRY_*` secrets are configured (issue #140).
+- CI runs this tier only once the `FOUNDRY_*` secrets are configured (issue laurigates/foundryvtt-mcp#140).
 
 ## Coverage areas
 

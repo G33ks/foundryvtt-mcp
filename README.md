@@ -409,7 +409,7 @@ npm ci
 # Compile TypeScript
 npm run build
 
-# Run the unit test suite (1227 tests)
+# Run the unit test suite
 npm test
 
 # Run linter and formatting checks

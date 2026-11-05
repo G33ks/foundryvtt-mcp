@@ -73,7 +73,7 @@ jobs:
             echo
             echo "The following repository secrets are not configured: ${missing[*]}"
             echo
-            echo "See issue #140 — without these the felddy/foundryvtt container"
+            echo "See issue laurigates/foundryvtt-mcp#140 — without these the felddy/foundryvtt container"
             echo "cannot authenticate to foundryvtt.com and never becomes healthy."
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -82,7 +82,7 @@ jobs:
             exit 1
           fi
 
-          echo "::warning title=Integration tests skipped::Missing FoundryVTT secrets (${missing[*]}); see issue #140."
+          echo "::warning title=Integration tests skipped::Missing FoundryVTT secrets (${missing[*]}); see issue laurigates/foundryvtt-mcp#140."
 
   integration:
     name: Integration tests

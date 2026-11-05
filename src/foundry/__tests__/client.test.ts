@@ -628,7 +628,7 @@ describe('FoundryClient', () => {
      * with the unparsed part silently dropped. RNG is pinned so the totals are
      * exact rather than ranges.
      */
-    describe('formulas that used to be silently mis-totalled (#219)', () => {
+    describe('formulas that used to be silently mis-totalled (laurigates/foundryvtt-mcp#219)', () => {
       beforeEach(() => {
         // Math.floor(0.5 * sides) + 1 — the middle-ish face of every die.
         vi.spyOn(Math, 'random').mockReturnValue(0.5);
@@ -854,7 +854,7 @@ describe('FoundryClient', () => {
    * socket that dropped on its own (server restart, network loss) still read as
    * connected and `get_health_status` still printed "✅ Connected".
    */
-  describe('socket liveness (#217) and live presence (#218)', () => {
+  describe('socket liveness (laurigates/foundryvtt-mcp#217) and live presence (laurigates/foundryvtt-mcp#218)', () => {
     /** Mock socket that records listeners and lets the test fire them. */
     function buildHandshakeSocket(worldData: Record<string, unknown>) {
       const listeners = new Map<string, Array<(...args: unknown[]) => void>>();

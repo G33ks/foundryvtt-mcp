@@ -21,11 +21,7 @@ src/
 
 ## Adding New Tools
 
-1. Define tool schema in `src/tools/definitions.ts`
-2. Add handler in `src/tools/handlers/`
-3. Wire the handler in `src/tools/router.ts`
-4. Add TypeScript types in `src/foundry/types.ts` if needed
-5. Test with your AI assistant
+See [Adding a tool](../../CONTRIBUTING.md#adding-a-tool) in CONTRIBUTING.md: definition, routing, handler, tests, and the write queue for a tool that changes the world.
 
 ## Testing
 
@@ -48,13 +44,15 @@ npm run test:e2e
 
 ### Smoke tests
 
-Two smoke tests verify the server boots end-to-end without a live FoundryVTT.
+Three smoke tests verify the server boots end-to-end without a live FoundryVTT.
 They run in CI on every PR and catch failure modes that the mocked Vitest
-suite cannot:
+suite cannot. They are isolated from your own configuration and connector
+(see [CONTRIBUTING.md](../../CONTRIBUTING.md#checks-before-a-pull-request)):
 
 ```bash
-npm run smoke        # Spawn dist/index.js, verify the startup banner on stderr
-npm run smoke:pack   # npm pack -> install into a fresh consumer -> verify banner
+npm run smoke         # Spawn dist/index.js, verify the startup banner on stderr
+npm run smoke:dotenv  # Configuration from a .env file is read before it is needed
+npm run smoke:pack    # npm pack -> install into a fresh consumer -> verify banner
 ```
 
 `smoke` covers construction-time and import-time regressions (SDK shape

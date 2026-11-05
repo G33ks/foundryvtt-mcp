@@ -508,7 +508,7 @@ describe('FoundryClient combat mutations', () => {
 // (creation) order of `combat.combatants`. The read tool (get_combat_state) and
 // the write tool (next_turn) must agree on that ordering.
 // --------------------------------------------------------------------------
-describe('initiative-ordered turn semantics (#214)', () => {
+describe('initiative-ordered turn semantics (laurigates/foundryvtt-mcp#214)', () => {
   /**
    * Stored (creation) order deliberately differs from initiative order:
    *   stored:   Bob (5), Alice (18), Charlie (12)

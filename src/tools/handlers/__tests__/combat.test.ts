@@ -177,7 +177,7 @@ describe('handleGetCombatState', () => {
   });
 });
 
-describe('handleGetCombatState — turn order (#214)', () => {
+describe('handleGetCombatState — turn order (laurigates/foundryvtt-mcp#214)', () => {
   const makeClient = (combat: WorldCombat) =>
     ({
       getCombatState: vi.fn().mockReturnValue(combat),
