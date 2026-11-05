@@ -1,17 +1,15 @@
 # Blueprint Documentation
 
-This directory contains the blueprint state and documentation for this project.
+This directory holds the project's first architecture decisions and product requirements.
 
 ## Contents
 
-- `manifest.json` - Blueprint configuration and generated content tracking
-- `feature-tracker.json` - Feature tracking with tasks and progress
-- `work-orders/` - Task packages for subagents
-- `ai_docs/` - AI-generated documentation
+- `adrs/` - Architecture Decision Records ADR-001 to ADR-006
+- `prds/` - Product Requirements Documents PRD-001 and PRD-002
 
 ## Related Directories
 
 - `docs/prds/` - Product Requirements Documents
 - `docs/adrs/` - Architecture Decision Records
 - `docs/prps/` - Product Requirement Prompts
-- `.claude/rules/` - Generated rules (from blueprint)
+- `.claude/rules/` - Rules for AI coding assistants

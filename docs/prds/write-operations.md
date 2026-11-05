@@ -2,7 +2,7 @@
 
 **Status**: Planned
 **Created**: 2026-03-12
-**Source**: docs/blueprint/feature-tracker.json (FR-018 through FR-024)
+**Source**: FR-018 through FR-024 of the former feature tracker (`docs/blueprint/feature-tracker.json`, since removed; see the git history)
 **Confidence**: 8/10
 
 ## Overview

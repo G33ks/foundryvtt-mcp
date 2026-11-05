@@ -16,10 +16,4 @@ This directory contains ADRs for the foundryvtt-mcp project using [MADR format](
 
 ## Creating New ADRs
 
-```bash
-# Use blueprint to derive from discussions
-/blueprint:derive-adr
-
-# Or create manually following MADR format:
-# docs/adrs/{NNNN}-{kebab-case-title}.md
-```
+Create the file by hand, following the MADR format: `docs/adrs/{NNNN}-{kebab-case-title}.md`, then add it to the index above.

@@ -19,7 +19,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       # The runner's preinstalled Node is enough: package-bridge.js only uses
       # core modules available since Node 18 (no dependencies, no setup-node).

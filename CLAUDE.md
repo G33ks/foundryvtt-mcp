@@ -104,6 +104,8 @@ See `.claude/rules/` for detailed guidelines:
 - `development.md` — TDD workflow, commit conventions, build commands
 - `testing.md` — Test tiers (unit, integration, E2E) and requirements
 - `foundry-write-protocol.md` — transport (Socket.IO vs REST) and the `modifyDocument` write protocol
+- `scripts-typecheck-gap.md` — `scripts/` is outside the typecheck surface: run a script after editing it
+- `esm-entrypoint-env-loading.md` — ESM runs imports before the entrypoint's body, so configuration read at module scope must not depend on loading `.env` there
 
 ## Reference
 

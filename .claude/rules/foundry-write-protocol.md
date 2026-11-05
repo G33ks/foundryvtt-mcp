@@ -15,7 +15,7 @@ FoundryVTT documents.
 | Mode | Trigger | What it does |
 |------|---------|--------------|
 | **Socket.IO** (primary) | `FOUNDRY_USERNAME` + `FOUNDRY_PASSWORD` | Authenticates a real Foundry client session (4-step `/join` flow in `auth.ts`), connects to `FOUNDRY_URL` (`:30000`), and loads a read-only `worldData` snapshot. Reads are served from that cache. |
-| **REST / `apiKey`** (secondary) | `FOUNDRY_API_KEY` set | Hits `/api/*` on the REST module / bridge. Optional — per the README it powers "REST API diagnostics". May be extracted (`feat/extract-rest-api-module`). |
+| **REST / `apiKey`** (secondary) | `FOUNDRY_API_KEY` set | Hits `/api/*` on the Foundry Local REST API module, a separate project. Optional — it backs the diagnostics tools, `search_compendium` and a few reads (see CLAUDE.md). |
 
 `.env.example` states Socket.IO is the primary method and `FOUNDRY_API_KEY` is
 commented out. **Do not assume the REST path is in use** — default

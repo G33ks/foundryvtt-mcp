@@ -27,7 +27,7 @@ Replace ESLint and Prettier with Biome (`@biomejs/biome` v2.x). Configuration is
 
 Formatting uses 2-space indentation, single quotes, semicolons, and a 100-character line width.
 
-Biome is integrated into the CI `test` workflow (`bun run lint`) and runs via `bun run lint:fix` / `bun run format` locally.
+Biome is integrated into the CI `test` workflow (`npm run lint`) and runs via `npm run lint:fix` / `npm run format` locally.
 
 ## Consequences
 

@@ -45,7 +45,7 @@ The Model Context Protocol (MCP) provides a standard interface for AI assistants
 
 ### Non-Functional
 
-- Node.js 18+ runtime; Bun as the package manager.
+- Node.js 22+ runtime; npm as the package manager.
 - TypeScript strict mode throughout.
 - All tool queries served from the in-memory world state cache; no per-query Socket.IO round trips.
 - Startup must complete authentication and world state load before accepting MCP requests.

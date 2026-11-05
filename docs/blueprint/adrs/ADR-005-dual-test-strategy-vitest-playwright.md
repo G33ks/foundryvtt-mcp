@@ -20,9 +20,9 @@ A single test framework optimized for one layer tends to be awkward for the othe
 
 Use two test frameworks:
 
-- **Vitest** (`vitest` v1.x) for unit tests. Config in `vitest.config.ts`. Tests live in `src/__tests__/` and alongside source files. Run with `bun test`. A separate `vitest.integration.config.ts` is used for integration tests that require a live FoundryVTT instance (provisioned via Docker Compose in `docker-compose.test.yml`).
+- **Vitest** (`vitest` v1.x) for unit tests. Config in `vitest.config.ts`. Tests live in `src/__tests__/` and alongside source files. Run with `npm test`. A separate `vitest.integration.config.ts` is used for integration tests that require a live FoundryVTT instance (provisioned via Docker Compose in `docker-compose.test.yml`).
 
-- **Playwright** (`@playwright/test` v1.x) for E2E tests targeting the MCP server's external behavior as an MCP client would see it. Config in `playwright.config.ts`. Run with `bun run test:e2e`.
+- **Playwright** (`@playwright/test` v1.x) for E2E tests targeting the MCP server's external behavior as an MCP client would see it. Config in `playwright.config.ts`. Run with `npm run test:e2e`.
 
 CI workflows run unit tests on every push/PR (`test.yml`). Integration tests run in a dedicated workflow (`integration-test.yml`) with Docker Compose.
 
