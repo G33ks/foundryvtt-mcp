@@ -1,8 +1,7 @@
 if command -v gitleaks >/dev/null 2>&1; then
   gitleaks protect --staged --no-banner
 else
-  echo "❌ ERROR: gitleaks not installed — secret scanning is required."
-  echo "   Install: https://github.com/gitleaks/gitleaks#installing"
-  exit 1
+  echo "⚠ gitleaks not installed: staged changes were not scanned for secrets."
+  echo "  CI scans the whole history; to scan before each commit, install it (see CONTRIBUTING.md)."
 fi
 npx lint-staged
