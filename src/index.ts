@@ -15,6 +15,8 @@
  * - `stop`        stop the shared process.
  * - `init`        write the configuration file interactively; `init --check`
  *                 checks the existing configuration without writing anything.
+ * - `--version`   print the package version (also `-v` and `version`); reads
+ *                 no configuration and connects to nothing.
  * - `daemon-launch` internal: starts `daemon` detached and exits (see shared/spawn.ts).
  *
  * Each role is imported on demand so the relay and the control commands do
@@ -33,6 +35,13 @@ const ENTRY = fileURLToPath(import.meta.url);
 
 async function main(role: string | undefined): Promise<void> {
   switch (role) {
+    case '--version':
+    case '-v':
+    case 'version': {
+      const { packageVersion } = await import('./shared/version.js');
+      process.stdout.write(`${packageVersion()}\n`);
+      break;
+    }
     case 'status': {
       const { runStatus } = await import('./shared/control.js');
       process.exit(await runStatus());
@@ -73,7 +82,7 @@ async function main(role: string | undefined): Promise<void> {
     }
     default:
       process.stderr.write(
-        `Unknown command: ${role}\nUsage: foundryvtt-mcp [init [--check] | daemon | status | stop]\n`,
+        `Unknown command: ${role}\nUsage: foundryvtt-mcp [init [--check] | daemon | status | stop | --version]\n`,
       );
       process.exit(2);
   }
