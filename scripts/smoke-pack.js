@@ -6,17 +6,20 @@
  * Validates the *published* package shape, not just the source build:
  *   1. Every non-negation entry in `package.json` "files" resolves to a real
  *      path (or matches at least one file via glob) in the source tree.
- *   2. `npm pack` produces a tarball.
+ *   2. `npm pack` produces a tarball holding no source map, no declaration
+ *      file, and no compiled file under dist/ without its source in src/
+ *      (a leftover of a deleted source, since `build` does not clean dist/).
  *   3. The tarball can be installed as a dependency in a fresh consumer
  *      project.
- *   4. `node node_modules/<pkg>/dist/index.js` from the consumer reaches the
+ *   4. The installed `foundryvtt-mcp` bin answers `--version` with the
+ *      version in package.json.
+ *   5. `node node_modules/<pkg>/dist/index.js` from the consumer reaches the
  *      startup banner — same contract as smoke-test.js.
  *
  * Catches packaging-shape regressions that smoke-test.js cannot: smoke-test
  * runs against the source tree, where every file is present regardless of
  * `files`. This script runs against the tarball end-users actually get when
- * they install the published package (TODO: npm package name to be decided,
- * phase 6). The motivating
+ * they install the published package. The motivating
  * scenario: shipping a release with a missing subdirectory in `files`, which
  * crashes at startup with ERR_MODULE_NOT_FOUND only when consumers install it.
  */
@@ -169,6 +172,7 @@ function packTarball() {
     fail(`npm pack failed (exit ${result.status})`, result.stderr);
   }
   let tarballName;
+  let packedFiles;
   try {
     const packInfo = JSON.parse(result.stdout);
     // Older npm prints an array of entries; newer npm keys them by package name.
@@ -176,18 +180,42 @@ function packTarball() {
       ? packInfo[0]
       : (packInfo?.[pkgJson.name] ?? packInfo);
     tarballName = entry?.filename;
+    packedFiles = entry?.files?.map((file) => file.path);
   } catch (err) {
     fail(`failed to parse npm pack --json output: ${err.message}`, result.stdout);
   }
   if (!tarballName) {
     fail('npm pack did not report a tarball name', result.stdout);
   }
+  if (!Array.isArray(packedFiles) || packedFiles.length === 0) {
+    fail('npm pack did not list the packed files', result.stdout);
+  }
   const tarball = join(tmp, tarballName);
   if (!existsSync(tarball)) {
     fail(`reported tarball does not exist on disk: ${tarball}`);
   }
-  console.log(`📦 Packed tarball: ${tarball}`);
+  console.log(`📦 Packed tarball: ${tarball} (${packedFiles.length} files)`);
+  checkPackedFiles(packedFiles);
   return tarball;
+}
+
+/** No source map, no declaration, and every compiled file has its source. */
+function checkPackedFiles(paths) {
+  const unexpected = [];
+  for (const path of paths) {
+    if (/\.map$/.test(path) || /\.d\.[cm]?ts$/.test(path)) {
+      unexpected.push(`${path} (source map or declaration)`);
+    } else if (path.startsWith('dist/')) {
+      const source = path.replace(/^dist\//, 'src/').replace(/\.js$/, '');
+      if (!['.ts', '.js'].some((ext) => existsSync(join(repoRoot, `${source}${ext}`)))) {
+        unexpected.push(`${path} (no ${source}.ts in src/: a leftover build output)`);
+      }
+    }
+  }
+  if (unexpected.length > 0) {
+    fail(`the tarball holds unexpected files:\n  ${unexpected.join('\n  ')}`);
+  }
+  console.log('✅ Packed files: no source map, no declaration, no leftover build output');
 }
 
 // ── 3. Install into a fresh consumer project ──────────────────────────────
@@ -218,7 +246,35 @@ function installInConsumer(tarball) {
   return { consumer, serverPath };
 }
 
-// ── 4. Spawn the installed server and wait for the banner ────────────────
+// ── 4. The installed bin answers --version ───────────────────────────────
+function checkInstalledBin(consumer) {
+  const binName = Object.keys(pkgJson.bin ?? {})[0];
+  if (!binName) {
+    fail('package.json declares no "bin"');
+  }
+  // npm installs a .cmd shim on Windows, which Node only runs through a shell.
+  const bin = join(consumer, 'node_modules', '.bin', isWindows ? `${binName}.cmd` : binName);
+  if (!existsSync(bin)) {
+    fail(`installed bin missing: ${bin}`);
+  }
+  const result = spawnSync(isWindows ? `"${bin}"` : bin, ['--version'], {
+    cwd: consumer,
+    encoding: 'utf8',
+    env: isolatedEnv(consumer, {}),
+    shell: isWindows,
+    timeout: STARTUP_TIMEOUT_MS,
+  });
+  const printed = (result.stdout ?? '').trim();
+  if (result.status !== 0 || printed !== pkgJson.version) {
+    fail(
+      `\`${binName} --version\` printed "${printed}" (exit ${result.status}), expected "${pkgJson.version}"`,
+      result.stderr,
+    );
+  }
+  console.log(`✅ Installed bin: \`${binName} --version\` → ${printed}`);
+}
+
+// ── 5. Spawn the installed server and wait for the banner ────────────────
 function runInstalledServer({ consumer, serverPath }) {
   return new Promise((resolve) => {
     const child = spawn('node', [serverPath], {
@@ -316,4 +372,5 @@ function runInstalledServer({ consumer, serverPath }) {
 validateFilesEntries();
 const tarball = packTarball();
 const installed = installInConsumer(tarball);
+checkInstalledBin(installed.consumer);
 await runInstalledServer(installed);
