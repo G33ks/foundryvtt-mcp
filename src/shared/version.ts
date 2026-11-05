@@ -1,5 +1,5 @@
 /**
- * @fileoverview The package version, read from `package.json` at runtime.
+ * @fileoverview The package name and version, read from `package.json` at runtime.
  *
  * `src/shared/` and `dist/shared/` sit at the same depth, so the same
  * relative path works from sources (tests, tsx) and from the build.
@@ -8,22 +8,35 @@
 import { readFileSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
-let cached: string | null = null;
+let cachedPackage: { name: string; version: string } | null = null;
+
+function readPackage(): { name: string; version: string } {
+  if (cachedPackage === null) {
+    let raw: unknown = null;
+    try {
+      raw = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+    } catch {
+      // the defaults below
+    }
+    const pkg = raw;
+    const isObject = typeof pkg === 'object' && pkg !== null;
+    const name = isObject && 'name' in pkg ? pkg.name : undefined;
+    const version = isObject && 'version' in pkg ? pkg.version : undefined;
+    cachedPackage = {
+      name: typeof name === 'string' ? name : 'foundryvtt-mcp',
+      version: typeof version === 'string' ? version : '0.0.0-unknown',
+    };
+  }
+  return cachedPackage;
+}
 
 export function packageVersion(): string {
-  if (cached === null) {
-    try {
-      const pkg: unknown = JSON.parse(
-        readFileSync(new URL('../../package.json', import.meta.url), 'utf8'),
-      );
-      const version =
-        typeof pkg === 'object' && pkg !== null && 'version' in pkg ? pkg.version : undefined;
-      cached = typeof version === 'string' ? version : '0.0.0-unknown';
-    } catch {
-      cached = '0.0.0-unknown';
-    }
-  }
-  return cached;
+  return readPackage().version;
+}
+
+/** The npm package name, e.g. for `npm install -g <name>`. */
+export function packageName(): string {
+  return readPackage().name;
 }
 
 let cachedBuild: string | null = null;

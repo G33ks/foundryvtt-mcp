@@ -3,50 +3,86 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { claudeCodeCommand, claudeDesktopSnippet, connectorCommand } from '../snippets.js';
+import { packageName } from '../../shared/version.js';
+import {
+  claudeCodeCommand,
+  claudeDesktopSnippet,
+  connectorCommand,
+  installKind,
+} from '../snippets.js';
 
-const WINDOWS_ENTRY = 'C:\\Users\\me\\source\\foundryvtt-mcp\\dist\\index.js';
+const WINDOWS_NODE = 'C:\\Program Files\\nodejs\\node.exe';
+const POSIX_NODE = '/home/me/.nvm/versions/node/v24.11.0/bin/node';
 
-describe('claudeDesktopSnippet', () => {
-  it('is valid JSON whose args hold the Windows path intact', () => {
-    const text = claudeDesktopSnippet(WINDOWS_ENTRY);
-    expect(text).toContain('C:\\\\Users\\\\me');
-    expect(JSON.parse(text)).toEqual({
-      mcpServers: { foundryvtt: { command: 'node', args: [WINDOWS_ENTRY] } },
+const ENTRIES = {
+  windows: {
+    clone: 'C:\\Users\\me\\source\\foundryvtt-mcp\\dist\\index.js',
+    global:
+      'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@g33ks\\foundryvtt-mcp\\dist\\index.js',
+    npx: 'C:\\Users\\me\\AppData\\Local\\npm-cache\\_npx\\4f3a2b1c\\node_modules\\@g33ks\\foundryvtt-mcp\\dist\\index.js',
+  },
+  posix: {
+    clone: '/home/me/src/foundryvtt-mcp/dist/index.js',
+    global: '/usr/local/lib/node_modules/@g33ks/foundryvtt-mcp/dist/index.js',
+    npx: '/home/me/.npm/_npx/4f3a2b1c/node_modules/@g33ks/foundryvtt-mcp/dist/index.js',
+  },
+} as const;
+
+describe('installKind', () => {
+  for (const os of ['windows', 'posix'] as const) {
+    it(`tells a clone, a global install and npx's cache apart (${os})`, () => {
+      expect(installKind(ENTRIES[os].clone)).toBe('clone');
+      expect(installKind(ENTRIES[os].global)).toBe('global');
+      expect(installKind(ENTRIES[os].npx)).toBe('npx');
     });
-  });
+  }
 
-  it('carries no env block', () => {
-    expect(claudeDesktopSnippet('/opt/mcp/dist/index.js')).not.toContain('env');
-  });
-});
-
-describe('claudeCodeCommand', () => {
-  it('registers the server at user scope by default, the path quoted', () => {
-    expect(claudeCodeCommand(WINDOWS_ENTRY)).toBe(
-      `claude mcp add foundryvtt --scope user -- node "${WINDOWS_ENTRY}"`,
-    );
-  });
-
-  it('offers the local scope', () => {
-    expect(claudeCodeCommand('/opt/mcp/dist/index.js', 'local')).toBe(
-      'claude mcp add foundryvtt --scope local -- node "/opt/mcp/dist/index.js"',
-    );
+  it('does not mistake a folder merely containing "_npx" for the cache', () => {
+    expect(installKind('/home/me/my_npx_tests/foundryvtt-mcp/dist/index.js')).toBe('clone');
   });
 });
 
 describe('connectorCommand', () => {
-  it('runs the entry through node, quoted, after a plain clone', () => {
-    expect(connectorCommand(WINDOWS_ENTRY, WINDOWS_ENTRY)).toBe(`node "${WINDOWS_ENTRY}"`);
-    expect(connectorCommand(WINDOWS_ENTRY, undefined)).toBe(`node "${WINDOWS_ENTRY}"`);
+  for (const os of ['windows', 'posix'] as const) {
+    it(`runs the entry through node, quoted, from a clone (${os})`, () => {
+      expect(connectorCommand(ENTRIES[os].clone)).toBe(`node "${ENTRIES[os].clone}"`);
+    });
+
+    it(`uses the package command for a global install (${os})`, () => {
+      expect(connectorCommand(ENTRIES[os].global)).toBe('foundryvtt-mcp');
+    });
+
+    it(`runs the package through npx from npx's cache (${os})`, () => {
+      expect(connectorCommand(ENTRIES[os].npx)).toBe(`npx ${packageName()}`);
+    });
+  }
+});
+
+describe('claudeDesktopSnippet', () => {
+  it('is valid JSON with the absolute paths of Node and of the entry, intact', () => {
+    const entry = ENTRIES.windows.global;
+    const text = claudeDesktopSnippet(WINDOWS_NODE, entry);
+    expect(text).toContain('C:\\\\Program Files\\\\nodejs\\\\node.exe');
+    expect(JSON.parse(text)).toEqual({
+      mcpServers: { foundryvtt: { command: WINDOWS_NODE, args: [entry] } },
+    });
   });
 
-  it('uses the package command when started by that name', () => {
-    expect(
-      connectorCommand(
-        '/usr/lib/node_modules/foundryvtt-mcp/dist/index.js',
-        '/usr/local/bin/foundryvtt-mcp',
-      ),
-    ).toBe('foundryvtt-mcp');
+  it('carries no env block', () => {
+    expect(claudeDesktopSnippet(POSIX_NODE, ENTRIES.posix.clone)).not.toContain('env');
+  });
+});
+
+describe('claudeCodeCommand', () => {
+  it('registers the server at user scope by default, both paths quoted', () => {
+    expect(claudeCodeCommand(WINDOWS_NODE, ENTRIES.windows.clone)).toBe(
+      `claude mcp add foundryvtt --scope user -- "${WINDOWS_NODE}" "${ENTRIES.windows.clone}"`,
+    );
+  });
+
+  it('offers the local scope', () => {
+    expect(claudeCodeCommand(POSIX_NODE, ENTRIES.posix.global, 'local')).toBe(
+      `claude mcp add foundryvtt --scope local -- "${POSIX_NODE}" "${ENTRIES.posix.global}"`,
+    );
   });
 });

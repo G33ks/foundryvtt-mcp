@@ -5,11 +5,17 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ResolvedSettings, SettingName, SettingSource } from '../../config/sources.js';
 import { KNOWN_SETTINGS } from '../../config/sources.js';
+import { packageName } from '../../shared/version.js';
 import type { Verdict, WorldSnapshot } from '../checks.js';
 import { type InitDeps, runInit } from '../init.js';
 import { PromptCancelled, type Prompter } from '../prompt.js';
 
 const ENTRY = 'C:\\Users\\me\\foundryvtt-mcp\\dist\\index.js';
+const NODE = 'C:\\Program Files\\nodejs\\node.exe';
+const GLOBAL_ENTRY =
+  'C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@g33ks\\foundryvtt-mcp\\dist\\index.js';
+const NPX_ENTRY =
+  'C:\\Users\\me\\AppData\\Local\\npm-cache\\_npx\\4f3a2b1c\\node_modules\\@g33ks\\foundryvtt-mcp\\dist\\index.js';
 const FILE = 'C:\\Users\\me\\AppData\\Local\\foundryvtt-mcp\\config.env';
 const PASSWORD = "S3cr#t'p`w long";
 const OLD_PASSWORD = 'old-secret-value';
@@ -116,6 +122,7 @@ function harness(options: {
     prompter,
     deps: {
       prompter,
+      node: NODE,
       print: (line) => output.push(line),
       resolve: () => settings(options.file ?? null, options.env),
       readFile: () => ({ ...(options.file ?? {}) }),
@@ -165,8 +172,11 @@ describe('init — new installation', () => {
     expect(out).toContain(FILE);
     expect(out).toContain('Assistant GM');
     expect(out).toContain('"C:\\\\Users\\\\me\\\\foundryvtt-mcp\\\\dist\\\\index.js"');
-    expect(out).toContain(`claude mcp add foundryvtt --scope user -- node "${ENTRY}"`);
-    expect(out).toContain(`claude mcp add foundryvtt --scope local -- node "${ENTRY}"`);
+    expect(out).toContain(`claude mcp add foundryvtt --scope user -- "${NODE}" "${ENTRY}"`);
+    expect(out).toContain(`claude mcp add foundryvtt --scope local -- "${NODE}" "${ENTRY}"`);
+    expect(out).toContain('"command": "C:\\\\Program Files\\\\nodejs\\\\node.exe"');
+    expect(out).toContain(`Both name this Node.js: ${NODE}.`);
+    expect(out).toContain(`run \`node "${ENTRY}" init\` again`);
     expect(out).toContain('Settings → Developer → Edit Config');
     expect(out).not.toContain(PASSWORD);
   });
@@ -418,6 +428,14 @@ describe('init --check', () => {
     expect(out).not.toContain(OLD_PASSWORD);
   });
 
+  it("checks normally from npx's cache", async () => {
+    const h = harness({ file: VALUES, tty: false });
+    expect(await runInit(['--check'], NPX_ENTRY, h.deps)).toBe(0);
+    expect(h.write).not.toHaveBeenCalled();
+    expect(text(h)).toContain('All checks passed.');
+    expect(text(h)).not.toContain("npx's cache");
+  });
+
   it('fails on a missing module, with the install steps but no Enter prompt', async () => {
     const h = harness({ file: VALUES, logins: [{ role: 3, modules: [] }] });
     expect(await runInit(['--check'], ENTRY, h.deps)).toBe(1);
@@ -481,5 +499,43 @@ describe('init — the commands it prints', () => {
     });
     await runInit([], ENTRY, { ...h.deps, command: 'foundryvtt-mcp' });
     expect(text(h)).toContain('To check it again later: foundryvtt-mcp init --check');
+  });
+
+  it('uses the package command and the installed paths for a global install', async () => {
+    const h = harness({
+      file: null,
+      script: {
+        asks: ['foundry.example.com', 'mcp-api'],
+        secrets: [PASSWORD],
+        confirms: [undefined],
+      },
+    });
+    expect(await runInit([], GLOBAL_ENTRY, h.deps)).toBe(0);
+    const out = text(h);
+    expect(out).toContain(`claude mcp add foundryvtt --scope user -- "${NODE}" "${GLOBAL_ENTRY}"`);
+    expect(out).toContain('run `foundryvtt-mcp init` again');
+    expect(out).toContain('To check it again later: foundryvtt-mcp init --check');
+  });
+
+  it("prints no client entry from npx's cache, and says how to install instead", async () => {
+    const h = harness({
+      file: null,
+      script: {
+        asks: ['foundry.example.com', 'mcp-api'],
+        secrets: [PASSWORD],
+        confirms: [undefined],
+      },
+    });
+    expect(await runInit([], NPX_ENTRY, h.deps)).toBe(0);
+    const out = text(h);
+    // The configuration is still written.
+    expect(h.write).toHaveBeenCalledTimes(1);
+    expect(out).not.toContain('mcpServers');
+    expect(out).not.toContain('claude mcp add');
+    expect(out).toContain("No client entry printed: this connector runs from npx's cache,");
+    expect(out).toContain(NPX_ENTRY);
+    expect(out).toContain(`  npm install -g ${packageName()}`);
+    expect(out).toContain('  foundryvtt-mcp init');
+    expect(out).toContain(`To check it again later: npx ${packageName()} init --check`);
   });
 });

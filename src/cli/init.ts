@@ -13,6 +13,7 @@
 import { type ResolvedSettings, readConfigFile, resolveSettings } from '../config/sources.js';
 import type { BrowserChoice } from '../foundry/browser-detect.js';
 import { IDENTITY_SETTINGS } from '../shared/config-hash.js';
+import { packageName } from '../shared/version.js';
 import {
   checkBrowser,
   describeLoginError,
@@ -26,13 +27,20 @@ import {
 } from './checks.js';
 import { quoteValue, UnwritableValueError, type WriteResult, writeConfig } from './config-file.js';
 import { PromptCancelled, type Prompter, terminalProblem, terminalPrompter } from './prompt.js';
-import { claudeCodeCommand, claudeDesktopSnippet, connectorCommand } from './snippets.js';
+import {
+  claudeCodeCommand,
+  claudeDesktopSnippet,
+  connectorCommand,
+  installKind,
+} from './snippets.js';
 
 export interface InitDeps {
   prompter: Prompter;
   print: (line: string) => void;
   /** Absolute path of `dist/index.js`, for the client snippets. */
   entry: string;
+  /** Absolute path of the Node.js running `init` (`process.execPath`), for the client snippets. */
+  node: string;
   /** How to run the connector from a terminal, in the commands `init` prints. */
   command: string;
   resolve: () => ResolvedSettings;
@@ -75,6 +83,19 @@ function writeAdvice(command: string): string[] {
     '(actors, journals, scenes, tokens, combat…) in the world. With "no", it can only read.',
     'To change your mind later: edit FOUNDRY_WRITE_ENABLED in the configuration file, then run',
     `\`${command} stop\` so the shared process restarts with it.`,
+  ];
+}
+
+/** Why `init` prints no client entry when it runs from npx's cache, and what to do. */
+function npxAdvice(entry: string): string[] {
+  return [
+    "No client entry printed: this connector runs from npx's cache,",
+    `  ${entry}`,
+    'which npm replaces or deletes when it updates or cleans that cache. Install it once instead:',
+    `  npm install -g ${packageName()}`,
+    'then run:',
+    '  foundryvtt-mcp init',
+    'to get the Claude desktop and Claude Code entries. The configuration written above is kept.',
   ];
 }
 
@@ -418,15 +439,25 @@ async function runInteractive(deps: InitDeps): Promise<number> {
   print('');
 
   // 8. Snippets
-  print('Claude desktop — Settings → Developer → Edit Config opens claude_desktop_config.json.');
-  print('Add this entry (merge it into "mcpServers" if the file already has one):');
-  print(claudeDesktopSnippet(deps.entry));
-  print('Then quit Claude desktop completely and start it again.');
-  print('');
-  print('Claude Code — register the connector for all your projects:');
-  print(`  ${claudeCodeCommand(deps.entry)}`);
-  print('or for the current project only, on this machine:');
-  print(`  ${claudeCodeCommand(deps.entry, 'local')}`);
+  if (installKind(deps.entry) === 'npx') {
+    for (const line of npxAdvice(deps.entry)) {
+      print(line);
+    }
+  } else {
+    print('Claude desktop — Settings → Developer → Edit Config opens claude_desktop_config.json.');
+    print('Add this entry (merge it into "mcpServers" if the file already has one):');
+    print(claudeDesktopSnippet(deps.node, deps.entry));
+    print('Then quit Claude desktop completely and start it again.');
+    print('');
+    print('Claude Code — register the connector for all your projects:');
+    print(`  ${claudeCodeCommand(deps.node, deps.entry)}`);
+    print('or for the current project only, on this machine:');
+    print(`  ${claudeCodeCommand(deps.node, deps.entry, 'local')}`);
+    print('');
+    print(
+      `Both name this Node.js: ${deps.node}. After changing or updating Node.js (nvm, installer), run \`${deps.command} init\` again for new ones.`,
+    );
+  }
   print('');
 
   // 9. Shared process
@@ -456,11 +487,12 @@ async function defaultDeps(entry: string): Promise<InitDeps> {
   const { isEndpointAlive } = await import('../shared/ipc-server.js');
   const { resolveSharedPaths } = await import('../shared/paths.js');
   const { runStop } = await import('../shared/control.js');
-  const command = connectorCommand(entry, process.argv[1]);
+  const command = connectorCommand(entry);
   return {
     prompter: terminalPrompter(),
     print: (line) => process.stdout.write(`${line}\n`),
     entry,
+    node: process.execPath,
     command,
     resolve: () => resolveSettings(),
     readFile: (file) => readConfigFile(file).values,
