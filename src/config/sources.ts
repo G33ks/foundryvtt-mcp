@@ -55,7 +55,6 @@ export const KNOWN_SETTINGS = [
   'LOG_LEVEL',
   'NODE_ENV',
   'MCP_SERVER_NAME',
-  'MCP_SERVER_VERSION',
 ] as const;
 export type SettingName = (typeof KNOWN_SETTINGS)[number];
 

@@ -18,6 +18,7 @@ import {
   type ReadResourceResult,
 } from '@modelcontextprotocol/sdk/types.js';
 import { tryGetConfig } from './config/index.js';
+import { packageVersion } from './shared/version.js';
 import { getAllTools } from './tools/definitions.js';
 import { getAllResources } from './tools/resources.js';
 import { logger } from './utils/logger.js';
@@ -34,7 +35,7 @@ export function createMcpServer(backend: McpBackend): Server {
   const server = new Server(
     {
       name: 'config' in loaded ? loaded.config.serverName : 'foundryvtt-mcp',
-      version: 'config' in loaded ? loaded.config.serverVersion : '0.1.0',
+      version: packageVersion(),
     },
     {
       capabilities: {

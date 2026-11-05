@@ -6,7 +6,6 @@ const HERMETIC = { FOUNDRY_MCP_CONFIG: '__vitest_no_config_file__.env' };
 // Mock process.env before importing the config
 const mockEnv = {
   MCP_SERVER_NAME: 'test-server',
-  MCP_SERVER_VERSION: '1.0.0',
   LOG_LEVEL: 'debug',
   NODE_ENV: 'test',
   FOUNDRY_URL: 'http://localhost:30000',
@@ -55,7 +54,6 @@ describe('Config', () => {
       resetConfig(); // Reset any cached config
 
       expect(config.serverName).toBe('test-server');
-      expect(config.serverVersion).toBe('1.0.0');
       expect(config.logLevel).toBe('debug');
       expect(config.nodeEnv).toBe('test');
       expect(config.foundry.url).toBe('http://localhost:30000');
@@ -78,7 +76,6 @@ describe('Config', () => {
       resetConfig(); // Reset any cached config
 
       expect(config.serverName).toBe('foundryvtt-mcp');
-      expect(config.serverVersion).toBe('0.1.0');
       expect(config.logLevel).toBe('info');
       expect(config.nodeEnv).toBe('development');
       expect(config.foundry.socketPath).toBe('/socket.io/');
