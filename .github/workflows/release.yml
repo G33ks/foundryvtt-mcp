@@ -1,0 +1,233 @@
+name: Release
+
+# Releases the connector on its own tags: vX.Y.Z or vX.Y.Z-<prerelease>, set
+# by hand on a commit of main whose package.json has that version and whose
+# CHANGELOG.md has a "## X.Y.Z" section.
+#
+# 1. build: checks the tag, runs the whole test suite and the smoke tests,
+#    packs the tarball, and keeps it as an artifact with its SHA-256.
+# 2. publish: npm trusted publishing (OIDC, no token; provenance is added by
+#    npm), only when the repository variable NPM_TRUSTED_PUBLISHING is "true".
+#    Otherwise skipped, as the run summary says: the tarball is then published
+#    by hand from the artifact.
+# 3. release: the GitHub release, with the CHANGELOG section as notes and the
+#    tarball attached, marked Latest (a pre-release is marked as such instead).
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      version: ${{ steps.tag.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
+      tarball: ${{ steps.pack.outputs.tarball }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Check the tag against package.json and main
+        id: tag
+        run: |
+          version=$(node -p "require('./package.json').version")
+          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match package.json version $version (expected v$version)"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::Tag $GITHUB_REF_NAME points at $GITHUB_SHA, which is not on main"
+            exit 1
+          fi
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - name: Extract the release notes from CHANGELOG.md
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          mkdir -p build/release
+          awk -v heading="## $VERSION" '
+            $0 == heading || index($0, heading " ") == 1 { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > build/release/notes.md
+          if ! grep -q '[^[:space:]]' build/release/notes.md; then
+            echo "::error::CHANGELOG.md has no \"## $VERSION\" section, or it is empty"
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build from a clean dist/
+        run: |
+          npm run clean
+          npm run build
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+        env:
+          NODE_ENV: test
+          FOUNDRY_URL: http://localhost:30000
+          LOG_LEVEL: error
+
+      - name: Startup smoke test
+        run: npm run smoke
+
+      - name: Dotenv load-order smoke test
+        run: npm run smoke:dotenv
+
+      - name: Pack smoke test
+        run: npm run smoke:pack
+
+      - name: Pack the tarball
+        id: pack
+        run: |
+          tarball=$(npm pack --pack-destination build/release --json | node -e '
+            let data = "";
+            process.stdin.on("data", (chunk) => (data += chunk)).on("end", () => {
+              const info = JSON.parse(data);
+              const entry = Array.isArray(info) ? info[0] : Object.values(info)[0];
+              process.stdout.write(entry.filename);
+            });
+          ')
+          cd build/release
+          sha256sum "$tarball" > "$tarball.sha256"
+          cat "$tarball.sha256"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release
+          path: build/release/
+          if-no-files-found: error
+
+      - name: Summary
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          TRUSTED: ${{ vars.NPM_TRUSTED_PUBLISHING }}
+        run: |
+          {
+            echo "## @g33ks/foundryvtt-mcp $VERSION"
+            echo
+            echo "Tarball \`$TARBALL\`, SHA-256 \`$(cut -d' ' -f1 "build/release/$TARBALL.sha256")\` (artifact \`release\`)."
+            echo
+            if [ "$TRUSTED" = "true" ]; then
+              echo "npm: published by the \`publish\` job (trusted publishing)."
+            else
+              echo "**npm: publication SKIPPED** — the repository variable NPM_TRUSTED_PUBLISHING is not \"true\"."
+              echo "Publish the tarball from the artifact by hand: \`npm publish $TARBALL --access public\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$TRUSTED" != "true" ]; then
+            echo "::notice::npm publication skipped: NPM_TRUSTED_PUBLISHING is not \"true\""
+          fi
+
+  publish:
+    needs: build
+    if: vars.NPM_TRUSTED_PUBLISHING == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Trusted publishing needs npm 11.5.1 or later.
+      - name: Check npm
+        run: |
+          npm --version
+          if ! node -e 'const [a,b,c]=process.argv[1].split(".").map(Number);process.exit(a>11||(a===11&&(b>5||(b===5&&c>=1)))?0:1)' "$(npm --version)"; then
+            npm install -g npm@11
+            npm --version
+          fi
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+          path: release
+
+      - name: Publish to npm
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+          TARBALL: ${{ needs.build.outputs.tarball }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+        run: |
+          cd release
+          sha256sum --check "$TARBALL.sha256"
+          if npm view "@g33ks/foundryvtt-mcp@$VERSION" version >/dev/null 2>&1; then
+            echo "::notice::@g33ks/foundryvtt-mcp@$VERSION is already on npm: not published again"
+            exit 0
+          fi
+          flags=(--access public)
+          if [ "$PRERELEASE" = "true" ]; then
+            flags+=(--tag next)
+          fi
+          npm publish "$TARBALL" "${flags[@]}"
+
+  release:
+    needs: [build, publish]
+    # Also when publish was skipped, never when it failed.
+    if: ${{ !cancelled() && needs.build.result == 'success' && needs.publish.result != 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: release
+          path: release
+
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.build.outputs.version }}
+          TARBALL: ${{ needs.build.outputs.tarball }}
+          PRERELEASE: ${{ needs.build.outputs.prerelease }}
+        run: |
+          cd release
+          sha256sum --check "$TARBALL.sha256"
+          flags=(--latest)
+          if [ "$PRERELEASE" = "true" ]; then
+            flags=(--prerelease --latest=false)
+          fi
+          gh release create "$TAG" \
+            "$TARBALL" \
+            "$TARBALL.sha256" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "foundryvtt-mcp $VERSION" \
+            --notes-file notes.md \
+            "${flags[@]}"
