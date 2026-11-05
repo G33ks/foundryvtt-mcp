@@ -88,8 +88,7 @@ Seven steps, in this order. [SETUP_GUIDE.md](SETUP_GUIDE.md) gives the details o
 
 ### 1. Check the prerequisites
 
-- **Node.js 22 or newer** (current LTS recommended) — `node --version` shows yours. Download it from [nodejs.org](https://nodejs.org/).
-- **Git**, to download the server.
+- **Node.js 22 or newer** (current LTS recommended), with npm — `node --version` shows yours. Download it from [nodejs.org](https://nodejs.org/).
 - **FoundryVTT v13 or v14**, with a world you can open as its Gamemaster. Foundry may run on this computer or on a server.
 - **A Chromium-based browser** on this computer: Google Chrome, Microsoft Edge, Brave, Vivaldi or Chromium. The server finds it by itself; you will never see it open.
 - **Claude desktop** or **Claude Code**.
@@ -116,28 +115,30 @@ Launch your world and log in as its Gamemaster.
 
 This one account is all the server needs. Prefer **Assistant GM** to **Gamemaster**: as a Gamemaster, the server's invisible session could take the *active GM* role from you — see [SETUP_GUIDE.md](SETUP_GUIDE.md#3-in-the-world-create-a-dedicated-user-and-enable-the-module).
 
-### 4. Download and build the server
+### 4. Install the server
 
-In a terminal (PowerShell, Terminal on macOS, any shell on Linux), in the folder where you want the server:
+In a terminal (PowerShell, Terminal on macOS, any shell on Linux):
 
 ```bash
-git clone https://github.com/G33ks/foundryvtt-mcp.git
-cd foundryvtt-mcp
-npm ci
-npm run build
+npm install -g @g33ks/foundryvtt-mcp
+foundryvtt-mcp --version
 ```
 
-In Windows PowerShell, if `npm` is refused with *running scripts is disabled on this system*, type `npm.cmd` instead of `npm` (`npm.cmd ci`, `npm.cmd run build`). `npm ci` may print warnings (vulnerability counts, a blocked install script); they do not stop the install. What matters is that `npm run build` ends without an error.
+In Windows PowerShell, if `npm` is refused with *running scripts is disabled on this system*, type `npm.cmd` instead of `npm`. `npm` may print warnings (a blocked install script, funding messages); they do not stop the install. `foundryvtt-mcp --version` prints the installed version.
 
-Keep this terminal open in the `foundryvtt-mcp` folder for the next steps.
+- **The package is `@g33ks/foundryvtt-mcp`.** The unscoped `foundryvtt-mcp` package on npm is the original project's, no longer this one.
+- **Install it globally** rather than running it through `npx`: npx keeps packages in a cache that npm replaces or deletes, so `init` prints no client entry from there.
+- **To work on the code**, from a clone: see [CONTRIBUTING.md](CONTRIBUTING.md); in the commands of this guide, use `node dist/index.js` (from the clone) instead of `foundryvtt-mcp`.
 
 ### 5. Run `init`
 
 ```bash
-node dist/index.js init
+foundryvtt-mcp init
 ```
 
 It asks for Foundry's address (the URL you open Foundry with in your browser, such as `http://localhost:30000` or `https://foundry.example.com`), the account from step 3 and whether the assistant may change the game (no by default), checking each answer against your Foundry: world running, account role, module enabled, browser. Then it writes the [configuration file](#configuration-file), the only place your settings live, and prints what to give your AI client. Details: [SETUP_GUIDE.md](SETUP_GUIDE.md#5-run-init).
+
+The client entries it prints name two absolute paths: the Node.js that ran `init` and the installed server. **After changing or updating Node.js** (nvm, a new installer), run `foundryvtt-mcp init` again and replace the entries.
 
 ### 6. Add the server to Claude
 
@@ -150,12 +151,25 @@ No `env` block is needed: the settings are in the configuration file.
 
 ### 7. Check that it works
 
-1. In the terminal: `node dist/index.js init --check`. It should end with `All checks passed.`; a ✖ line says what to fix.
+1. In the terminal: `foundryvtt-mcp init --check`. It should end with `All checks passed.`; a ✖ line says what to fix.
 2. In Claude, ask: *"Show the FoundryVTT connector's health status."* Claude calls `get_health_status` (allow the tool when Claude asks), which should show the FoundryVTT connection ✅, the module bridge ✅ connected with an authenticated module, the headless GM session logged in with its browser, and the configuration file the settings come from.
 
 The first call can take a few seconds while the server connects. If something is ❌, the message says why; see [TROUBLESHOOTING.md](TROUBLESHOOTING.md).
 
 > **Playing as a human while the AI GMs?** No extra setup needed. Log into your own Foundry client as a **Player** — or as your own **Gamemaster**: with `mcp-api` an Assistant GM, you stay the active GM. The server opens its own invisible background browser session with `mcp-api`'s session for GM-tier canvas access (screenshots, dice rolls, pausing, uploads); only `mcp-api` appears in the player list for it. The module bridge requires this session: a GM tab you open yourself never connects to it (see [Module Bridge Security](#module-bridge-security)).
+
+### Updating
+
+1. Close your AI clients (quit Claude desktop completely).
+2. In a terminal:
+
+   ```bash
+   npm install -g @g33ks/foundryvtt-mcp@latest
+   foundryvtt-mcp stop
+   ```
+
+   `stop` ends the shared process still running the previous version; `foundryvtt-mcp --version` shows the new one.
+3. Start your clients again. Their entries stay valid: the installed server keeps its path. The companion module updates separately, from Foundry's Setup screen ([SETUP_GUIDE.md](SETUP_GUIDE.md#2-install-companion-module-foundryvtt-mcp-bridge)).
 
 ---
 
@@ -172,7 +186,7 @@ Every MCP client on the machine shares **one configuration file**, so a client e
 
 `FOUNDRY_MCP_CONFIG` names another file and wins over everything; with `FOUNDRY_MCP_STATE_DIR` set, the file is `<that directory>/config.env` (a fully isolated setup, for tests).
 
-**The easy way** is `node dist/index.js init` ([Quick Start](#5-run-init), step 5): it writes the file after checking each answer against your FoundryVTT. `node dist/index.js init --check` re-runs the checks on the existing file, without asking or writing anything.
+**The easy way** is `foundryvtt-mcp init` ([Quick Start](#5-run-init), step 5): it writes the file after checking each answer against your FoundryVTT. `foundryvtt-mcp init --check` re-runs the checks on the existing file, without asking or writing anything.
 
 By hand: one `KEY=value` per line, with exactly the names of the variables below; `#` starts a comment:
 
@@ -186,8 +200,8 @@ FOUNDRY_MODULE_BRIDGE_ENABLED=true
 
 - **Quote values**: put each value between `'…'`; if it contains an apostrophe, between `` `…` ``. Unquoted, a `#` cuts the value (the rest is a comment) and surrounding spaces are dropped. Nothing is escaped inside quotes.
 - **Passwords** are stored in clear: the file is for your user only. On macOS and Linux the server warns when others may read it (`chmod 600` it). They never appear in logs or in `status` (shown as `<set>`).
-- **Priority, setting by setting**: an environment variable (the client's `env` block, or the system) wins, then a `.env` in the working directory (for development), then the file, then the default. `node dist/index.js status` shows where each setting comes from.
-- **After editing the file**, run `node dist/index.js stop`: the next call starts the shared process with the new settings. A client whose relay was waiting for a configuration needs nothing: its next call reads the file.
+- **Priority, setting by setting**: an environment variable (the client's `env` block, or the system) wins, then a `.env` in the working directory (for development), then the file, then the default. `foundryvtt-mcp status` shows where each setting comes from.
+- **After editing the file**, run `foundryvtt-mcp stop`: the next call starts the shared process with the new settings. A client whose relay was waiting for a configuration needs nothing: its next call reads the file.
 - **The file is authoritative**: a client that still passes its own `env` block is served with the configuration the shared process runs, and its first tool result says which of its settings are ignored and where they come from (see [Shared Process Mode](#shared-process-mode)).
 - **No configuration at all**: the server still starts and lists its tools; each call says where the file is expected and what it needs (`FOUNDRY_URL`, `FOUNDRY_USERNAME`, `FOUNDRY_PASSWORD`) — see [SETUP_GUIDE.md](SETUP_GUIDE.md#the-configuration-file).
 
@@ -229,17 +243,17 @@ In a JSON `env` block instead, Windows backslashes must be doubled; forward slas
 
 ### Shared Process Mode
 
-By default `node dist/index.js` is a **relay**: it answers `initialize` and `tools/list` immediately and forwards `tools/call` and `resources/read` to a **shared process** (`node dist/index.js daemon`) that holds the FoundryVTT connection, the module bridge and the headless GM session.
+By default `foundryvtt-mcp` is a **relay**: it answers `initialize` and `tools/list` immediately and forwards `tools/call` and `resources/read` to a **shared process** (`foundryvtt-mcp daemon`) that holds the FoundryVTT connection, the module bridge and the headless GM session.
 
 - **Automatic start**: the first relay that finds no shared process starts one in the background (detached, so it survives the client closing or restarting the relay) and waits for it — up to ~30 s. Relays started at the same time end up sharing a single process. Relays connect as soon as they start, so the FoundryVTT connection and the GM session are ready before the first tool call.
-- **Lifetime**: the shared process stays up while at least one relay is connected, however long it goes without calls. It exits `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` (5 by default) after the last client closes, on `stop`, when a relay from a newer build connects (a rebuild counts), or when a relay whose settings match a changed configuration file connects — it then lets running calls finish and the relay starts a fresh one. Closing and reopening a client within that delay keeps the same process and the same FoundryVTT connection. A call that was already running always completes, even if the client that asked for it went away.
+- **Lifetime**: the shared process stays up while at least one relay is connected, however long it goes without calls. It exits `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` (5 by default) after the last client closes, on `stop`, when a relay of a newer version connects (or, for the same version, of a later install or rebuild), or when a relay whose settings match a changed configuration file connects — it then lets running calls finish and the relay starts a fresh one. Closing and reopening a client within that delay keeps the same process and the same FoundryVTT connection. A call that was already running always completes, even if the client that asked for it went away.
 - **FoundryVTT not reachable yet**: the shared process stays up, returns the connection error to the call, and retries on the next call — start FoundryVTT before or after your AI client, in any order. With FoundryVTT up but no world launched, it retries by itself in the background (every 5 s at first, at most every 2 min) and connects as soon as the world is launched.
 - **Writes**: tools that change game state run one at a time, in arrival order; reads run in parallel.
 - **Commands**:
 
   ```bash
-  node dist/index.js status   # pid, version, uptime, FoundryVTT / bridge / GM session state, relays, log path
-  node dist/index.js stop     # finish running calls, then stop the shared process
+  foundryvtt-mcp status   # pid, version, uptime, FoundryVTT / bridge / GM session state, relays, log path
+  foundryvtt-mcp stop     # finish running calls, then stop the shared process
   ```
 
   They only read the state directory, so they work from any terminal — no FoundryVTT configuration needed.
@@ -259,7 +273,16 @@ The bridge drives a GM session, and its loopback port is reachable by every loca
 - **Mutual handshake (protocol v1)**: the server sends a random challenge; the module answers with an HMAC-SHA256 proof, and the server answers with its own proof, which the module checks before obeying. Both are keyed by a random secret the shared process generates at startup and keeps in memory only — never written to disk, logged or returned by a tool. The headless GM session exposes a `window.foundryMcpBridge` function to its page (a Playwright binding) that computes the proofs, so the secret never enters the page or the WebSocket. It disappears with the shared process.
 - **Until authenticated**, a connection receives no command, nothing it sends is processed, and it cannot displace the connected module. It is closed with `4401` (wrong proof, unknown protocol, any other message), `4408` (no answer within 5 s — typically a module older than 0.5.0, logged as such) or `1009` (a message over 4 KiB). Refusals are logged as warnings (rate-limited); `status` and `get_health_status` show whether an authenticated module is connected.
 - **No manual GM tab**: a GM tab opened by hand has no `window.foundryMcpBridge`, so the module logs `no foundryvtt-mcp credentials in this browser, bridge disabled` to the browser console and stays silent. `FOUNDRY_HEADLESS_GM_ENABLED=false` therefore disables the bridge in practice.
-- **Check it**: with the connector running and the module connected, `npm run check:bridge-security` tries four forged connections and confirms each is refused while the module stays connected.
+- **Check it**: with the connector running and the module connected, `npm run check:bridge-security`, from a clone, tries four forged connections and confirms each is refused while the module stays connected.
+
+### Client entries
+
+A client entry starts Node.js on the installed server, both by their absolute path: MCP clients may start servers with a reduced `PATH` and an undefined working directory. `foundryvtt-mcp init` prints the entries with the right paths. By hand:
+
+- `<NODE>`: what `node -p process.execPath` prints, such as `C:\Program Files\nodejs\node.exe` or `/usr/local/bin/node`;
+- `<ENTRY>`: what `npm root -g` prints, followed by `/@g33ks/foundryvtt-mcp/dist/index.js` — such as `C:\Users\you\AppData\Roaming\npm\node_modules\@g33ks\foundryvtt-mcp\dist\index.js`. From a clone, `<clone>/dist/index.js`.
+
+In JSON, double each Windows backslash, or write forward slashes. After changing or updating Node.js, `<NODE>` changes: run `foundryvtt-mcp init` again.
 
 ### Claude Desktop Configuration
 
@@ -269,8 +292,8 @@ With the settings in the [configuration file](#configuration-file), add to `clau
 {
   "mcpServers": {
     "foundryvtt": {
-      "command": "node",
-      "args": ["<PATH_TO_REPO>/dist/index.js"]
+      "command": "<NODE>",
+      "args": ["<ENTRY>"]
     }
   }
 }
@@ -278,15 +301,15 @@ With the settings in the [configuration file](#configuration-file), add to `clau
 
 ### Claude Code Configuration
 
-`claude mcp add foundryvtt --scope user -- node "<PATH_TO_REPO>/dist/index.js"` (all your projects; `--scope local` for the current project only), or in `~/.claude.json` (or a project's `.mcp.json`):
+`claude mcp add foundryvtt --scope user -- "<NODE>" "<ENTRY>"` (all your projects; `--scope local` for the current project only), or in `~/.claude.json` (or a project's `.mcp.json`):
 
 ```json
 {
   "mcpServers": {
     "foundryvtt": {
       "type": "stdio",
-      "command": "node",
-      "args": ["<PATH_TO_REPO>/dist/index.js"]
+      "command": "<NODE>",
+      "args": ["<ENTRY>"]
     }
   }
 }
@@ -303,8 +326,8 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
   "mcpServers": {
     "foundryvtt": {
       "type": "stdio",
-      "command": "node",
-      "args": ["<PATH_TO_REPO>/dist/index.js"],
+      "command": "<NODE>",
+      "args": ["<ENTRY>"],
       "timeout": 60000
     }
   }

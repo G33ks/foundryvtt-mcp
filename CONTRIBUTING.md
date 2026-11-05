@@ -23,6 +23,8 @@ npm ci          # exactly the locked versions; also installs the git hooks
 npm run build   # compiles to dist/
 ```
 
+The user guides name the installed command, `foundryvtt-mcp`; from the clone, run `node dist/index.js` instead (`node dist/index.js init`, `status`, `stop`, `--version`). `node dist/index.js init` prints client entries that start the clone's `dist/index.js`. Give every MCP client entries for one install only: relays of a clone and of an installed package would replace each other's shared process.
+
 [docs/guides/development.md](docs/guides/development.md) describes the project layout and the development commands in more detail.
 
 ## Checks before a pull request
@@ -65,7 +67,7 @@ Unit tests mock FoundryVTT; some changes also need a live world. Keep it safe:
 - **Use a disposable world** and a dedicated **Assistant GM** account for the connector, not your own GM account.
 - **Never test on a world you play in without a backup.** Write tools change documents for real.
 - **Use a temporary state directory**: set `FOUNDRY_MCP_STATE_DIR` to an empty folder. The test connector then has its own token, logs, pipe or socket, and configuration file.
-- **Stop your usual connector first**: `node dist/index.js stop`. The bridge port (31415) does not depend on the state directory, so two connectors would compete for it.
+- **Stop your usual connector first**: `node dist/index.js stop` (or `foundryvtt-mcp stop` for the installed package). The bridge port (31415) does not depend on the state directory, so two connectors would compete for it.
 - **Never run two connectors at once**, for the same reason.
 - `npm run check:bridge-security` checks the bridge's authentication against a running connector whose companion module is connected. It needs a live connector, so it does not run in CI: run it yourself after touching the bridge or the module.
 - `npm run test:integration:docker` runs the integration suite against a FoundryVTT container. It needs a FoundryVTT licence key in `.env.integration` (see `.env.integration.example`).
@@ -73,6 +75,16 @@ Unit tests mock FoundryVTT; some changes also need a live world. Keep it safe:
 ## The companion module
 
 The companion module lives in [`foundry-module/`](foundry-module/) (plain browser JavaScript, no build step). `src/foundry/__tests__/companion-transport.test.ts` runs its transport under Node against the real bridge.
+
+## Releases (maintainers)
+
+The server is published on npm as [`@g33ks/foundryvtt-mcp`](https://www.npmjs.com/package/@g33ks/foundryvtt-mcp), from tags set by hand:
+
+1. On a branch: set the version in `package.json` and `package-lock.json` (`npm version <x.y.z> --no-git-tag-version`), and turn `## Unreleased` in `CHANGELOG.md` into `## x.y.z — <date>`.
+2. Merge it into `main`, then tag that commit `vx.y.z` and push the tag.
+3. The `Release` workflow (`.github/workflows/release.yml`) checks that the tag matches `package.json` and is on `main`, runs the whole suite and the smoke tests, packs the tarball (kept as the `release` artifact with its SHA-256), publishes it to npm by trusted publishing when the repository variable `NPM_TRUSTED_PUBLISHING` is `true`, and creates the GitHub release with the CHANGELOG section as notes, marked Latest.
+
+The companion module has its own tags, `bridge-vx.y.z`, and its own workflow (`bridge-release.yml`).
 
 To try a change in Foundry, copy the folder into a test world's `Data/modules/foundryvtt-mcp-bridge` (see [Manual installation](foundry-module/README.md#manual-installation-advanced)), reload the world, then check the bridge with `status` and `npm run check:bridge-security`.
 

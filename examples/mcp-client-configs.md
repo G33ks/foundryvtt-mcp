@@ -2,7 +2,14 @@
 
 This document provides configuration examples for connecting various AI assistants to your FoundryVTT MCP Server.
 
-Every example assumes the settings are in the shared configuration file, written by `node dist/index.js init` (see the README's [Quick Start](../README.md#-quick-start)). A client entry then holds only the command: every MCP client on the machine reads the same file.
+Every example assumes the settings are in the shared configuration file, written by `foundryvtt-mcp init` (see the README's [Quick Start](../README.md#-quick-start)). A client entry then holds only the command: every MCP client on the machine reads the same file.
+
+The command is Node.js running the installed server, both by their absolute path (MCP clients may start servers with a reduced `PATH`):
+
+- `<NODE>`: what `node -p process.execPath` prints, such as `C:/Program Files/nodejs/node.exe` or `/usr/local/bin/node`;
+- `<ENTRY>`: what `npm root -g` prints, followed by `/@g33ks/foundryvtt-mcp/dist/index.js` (from a clone, `<clone>/dist/index.js`).
+
+`foundryvtt-mcp init` prints the Claude desktop and Claude Code entries with both paths filled in. After changing or updating Node.js, run it again.
 
 ## Claude Desktop
 
@@ -19,14 +26,14 @@ Every example assumes the settings are in the shared configuration file, written
 {
   "mcpServers": {
     "foundryvtt": {
-      "command": "node",
-      "args": ["/path/to/foundryvtt-mcp/dist/index.js"]
+      "command": "<NODE>",
+      "args": ["<ENTRY>"]
     }
   }
 }
 ```
 
-On Windows, write the path with forward slashes (`C:/Users/you/foundryvtt-mcp/dist/index.js`) or doubled backslashes; `init` prints the entry with the right path.
+On Windows, write the paths with forward slashes (`C:/Users/you/AppData/Roaming/npm/node_modules/@g33ks/foundryvtt-mcp/dist/index.js`) or doubled backslashes; `init` prints the entry with the right paths.
 
 > The server connects to FoundryVTT over **Socket.IO** with a world user
 > account (Assistant GM). The companion module **FoundryVTT MCP Bridge** adds
@@ -41,8 +48,8 @@ Settings can also be given in the entry itself:
 {
   "mcpServers": {
     "foundryvtt": {
-      "command": "node",
-      "args": ["/path/to/foundryvtt-mcp/dist/index.js"],
+      "command": "<NODE>",
+      "args": ["<ENTRY>"],
       "env": {
         "FOUNDRY_URL": "http://localhost:30000",
         "FOUNDRY_USERNAME": "mcp-api",
@@ -58,7 +65,7 @@ They win over the file for this client only, but one shared process serves every
 ## Claude Code
 
 ```bash
-claude mcp add foundryvtt --scope user -- node "/path/to/foundryvtt-mcp/dist/index.js"
+claude mcp add foundryvtt --scope user -- "<NODE>" "<ENTRY>"
 ```
 
 `--scope user` registers it for all your projects; `--scope local` for the current project only, on this machine. `claude mcp list` shows the entry.
@@ -70,9 +77,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 
 const transport = new StdioClientTransport({
-  command: 'node',
-  args: ['./dist/index.js'],
-  cwd: '/path/to/foundryvtt-mcp'
+  command: process.execPath,
+  args: ['<ENTRY>'],
 });
 
 const client = new Client({
@@ -133,9 +139,8 @@ from mcp.client.stdio import stdio_client
 
 async def main():
     server_params = StdioServerParameters(
-        command="node",
-        args=["./dist/index.js"],
-        cwd="/path/to/foundryvtt-mcp"
+        command="<NODE>",
+        args=["<ENTRY>"],
     )
 
     async with stdio_client(server_params) as (read, write):
@@ -195,17 +200,16 @@ The full list is in the README, [Environment Variables](../README.md#environment
 
 1. **Test the MCP server standalone**:
    ```bash
-   cd /path/to/foundryvtt-mcp
-   node dist/index.js init --check
+   foundryvtt-mcp init --check
    ```
 
 2. **Test the MCP client connection**: ask the assistant for the connector's health status (`get_health_status`).
 
 3. **Inspect the shared process**:
    ```bash
-   node dist/index.js status
+   foundryvtt-mcp status
    ```
-   For more detail, set `LOG_LEVEL='debug'` in the configuration file, run `node dist/index.js stop`, and read `daemon.log` (its path is in `status`).
+   For more detail, set `LOG_LEVEL='debug'` in the configuration file, run `foundryvtt-mcp stop`, and read `daemon.log` (its path is in `status`).
 
 ## Example Prompts for AI Assistants
 
@@ -234,14 +238,14 @@ Once connected, try these prompts with your AI assistant:
 ### Common Issues
 
 1. **"Server not found" or connection errors**
-   - Check the path to `dist/index.js` is correct
-   - Ensure the server was built: `npm run build`
+   - Check the paths of Node.js and of `dist/index.js` in the entry (run `foundryvtt-mcp init` again to print them)
+   - Check the server is installed: `foundryvtt-mcp --version`
    - Verify FoundryVTT is running
 
 2. **"Tool not available" errors**
    - Check if FoundryVTT is accessible
-   - Run `node dist/index.js status`: it shows where each setting comes from
-   - Try `node dist/index.js init --check` to diagnose
+   - Run `foundryvtt-mcp status`: it shows where each setting comes from
+   - Try `foundryvtt-mcp init --check` to diagnose
 
 3. **"Empty results" or limited functionality**
    - Ensure a **world is loaded** in FoundryVTT (the server needs an active world, not the setup screen)
@@ -255,7 +259,7 @@ Once connected, try these prompts with your AI assistant:
 
 ### Getting Debug Information
 
-Add `LOG_LEVEL='debug'` to the configuration file, then run `node dist/index.js stop`: the shared process started by the next call logs in detail to `daemon.log`. See [TROUBLESHOOTING.md](../TROUBLESHOOTING.md).
+Add `LOG_LEVEL='debug'` to the configuration file, then run `foundryvtt-mcp stop`: the shared process started by the next call logs in detail to `daemon.log`. See [TROUBLESHOOTING.md](../TROUBLESHOOTING.md).
 
 ## Performance Tips
 

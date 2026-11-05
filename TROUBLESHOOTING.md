@@ -2,11 +2,13 @@
 
 This guide helps you diagnose and resolve common issues with the FoundryVTT MCP server.
 
+The commands use `foundryvtt-mcp`, the command of the installed package (`npm install -g @g33ks/foundryvtt-mcp`). From a clone, type `node dist/index.js` in the clone instead.
+
 ## Quick Diagnostics
 
 ### `init --check` (start here)
 ```bash
-node dist/index.js init --check     # or: foundryvtt-mcp init --check
+foundryvtt-mcp init --check
 ```
 Checks the configuration the connector would use, step by step, without asking
 anything or writing anything — safe while the shared process runs:
@@ -17,16 +19,16 @@ anything or writing anything — safe while the shared process runs:
 4. a Chromium-based browser starts headless for the invisible GM session.
 
 Each failed step says what to fix. To write or fix the configuration
-interactively, run `node dist/index.js init` (see [SETUP_GUIDE.md](SETUP_GUIDE.md)).
+interactively, run `foundryvtt-mcp init` (see [SETUP_GUIDE.md](SETUP_GUIDE.md)).
 
 ### Health Check
 ```bash
-node dist/index.js status            # the shared process: connection, bridge, browser
+foundryvtt-mcp status            # the shared process: connection, bridge, browser
 # In your AI client, run: get_health_status
 ```
 
 ### Check Current Status
-The shared process runs in the background, so its startup messages go to `daemon.log`, not to a terminal: `node dist/index.js status` prints its path. Look there for:
+The shared process runs in the background, so its startup messages go to `daemon.log`, not to a terminal: `foundryvtt-mcp status` prints its path. Look there for:
 - `Connected to FoundryVTT via Socket.IO`
 - `Module bridge listening on ws://localhost:31415 (loopback only)`
 - `Headless GM session logged in — sharing the connector's session (mcp-api)`
@@ -34,13 +36,32 @@ The shared process runs in the background, so its startup messages go to `daemon
 
 ## Common Issues
 
+### Installation
+
+#### `foundryvtt-mcp` is not recognized after `npm install -g`
+npm's global folder is not on your `PATH`. `npm prefix -g` prints it (on Windows the command sits in that folder, usually `%APPDATA%\npm`; elsewhere in its `bin/` subfolder). Add it to `PATH` and open a new terminal. The MCP clients do not depend on it: their entries name Node.js and the server by absolute path.
+
+#### The wrong package is installed
+`npm ls -g --depth=0` lists `foundryvtt-mcp` without `@g33ks/`, or `foundryvtt-mcp --version` does not print a 2.x version (an old one may not answer at all; stop it with Ctrl+C). The unscoped `foundryvtt-mcp` package on npm is the original project's, not this one. Remove it and install this project's package:
+
+```bash
+npm uninstall -g foundryvtt-mcp
+npm install -g @g33ks/foundryvtt-mcp
+```
+
+#### `init` prints no client entry
+It ran from npx's cache (`npx @g33ks/foundryvtt-mcp init`), which npm replaces or deletes when it updates or cleans it, so a client entry pointing there would break. Install the package globally, then run `foundryvtt-mcp init`. The configuration it wrote is kept.
+
+#### The client stopped starting the server after a Node.js change
+The client entries name the Node.js that ran `init` by its path, which changes with a new Node.js version under nvm (and can with an installer). Run `foundryvtt-mcp init` again with the Node.js you use now, and replace the entries. Claude desktop's log (`mcp-server-foundryvtt.log`) shows the failed start.
+
 ### Connection Issues
 
 #### "Connection Refused" or "ECONNREFUSED"
 **Symptoms**: Cannot connect to FoundryVTT server
 **Solutions**:
 1. **Start FoundryVTT**: Ensure FoundryVTT is running and accessible
-2. **Check URL**: Verify `FOUNDRY_URL` in your configuration file (`node dist/index.js status` shows it)
+2. **Check URL**: Verify `FOUNDRY_URL` in your configuration file (`foundryvtt-mcp status` shows it)
    ```env
    FOUNDRY_URL=http://localhost:30000
    ```
@@ -164,7 +185,7 @@ Detection compares paragraphs of text, not HTML, so markup rewritten by FoundryV
 **Solutions**:
 1. **Automatic headless GM session**: Nothing to do — the server launches its headless browser with these checks disabled (a throwaway browser with a fresh profile that only loads `FOUNDRY_URL`). If it still fails, look for errors in the server logs (`daemon.log` in shared-process mode), in particular `Module bridge refused a connection: …` (see [below](#module-bridge-refused-a-connection-)).
 2. **GM tab opened by hand**: no longer supported. Since module 0.5.0 the module only connects from the headless GM session, which provides the `window.foundryMcpBridge` function it authenticates with; `FOUNDRY_HEADLESS_GM_ENABLED=false` therefore disables the bridge in practice. In an ordinary GM tab, the browser console line `FoundryVTT MCP Bridge | no foundryvtt-mcp credentials in this browser, bridge disabled` is normal — that tab is not meant to connect.
-3. **Check the bridge itself**: If the server log has no `Module bridge listening` line, the port may already be in use or `FOUNDRY_MODULE_BRIDGE_ENABLED` is `false`. In shared-process mode that log is `daemon.log` (see [Shared Process](#shared-process)); `node dist/index.js status` shows whether the bridge listens and whether the module is connected. The port is typically held by another process running in all-in-one mode (`FOUNDRY_MCP_SHARED=false`), or by a shared process from a second state directory.
+3. **Check the bridge itself**: If the server log has no `Module bridge listening` line, the port may already be in use or `FOUNDRY_MODULE_BRIDGE_ENABLED` is `false`. In shared-process mode that log is `daemon.log` (see [Shared Process](#shared-process)); `foundryvtt-mcp status` shows whether the bridge listens and whether the module is connected. The port is typically held by another process running in all-in-one mode (`FOUNDRY_MCP_SHARED=false`), or by a shared process from a second state directory.
 4. **Bridge reached from another machine**: The bridge listens on loopback only (`127.0.0.1`, `::1`). The module must run in a browser on the same machine as the MCP server — which the headless GM session always does.
 
 #### "Module bridge refused a connection: …"
@@ -179,7 +200,7 @@ Detection compares paragraphs of text, not HTML, so markup rewritten by FoundryV
 - **`unsupported bridge protocol … (expected 1)`**: a module speaking another version of the handshake. Install the module from the same checkout as the server.
 - **`non-JSON message before authentication`**, **`message other than auth_response before authentication`**, **`malformed auth_response`**, **`message over 4096 bytes before authentication`**: the client sent something other than the module's handshake — a foreign client, or a module copy that does not match the server. Redeploy the module from the same checkout if the bridge stays disconnected.
 
-**Check it**: `node dist/index.js status` shows the `Module bridge:` line (`protocol v1, authenticated module connected: yes/no`) and the `Bridge origin:` line, the only origin accepted — compare it with the address Foundry is served from. With the module connected, `npm run check:bridge-security` makes four forged connections and confirms each one is refused while the module stays connected.
+**Check it**: `foundryvtt-mcp status` shows the `Module bridge:` line (`protocol v1, authenticated module connected: yes/no`) and the `Bridge origin:` line, the only origin accepted — compare it with the address Foundry is served from. With the module connected, `npm run check:bridge-security` makes four forged connections and confirms each one is refused while the module stays connected.
 
 ### Shared Process
 
@@ -195,12 +216,12 @@ In the state directory — `%LOCALAPPDATA%\foundryvtt-mcp\` on Windows, `$XDG_ST
 | `daemon.json` | pid, version, start time, pipe and log path of the running shared process. |
 | `token` | Secret the relays present to the shared process. Do not share it. |
 
-`node dist/index.js status` prints the paths actually in use. Set `LOG_LEVEL=debug` in the configuration file for more detail, then `node dist/index.js stop` (it applies to the shared process started next).
+`foundryvtt-mcp status` prints the paths actually in use. Set `LOG_LEVEL=debug` in the configuration file for more detail, then `foundryvtt-mcp stop` (it applies to the shared process started next).
 
 #### Inspecting and stopping the shared process
 ```bash
-node dist/index.js status   # running?, pid, uptime, FoundryVTT / bridge / GM session, relays, write queue
-node dist/index.js stop     # lets running calls finish, then exits (waits up to ~2.5 min)
+foundryvtt-mcp status   # running?, pid, uptime, FoundryVTT / bridge / GM session, relays, write queue
+foundryvtt-mcp stop     # lets running calls finish, then exits (waits up to ~2.5 min)
 ```
 `status` exits with code 3 when nothing runs. If `stop` cannot reach the process (for example after the `token` file was deleted), end the pid listed in `daemon.json` — Task Manager, `Stop-Process -Id <pid>` (PowerShell) or `kill <pid>`. The next tool call starts a fresh one.
 
@@ -215,7 +236,7 @@ FoundryVTT is not reachable yet, or the URL/credentials are wrong. The shared pr
 FoundryVTT is running but no world is launched: it shows the Setup screen, typically after the Foundry server restarted (a backup can restart it) or after **Return to Setup**. Launch the world; nothing else is needed. The connector retries by itself in the background — every 5 s at first, then doubling up to once every 2 min — and reconnects within that delay once the world is up, without any tool call. Each change of state is logged once in `daemon.log` (`FoundryVTT connection: waiting-for-world — …`), not once per attempt.
 
 While it reconnects:
-- `node dist/index.js status` shows `FoundryVTT: not connected (waiting-for-world — …)` (or `reauthenticating`, `retrying`), and the headless GM session `reauthenticating` or `waiting-for-session`; `get_health_status` says the same.
+- `foundryvtt-mcp status` shows `FoundryVTT: not connected (waiting-for-world — …)` (or `reauthenticating`, `retrying`), and the headless GM session `reauthenticating` or `waiting-for-session`; `get_health_status` says the same.
 - A tool call waits up to 15 s for the connection, then is refused with `Reconnecting to FoundryVTT… (<state>: <reason>)`. Nothing is ever sent to FoundryVTT on a connection it no longer recognises; a write keeps its place in the write queue while it waits.
 
 After a FoundryVTT server restart, Foundry has forgotten every login; the connector notices it at the socket's reconnection (Foundry answers it with no user) and logs in again once. A plain network drop needs no new login: the socket reconnects with the same session.
@@ -227,7 +248,7 @@ Expected. The invisible session shares the connector's login, and leaving the ga
 In the default single-account mode the invisible session is a real Foundry client running as the connector's account. As a Gamemaster it can become Foundry's *active GM* instead of a human Gamemaster (equal roles go to the smaller user id) and run the game system's automations there. Make the account an **Assistant GM** (Configuration → User Management) while the connector is stopped, then start it again.
 
 #### "The shared FoundryVTT MCP process did not become available within 30 s"
-The relay started a shared process that never answered. Look at the end of `daemon.log`: a configuration error, a crash at startup, or an antivirus blocking `node.exe`. Running `node dist/index.js daemon` by hand in a terminal with the same environment shows startup errors directly.
+The relay started a shared process that never answered. Look at the end of `daemon.log`: a configuration error, a crash at startup, or an antivirus blocking `node.exe`. Running `foundryvtt-mcp daemon` by hand in a terminal with the same environment shows startup errors directly.
 
 #### "The shared FoundryVTT MCP process exited during this call; its outcome is unknown"
 The shared process died (or was killed) while it ran the call. The call is **not** resent automatically: for a write, check in FoundryVTT whether it happened before retrying. The next call starts a new shared process.
@@ -236,7 +257,7 @@ The shared process died (or was killed) while it ran the call. The call is **not
 The `token` file changed while a shared process was running (deleted or edited by hand). End the shared process (see above); the next call starts one with the current token.
 
 #### Where is my configuration?
-`node dist/index.js status` answers, with or without a running shared process. Its last section, **This terminal**, shows the configuration file it looked for (and whether it exists) and every setting with where it comes from: `env` (an environment variable — a client's `env` block, or the system), `.env` (a `.env` in the working directory), `file` (the configuration file). With a shared process running, `status` also shows the settings that process runs with, and what each connected client declared. Passwords and API keys show as `<set>`.
+`foundryvtt-mcp status` answers, with or without a running shared process. Its last section, **This terminal**, shows the configuration file it looked for (and whether it exists) and every setting with where it comes from: `env` (an environment variable — a client's `env` block, or the system), `.env` (a `.env` in the working directory), `file` (the configuration file). With a shared process running, `status` also shows the settings that process runs with, and what each connected client declared. Passwords and API keys show as `<set>`.
 
 The file is `%LOCALAPPDATA%\foundryvtt-mcp\config.env` on Windows and `$XDG_CONFIG_HOME/foundryvtt-mcp/config.env` (or `~/.config/foundryvtt-mcp/config.env`) elsewhere; `FOUNDRY_MCP_CONFIG` names another one, and `FOUNDRY_MCP_STATE_DIR` moves it into that directory. See the README, *Configuration File*.
 
@@ -244,7 +265,7 @@ The file is `%LOCALAPPDATA%\foundryvtt-mcp\config.env` on Windows and `$XDG_CONF
 No `FOUNDRY_URL` anywhere, or a setting that does not validate (the message names it and where it comes from). The server keeps running and lists its tools; every call answers with this message and reads the configuration again. Write the file at the path the message gives — at least `FOUNDRY_URL`, `FOUNDRY_USERNAME` and `FOUNDRY_PASSWORD`, each value between `'…'` — and call the tool again: no client restart needed.
 
 #### "This MCP client's own settings are ignored: …"
-The shared process serves every MCP client with **one** configuration, and this client passes settings of its own — usually an `env` block left in its configuration (or, for Claude Code, a `FOUNDRY_*` variable in the system environment, which it passes on; Claude desktop does not). They are not applied; the note names them and where they come from, and `node dist/index.js status` lists every client with its ignored settings. Remove the `env` block (or the variable) and restart that client, or, if its values are the ones you want, put them in the configuration file and run `node dist/index.js stop`.
+The shared process serves every MCP client with **one** configuration, and this client passes settings of its own — usually an `env` block left in its configuration (or, for Claude Code, a `FOUNDRY_*` variable in the system environment, which it passes on; Claude desktop does not). They are not applied; the note names them and where they come from, and `foundryvtt-mcp status` lists every client with its ignored settings. Remove the `env` block (or the variable) and restart that client, or, if its values are the ones you want, put them in the configuration file and run `foundryvtt-mcp stop`.
 
 Only the connection settings count (URL, account and passwords, API key, socket path, writes, module bridge, headless GM session, data path). A client with another `LOG_LEVEL`, timeout or idle delay is served without a note: the shared process's values apply.
 
@@ -252,10 +273,10 @@ Only the connection settings count (URL, account and passwords, API key, socket 
 Expected, once: a client whose settings match the file *as it is now* while the running process was started with other ones (the file changed, or a client's `env` block started it) restarts it with the file's settings. Running calls finish first. It never restarts in a loop: any other difference is served, with the note above. An unreadable or invalid file restarts nothing.
 
 #### The shared process stops on its own / `mcp-api` leaves Foundry's player list
-It stops `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` (5 by default) after the **last** MCP client closed (Claude desktop counts as closed only once quit from the notification area too), and leaves FoundryVTT then. Reopening a client within that delay keeps the same process; later, the first call starts a new one (a few seconds). `0` keeps it up for good. To stop it at once: `node dist/index.js stop`.
+It stops `FOUNDRY_MCP_IDLE_TIMEOUT_MINUTES` (5 by default) after the **last** MCP client closed (Claude desktop counts as closed only once quit from the notification area too), and leaves FoundryVTT then. Reopening a client within that delay keeps the same process; later, the first call starts a new one (a few seconds). `0` keeps it up for good. To stop it at once: `foundryvtt-mcp stop`.
 
 #### The shared process keeps restarting / FoundryVTT reconnects often
-`daemon.log` shows `a relay from a newer build … connected`: an MCP client runs a newer build than the shared process. Restart every MCP client after updating or rebuilding the server, so that all relays run the same build. (A different configuration no longer restarts it more than once — see above.)
+`daemon.log` shows `a relay from a newer build … connected`: an MCP client runs a newer build than the shared process — a newer version, or for the same version a later install or rebuild. After updating, close every MCP client, run `foundryvtt-mcp stop`, and start them again, so that all relays run the same build. Clients pointing at two different installs (a clone and the package, or two Node.js prefixes) keep replacing each other's shared process: give every client the entries `foundryvtt-mcp init` prints for one install. (A different configuration no longer restarts it more than once — see above.)
 
 #### Configuration in `.env` ignored with Claude Desktop
 Claude Desktop starts MCP servers in `C:\Windows\System32`, where no `.env` file is looked up. Use the configuration file instead (see *Where is my configuration?*): every client reads it. A `.env` is only read from the working directory of the process (handy for development in the repository).
@@ -266,12 +287,12 @@ Claude Desktop starts MCP servers in `C:\Windows\System32`, where no `.env` file
 1. **REST API module required**: `get_system_health`, `get_recent_logs`, `search_logs` and `diagnose_errors` need the optional Foundry Local REST API module; `get_health_status` answers without it and only adds the server's health when it is there
 2. **Install module**: it is a separate project, not distributed by this repository — see [the configuration guide](docs/guides/configuration.md#optional-diagnostics-tools)
 3. **Enable module**: Activate it in your world's module settings
-4. **Set API key**: Add `FOUNDRY_API_KEY` to your configuration file, then run `node dist/index.js stop`
+4. **Set API key**: Add `FOUNDRY_API_KEY` to your configuration file, then run `foundryvtt-mcp stop`
 
 ## Environment Configuration
 
 ### Configuration File Template
-`node dist/index.js init` writes the configuration file (`%LOCALAPPDATA%\foundryvtt-mcp\config.env` on Windows, `~/.config/foundryvtt-mcp/config.env` elsewhere). Written by hand, it looks like this:
+`foundryvtt-mcp init` writes the configuration file (`%LOCALAPPDATA%\foundryvtt-mcp\config.env` on Windows, `~/.config/foundryvtt-mcp/config.env` elsewhere). Written by hand, it looks like this:
 ```env
 # Required
 FOUNDRY_URL='http://localhost:30000'
@@ -288,18 +309,18 @@ FOUNDRY_MODULE_BRIDGE_ENABLED='true'
 # Optional: more detail in daemon.log
 # LOG_LEVEL='debug'
 ```
-Less common settings (`FOUNDRY_USER_ID`, `FOUNDRY_TIMEOUT`, `FOUNDRY_RETRY_ATTEMPTS`…) are in the [configuration guide](docs/guides/configuration.md). After editing the file, run `node dist/index.js stop`.
+Less common settings (`FOUNDRY_USER_ID`, `FOUNDRY_TIMEOUT`, `FOUNDRY_RETRY_ATTEMPTS`…) are in the [configuration guide](docs/guides/configuration.md). After editing the file, run `foundryvtt-mcp stop`.
 
 ### Configuration Validation
 Check your configuration against the live FoundryVTT:
 ```bash
-node dist/index.js init --check
+foundryvtt-mcp init --check
 ```
 
 ## Advanced Diagnostics
 
 ### Enable Debug Logging
-Add to the configuration file, then run `node dist/index.js stop` (the next call starts the shared process with it):
+Add to the configuration file, then run `foundryvtt-mcp stop` (the next call starts the shared process with it):
 ```env
 LOG_LEVEL='debug'
 ```
@@ -363,11 +384,12 @@ If you continue to experience problems:
 
 1. **Run diagnostics**:
    ```bash
-   node dist/index.js init --check
+   foundryvtt-mcp init --check
    ```
 
 2. **Gather information**:
-   - The output of `node dist/index.js status` (passwords show as `<set>`; check for anything else private)
+   - The output of `foundryvtt-mcp --version` (from a clone: `git rev-parse --short HEAD`)
+   - The output of `foundryvtt-mcp status` (passwords show as `<set>`; check for anything else private)
    - `daemon.log` (with `LOG_LEVEL=debug`)
    - FoundryVTT version and active modules
    - Error messages and stack traces
@@ -384,13 +406,14 @@ If you continue to experience problems:
 ### Common Commands
 ```bash
 # Setup and configuration
-node dist/index.js init           # Interactive setup (writes the configuration file)
-node dist/index.js init --check   # Check the configuration, writes nothing
-node dist/index.js status         # The shared process and where each setting comes from
-node dist/index.js stop           # Stop the shared process (the next call starts a new one)
-npm run build                     # Build the project
+foundryvtt-mcp init           # Interactive setup (writes the configuration file)
+foundryvtt-mcp init --check   # Check the configuration, writes nothing
+foundryvtt-mcp status         # The shared process and where each setting comes from
+foundryvtt-mcp stop           # Stop the shared process (the next call starts a new one)
+foundryvtt-mcp --version      # The installed version
 
-# Development
+# Development (in a clone, see CONTRIBUTING.md)
+npm run build                 # Build the project
 npm run dev                   # Development mode
 npm test                      # Run tests
 npm run lint                  # Code linting
@@ -398,10 +421,10 @@ npm run lint                  # Code linting
 
 ### Health Check Checklist
 - [ ] FoundryVTT is running with an active world
-- [ ] The configuration file has `FOUNDRY_URL`, `FOUNDRY_USERNAME`, `FOUNDRY_PASSWORD` (`node dist/index.js status`, section *This terminal*)
+- [ ] The configuration file has `FOUNDRY_URL`, `FOUNDRY_USERNAME`, `FOUNDRY_PASSWORD` (`foundryvtt-mcp status`, section *This terminal*)
 - [ ] Username matches a FoundryVTT user exactly (case-sensitive)
 - [ ] No firewall blocking connections
-- [ ] `node dist/index.js init --check` ends with `All checks passed.`
+- [ ] `foundryvtt-mcp init --check` ends with `All checks passed.`
 - [ ] `get_health_status` shows the connection and the module bridge connected
 - [ ] Basic tools (dice rolling) work
 - [ ] Search tools return expected results
@@ -411,4 +434,4 @@ Verify these work in your browser:
 - FoundryVTT main: `http://localhost:30000`
 - Join page (confirms active world): `http://localhost:30000/join`
 
-Remember: most issues are configuration-related. `node dist/index.js init --check` and `get_health_status` point at most of them.
+Remember: most issues are configuration-related. `foundryvtt-mcp init --check` and `get_health_status` point at most of them.
