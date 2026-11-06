@@ -70,3 +70,38 @@ describe('handleGetChatMessages — limit clamp', () => {
     expect(client.getChatMessages).toHaveBeenCalledWith(5);
   });
 });
+
+describe('handleGetChatMessages — author (G33ks/foundryvtt-mcp#13)', () => {
+  const users = [
+    { _id: 'gmUser0000000001', name: 'Gamemaster' },
+    { _id: 'mcpUser000000001', name: 'mcp-api' },
+  ];
+
+  async function authorLine(message: Record<string, unknown>): Promise<string> {
+    const client = {
+      getChatMessages: vi.fn(() => [
+        { _id: 'msg', content: 'hello', timestamp: Date.UTC(2026, 10, 6), ...message },
+      ]),
+      getUsers: vi.fn(() => ({ users })),
+    } as unknown as FoundryClient;
+    const result = await handleGetChatMessages({}, client);
+    const text = (result as { content: Array<{ text: string }> }).content[0]?.text ?? '';
+    return text.split('\n').at(-1) ?? '';
+  }
+
+  it('reads the author from `author` when there is no alias', async () => {
+    expect(await authorLine({ author: 'mcpUser000000001' })).toMatch(/\*\*mcp-api\*\*: hello$/);
+  });
+
+  it('still reads the older `user` field', async () => {
+    expect(await authorLine({ user: 'gmUser0000000001' })).toMatch(/\*\*Gamemaster\*\*: hello$/);
+  });
+
+  it('prefers the alias, and says Unknown only when no field names a user', async () => {
+    expect(
+      await authorLine({ author: 'mcpUser000000001', speaker: { alias: 'Narrator' } }),
+    ).toMatch(/\*\*Narrator\*\*: hello$/);
+    expect(await authorLine({})).toMatch(/\*\*Unknown\*\*: hello$/);
+    expect(await authorLine({ author: 'nobody0000000000' })).toMatch(/\*\*Unknown\*\*: hello$/);
+  });
+});

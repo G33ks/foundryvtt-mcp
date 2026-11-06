@@ -18,6 +18,7 @@
 
 import { isRecord } from '../utils/guards.js';
 import { stripHtml } from '../utils/sanitize.js';
+import { messageAuthorId } from './message-author.js';
 import type { WorldData } from './types.js';
 import type { DocumentBroadcast } from './world-cache.js';
 
@@ -364,9 +365,7 @@ function renderSummary(
     const speaker = isRecord(first.speaker) ? first.speaker : undefined;
     const alias = speaker && typeof speaker.alias === 'string' ? speaker.alias : undefined;
     const author =
-      alias ??
-      userName(worldData, typeof first.user === 'string' ? first.user : broadcast.userId) ??
-      'Unknown';
+      alias ?? userName(worldData, messageAuthorId(first) ?? broadcast.userId) ?? 'Unknown';
     const raw = typeof first.content === 'string' ? first.content : '';
     const text = truncate(stripHtml(raw));
     const flavor = typeof first.flavor === 'string' ? truncate(stripHtml(first.flavor)) : '';

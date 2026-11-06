@@ -219,4 +219,32 @@ describe('summarizeDocumentBroadcast', () => {
     );
     expect(event.summary).toContain('update Cards');
   });
+
+  describe('ChatMessage author (G33ks/foundryvtt-mcp#13)', () => {
+    const world = {
+      ...baseWorldData,
+      users: [
+        { _id: 'gmUser0000000001', name: 'Gamemaster' },
+        { _id: 'mcpUser000000001', name: 'mcp-api' },
+      ],
+    } as unknown as WorldData;
+    const chat = (fields: Record<string, unknown>, userId?: string) =>
+      summarizeDocumentBroadcast(
+        broadcast({
+          result: [{ _id: 'msgAAAAAAAAAAAAA', content: '<p>hi</p>', ...fields }],
+          ...(userId ? { userId } : {}),
+        }),
+        world,
+      ).summary;
+
+    it('reads `author`, then the older `user`, then whoever sent the broadcast', () => {
+      expect(chat({ author: 'mcpUser000000001' }, 'gmUser0000000001')).toBe('💬 mcp-api: hi');
+      expect(chat({ user: 'gmUser0000000001' })).toBe('💬 Gamemaster: hi');
+      expect(chat({}, 'gmUser0000000001')).toBe('💬 Gamemaster: hi');
+    });
+
+    it('says Unknown when nothing names a user', () => {
+      expect(chat({})).toBe('💬 Unknown: hi');
+    });
+  });
 });

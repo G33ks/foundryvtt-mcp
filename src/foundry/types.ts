@@ -962,7 +962,10 @@ export type WorldJournalPage = NonNullable<WorldJournal['pages']>[number];
 export interface WorldMessage {
   _id: string;
   type: number;
-  user: string;
+  /** Id of the user who wrote it (FoundryVTT v12 and later); read it with `messageAuthorId`. */
+  author?: string;
+  /** Earlier name of `author`, in older data. */
+  user?: string;
   timestamp: number;
   flavor?: string;
   content: string;
