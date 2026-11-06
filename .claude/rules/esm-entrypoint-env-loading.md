@@ -52,8 +52,8 @@ natural guess.
   directly: `config`/`getConfig()` for validated values, `resolveSettings()`
   (or `processSettings()` for `FOUNDRY_MCP_STATE_DIR`/`FOUNDRY_MCP_CONFIG`)
   for raw ones. A direct read misses `.env` and the file — the same symptom
-  as laurigates/foundryvtt-mcp#206. Known exceptions left for later: `scripts/diagnose-api.ts`,
-  `scripts/run-e2e-tests.ts`.
+  as laurigates/foundryvtt-mcp#206. This holds for `scripts/` too
+  (`scripts/diagnose-api.ts` imports `resolveSettings` from `src/`, run by tsx).
 
 - **Never inject.** The relay hands its own environment to the shared process
   it starts; injected `.env` or file values would arrive there as

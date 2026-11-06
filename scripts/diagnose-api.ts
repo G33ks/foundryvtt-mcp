@@ -3,15 +3,19 @@
 /**
  * Diagnostic script to test FoundryVTT REST API module endpoints
  * Run with: npx tsx scripts/diagnose-api.ts
+ *
+ * Settings come from the same resolver as the server (environment, then
+ * `.env` in the working directory, then the configuration file), so
+ * FOUNDRY_URL and FOUNDRY_API_KEY need not be set in the shell.
  */
 
+import { pathToFileURL } from 'node:url';
 import axios from 'axios';
-import dotenv from 'dotenv';
+import { resolveSettings } from '../src/config/sources.js';
 
-dotenv.config({ quiet: true });
-
-const FOUNDRY_URL = process.env.FOUNDRY_URL || 'http://localhost:30000';
-const API_KEY = process.env.FOUNDRY_API_KEY;
+const { values: settings } = resolveSettings();
+const FOUNDRY_URL = settings.FOUNDRY_URL || 'http://localhost:30000';
+const API_KEY = settings.FOUNDRY_API_KEY;
 
 interface TestResult {
   endpoint: string;
@@ -249,7 +253,8 @@ async function runDiagnostics() {
   console.log('6. Restart FoundryVTT if needed');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Run when called directly (a file URL comparison that also holds on Windows).
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   runDiagnostics().catch(console.error);
 }
 
