@@ -15,13 +15,11 @@ import { RefusedError } from '../utils/refusal.js';
 import type { LogPatternSearchParams, LogSearchParams } from './types.js';
 import {
   ErrorDiagnosisSchema,
-  type LogEntrySchema,
   LogResponseSchema,
   LogSearchResponseSchema,
   SystemHealthSchema,
 } from './types.js';
 
-type LogEntry = z.infer<typeof LogEntrySchema>;
 type LogResponse = z.infer<typeof LogResponseSchema>;
 type LogSearchResponse = z.infer<typeof LogSearchResponseSchema>;
 type SystemHealth = z.infer<typeof SystemHealthSchema>;
@@ -335,97 +333,6 @@ export class DiagnosticsClient {
       return parsed;
     } catch (error) {
       throw restFailure('Error diagnosis', error);
-    }
-  }
-
-  /**
-   * Get errors filtered by severity and time window
-   *
-   * @param timeframe - Time window in seconds (default: 3600)
-   * @param level - Log level to filter by (default: 'error')
-   * @returns Promise resolving to filtered log entries
-   *
-   * @example
-   * ```typescript
-   * // Get all errors from the last 2 hours
-   * const errors = await diagnostics.getErrorsOnly(7200);
-   *
-   * // Get warnings from the last 30 minutes
-   * const warnings = await diagnostics.getErrorsOnly(1800, 'warn');
-   * ```
-   */
-  async getErrorsOnly(
-    timeframe: number = 3600,
-    level: LogEntry['level'] = 'error',
-  ): Promise<LogEntry[]> {
-    try {
-      const since = new Date(Date.now() - timeframe * 1000).toISOString();
-
-      const response = await this.getRecentLogs({
-        level,
-        since,
-        lines: 1000, // Get a large number to ensure we capture all errors
-        includeStack: true,
-      });
-
-      return response.logs;
-    } catch (error) {
-      logger.error('DiagnosticsClient | Failed to get errors only:', error);
-      throw new Error(
-        `Failed to retrieve ${level} logs: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
-    }
-  }
-
-  /**
-   * Monitor system health and return status summary
-   *
-   * Only the overall status: there is no numeric score behind it. The
-   * signature used to declare an optional `score` and the example used to show
-   * one, but nothing ever set it and {@link SystemHealth} has no such field —
-   * so a caller that read it got `undefined` from a documented field.
-   *
-   * @returns Promise resolving to the overall status, `'critical'` if health
-   *   could not be retrieved at all
-   *
-   * @example
-   * ```typescript
-   * const status = await diagnostics.getHealthStatus();
-   * // Returns: { status: 'healthy' | 'warning' | 'critical' }
-   * ```
-   */
-  async getHealthStatus(): Promise<{ status: SystemHealth['status'] }> {
-    try {
-      const health = await this.getSystemHealth();
-      return {
-        status: health.status,
-      };
-    } catch (error) {
-      logger.error('DiagnosticsClient | Failed to get health status:', error);
-      return { status: 'critical' };
-    }
-  }
-
-  /**
-   * Check if diagnostics API is available
-   *
-   * @returns Promise resolving to boolean indicating availability
-   *
-   * @example
-   * ```typescript
-   * const available = await diagnostics.isAvailable();
-   * if (!available) {
-   *   console.log('Diagnostics API not available - check module installation');
-   * }
-   * ```
-   */
-  async isAvailable(): Promise<boolean> {
-    try {
-      await this.foundryClient.get('/api/diagnostics/health');
-      return true;
-    } catch (error) {
-      logger.debug('DiagnosticsClient | Diagnostics API not available:', error);
-      return false;
     }
   }
 }
