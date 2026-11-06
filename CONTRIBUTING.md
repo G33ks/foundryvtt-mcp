@@ -23,6 +23,8 @@ npm ci          # exactly the locked versions; also installs the git hooks
 npm run build   # compiles to dist/
 ```
 
+With npm 12, `npm ci` ends with a warning that the install script of `esbuild` (a dependency of `tsx` and `vitest`) was blocked because `allowScripts` does not cover it. That is expected and harmless: the script only checks the platform binary that npm already installed as an optional dependency, and, outside Windows, replaces the `esbuild` command's JavaScript launcher with a link to that binary. `tsx`, `vitest` and the build work the same without it. The project does not approve it in `package.json` (`npm install-scripts approve` writes an `allowScripts` entry pinned to one version by default, which every esbuild update would leave behind). CI's npm (bundled with Node 22 and 24) does not block install scripts.
+
 The user guides name the installed command, `foundryvtt-mcp`; from the clone, run `node dist/index.js` instead (`node dist/index.js init`, `status`, `stop`, `--version`). `node dist/index.js init` prints client entries that start the clone's `dist/index.js`. Give every MCP client entries for one install only: relays of a clone and of an installed package would replace each other's shared process.
 
 [docs/guides/development.md](docs/guides/development.md) describes the project layout and the development commands in more detail.

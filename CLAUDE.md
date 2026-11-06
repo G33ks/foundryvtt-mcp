@@ -34,7 +34,10 @@ node dist/index.js stop         # Stop the shared process (next call starts a fr
 1. AI assistant calls MCP tool → relay (`src/shared/relay.ts`, default mode) forwards it
    over a named pipe / Unix socket to the shared process (`src/shared/daemon.ts`);
    with `FOUNDRY_MCP_SHARED=false` the stdio process handles it itself (`src/server.ts`)
-2. `FoundryCore.callTool` (`src/core.ts`) → write tools wait in a FIFO queue → `src/tools/router.ts`
+2. `FoundryCore.callTool` (`src/core.ts`) → write tools wait in a FIFO queue; a call that
+   needs the socket waits for a reconnection in progress, and one that needs the
+   companion module waits for it while it connects (`src/tools/tool-dependencies.ts`)
+   → `src/tools/router.ts`
 3. Router dispatches to handler → `src/tools/handlers/`
 4. Handler queries cached worldData → `src/foundry/client.ts`
 5. Response returned as MCP result
@@ -50,8 +53,11 @@ commands must not load Socket.IO or Playwright.
 | Core | `src/core.ts` | FoundryVTT client + module bridge + headless GM session, tool routing, write queue |
 | Shared mode | `src/shared/` | Relay, shared process, IPC protocol, autostart, `status`/`stop` |
 | Write tools | `src/tools/write-tools.ts` | Tools serialised by the write queue — add every new mutation tool |
+| Tool dependencies | `src/tools/tool-dependencies.ts` | What each tool and resource needs (socket, module, REST, local) — classify every new tool |
+| MCP errors | `src/utils/mcp-errors.ts` | Errors leave `createMcpServer` with their bare message (the client adds the prefix) |
 | Client | `src/foundry/client.ts` | Socket.IO connection, world state cache |
-| Journal integrity | `src/foundry/journal-integrity.ts`, `journal-history.ts` | Page version tokens, overwrite watch (`modifyDocument` + `pm.autosave`), local copies in the state dir |
+| Journal integrity | `src/foundry/journal-integrity.ts`, `journal-history.ts`, `journal-conflicts.ts` | Page version tokens, overwrite watch (`modifyDocument` + `pm.autosave`), local copies and the 24-hour overwrite list (`journal-conflicts.json`) in the state dir |
+| Chat author | `src/foundry/message-author.ts` | A chat message's author: `author`, then the older `user` |
 | Auth | `src/foundry/auth.ts` | 4-step Socket.IO authentication |
 | Config | `src/config/index.ts` | Zod-validated environment config |
 | Tools | `src/tools/definitions.ts` | MCP tool schemas |

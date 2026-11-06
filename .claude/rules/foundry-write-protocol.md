@@ -90,6 +90,11 @@ does not carry it: you need a local copy of a FoundryVTT installation of the
 target version (the desktop app's `resources/app/` folder, or the root of the
 extracted Node.js build), and the paths below are relative to it.
 
+The maintainers' test server keeps such a build in `~/foundryvtt` (Node.js
+build of the version under test, read-only use): `client/` and `common/` are
+the readable source; `dist/` is the minified server, of little use for
+reading. Check `package.json` there for the build number.
+
 Key files: `client/data/client-backend.mjs` (`#buildRequest`/`#dispatchRequest`),
 `client/helpers/socket-interface.mjs` (`dispatch` = emit-with-ack), and
 `common/abstract/socket.mjs` + `common/abstract/_types.mjs` (response shape and
@@ -99,8 +104,11 @@ first, then smoke-test one round-trip against a live world.
 
 ## What does NOT map to `modifyDocument`
 
-Compendium reads (`search_compendium`, compendium-source item create) use
-`CompendiumCollection.getDocuments` / the pack index — a separate socket path,
-not `modifyDocument`. Currently `search_compendium` stays on the REST path
-(graceful-empty without `apiKey`) and compendium-source create is rejected over
-Socket.IO. Design a pack-read path before adding compendium writes.
+Compendium reads use `CompendiumCollection.getDocuments` / the pack index — a
+separate path, not `modifyDocument`, and the connector does not speak it over
+Socket.IO. `search_compendium` stays on the REST path (graceful-empty without
+`apiKey`); compendium content and compendium sources go through the companion
+module instead (`search_compendium_content`, `import_compendium_actor`, and
+`create_actor_item` with a compendium source read the document there, then
+create it with `modifyDocument`). Design a pack-read path before adding
+compendium reads over the socket.

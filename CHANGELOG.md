@@ -14,6 +14,15 @@
 - Only the calls that read the cached world or go through the socket wait for a reconnection; tools of the companion module, of the REST API module and local ones (`generate_npc`, `list_scene_assets`, …) go ahead at once. `foundry://` resources that read the cache now wait like tools. Each of the 114 tools is classified in `src/tools/tool-dependencies.ts`.
 - A tool that goes through the companion module waits up to 10 s for it while the headless GM page is starting, loading `/game`, reconnecting or was just logged in, and is refused at once, with the reason, when the module cannot come. Writes of the companion module still wait in the same queue as the other writes.
 - The headless GM session reads `loading-game` ("Opening /game with the connector's session"), not `waiting-for-session`, while it loads the game with the session in hand.
+- A refusal reaches the client with its own message, without a "Failed to <tool>: " prefix in front, and the `Tool call refused` / `Resource read refused` log lines give it without the `MCP error <code>: ` prefix.
+- The README's "How it works" diagram is an image (`docs/assets/how-it-works.png`, with its Mermaid source next to it): the npm page does not render Mermaid.
+- `init` and the README note that, in PowerShell, `claude mcp add … -- …` needs `'--'` when `claude` is the `claude.ps1` of an npm install.
+- `scripts/diagnose-api.ts` reads its settings through the same resolver as the server (environment, `.env`, configuration file), and runs when called directly on Windows too.
+- Dependencies: `dotenv` 18; `@types/node` follows the oldest supported Node.js (22). Dependabot no longer proposes TypeScript majors.
+
+### Removed
+
+- `scripts/run-e2e-tests.ts`: nothing ran it, and `npm run test:e2e` does the same.
 
 ### Fixed
 
@@ -27,6 +36,8 @@
 - Errors reach MCP clients with one `MCP error <code>: ` prefix instead of two, for every code, through a relay and all-in-one (#15).
 - `get_recent_logs`, `search_logs` and `diagnose_errors` without `FOUNDRY_API_KEY` are refused at once, with no request to FoundryVTT. A failed request to the REST API module logs one short warning (the stack at `debug`) instead of three errors with stacks.
 - `get_chat_messages` and `watch_events` read a message's author from `author` (FoundryVTT v12 and later), then `user`: a message without a speaker alias no longer shows "Unknown" (#13).
+- Dependabot can update `ws` again: the `ws` override follows the direct dependency (`$ws`) instead of conflicting with it (`EOVERRIDE`).
+- `npm run smoke:pack` no longer spawns npm and the installed bin through a shell on Windows (Node's DEP0190 warning).
 
 ## 2.0.0 — 2026-11-05
 

@@ -34,8 +34,10 @@ reference).
   mutation**. When no mutable actor / world is available they `ctx.skip()`
   rather than fail — matching the live-world precondition of the other
   integration specs.
-- The bridge/REST path is **read-only**; `search_compendium` integration
-  coverage is blocked on the bridge implementing `/api/compendium/search`.
+- The REST API module path (`FOUNDRY_API_KEY`) is **read-only**;
+  `search_compendium` integration coverage is blocked on that module (a
+  separate project, not the companion module) implementing
+  `/api/compendium/search`.
 - CI runs this tier only once the `FOUNDRY_*` secrets are configured (issue laurigates/foundryvtt-mcp#140).
 
 ## Coverage areas
