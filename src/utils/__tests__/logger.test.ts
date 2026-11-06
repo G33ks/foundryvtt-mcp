@@ -7,65 +7,16 @@ vi.mock('../../config/index.js', () => ({
   },
 }));
 
-class Logger {
-  private logLevel: 'debug' | 'info' | 'warn' | 'error';
-  private levels: Record<'debug' | 'info' | 'warn' | 'error', number> = {
-    debug: 0,
-    info: 1,
-    warn: 2,
-    error: 3,
-  };
+const { Logger } = await import('../logger.js');
 
-  constructor(logLevel: 'debug' | 'info' | 'warn' | 'error' = 'info') {
-    this.logLevel = logLevel;
-  }
-
-  private shouldLog(level: 'debug' | 'info' | 'warn' | 'error'): boolean {
-    return this.levels[level] >= this.levels[this.logLevel];
-  }
-
-  private formatMessage(
-    level: 'debug' | 'info' | 'warn' | 'error',
-    message: string,
-    meta?: unknown,
-  ): string {
-    const timestamp = new Date().toISOString();
-    const metaStr = meta ? ` ${JSON.stringify(meta)}` : '';
-    return `[${timestamp}] ${level.toUpperCase()}: ${message}${metaStr}`;
-  }
-
-  debug(message: string, meta?: unknown): void {
-    if (this.shouldLog('debug')) {
-      console.debug(this.formatMessage('debug', message, meta));
-    }
-  }
-
-  info(message: string, meta?: unknown): void {
-    if (this.shouldLog('info')) {
-      console.info(this.formatMessage('info', message, meta));
-    }
-  }
-
-  warn(message: string, meta?: unknown): void {
-    if (this.shouldLog('warn')) {
-      console.warn(this.formatMessage('warn', message, meta));
-    }
-  }
-
-  error(message: string, error?: unknown): void {
-    if (this.shouldLog('error')) {
-      const errorDetails =
-        error instanceof Error ? { message: error.message, stack: error.stack } : error;
-      console.error(this.formatMessage('error', message, errorDetails));
-    }
-  }
-}
+type ConsoleMethod = 'log' | 'debug' | 'info' | 'warn' | 'error';
 
 describe('Logger', () => {
-  let consoleSpy: Record<'debug' | 'info' | 'warn' | 'error', MockInstance>;
+  let consoleSpy: Record<ConsoleMethod, MockInstance>;
 
   beforeEach(() => {
     consoleSpy = {
+      log: vi.spyOn(console, 'log').mockImplementation(() => {}),
       debug: vi.spyOn(console, 'debug').mockImplementation(() => {}),
       info: vi.spyOn(console, 'info').mockImplementation(() => {}),
       warn: vi.spyOn(console, 'warn').mockImplementation(() => {}),
@@ -77,77 +28,108 @@ describe('Logger', () => {
     vi.restoreAllMocks();
   });
 
-  describe('log level filtering', () => {
-    it('should log debug messages when log level is debug', () => {
-      const logger = new Logger('debug');
-      logger.debug('test message');
-      expect(consoleSpy.debug).toHaveBeenCalledOnce();
-    });
+  /** Lines written, without their timestamp. */
+  const written = (method: ConsoleMethod) =>
+    consoleSpy[method].mock.calls.map(([line]) => String(line).replace(/^\[[^\]]+\] /, ''));
 
-    it('should not log debug messages when log level is info', () => {
-      const logger = new Logger('info');
-      logger.debug('test message');
+  describe('stdout stays free for the MCP protocol', () => {
+    it('writes every level to stderr (console.error, console.warn), never to stdout', () => {
+      const logger = new Logger('debug');
+      logger.debug('d');
+      logger.info('i');
+      logger.warn('w');
+      logger.error('e');
+
+      expect(written('error')).toEqual(['DEBUG: d', 'INFO: i', 'ERROR: e']);
+      expect(written('warn')).toEqual(['WARN: w']);
+      expect(consoleSpy.log).not.toHaveBeenCalled();
+      expect(consoleSpy.info).not.toHaveBeenCalled();
       expect(consoleSpy.debug).not.toHaveBeenCalled();
     });
+  });
 
-    it('should log info messages when log level is info', () => {
+  describe('log level filtering', () => {
+    it('drops debug at info, keeps info', () => {
       const logger = new Logger('info');
-      logger.info('test message');
-      expect(consoleSpy.info).toHaveBeenCalledOnce();
+      logger.debug('hidden');
+      logger.info('shown');
+      expect(written('error')).toEqual(['INFO: shown']);
     });
 
-    it('should log warn messages when log level is warn', () => {
+    it('keeps only warn and error at warn', () => {
       const logger = new Logger('warn');
-      logger.warn('test message');
-      expect(consoleSpy.warn).toHaveBeenCalledOnce();
+      logger.info('hidden');
+      logger.warn('shown');
+      logger.error('also shown');
+      expect(written('warn')).toEqual(['WARN: shown']);
+      expect(written('error')).toEqual(['ERROR: also shown']);
     });
 
-    it('should log error messages at all log levels', () => {
-      const logger = new Logger('debug');
-      logger.error('test message');
-      expect(consoleSpy.error).toHaveBeenCalledOnce();
+    it('defaults to info', () => {
+      const logger = new Logger();
+      logger.debug('hidden');
+      logger.info('shown');
+      expect(written('error')).toEqual(['INFO: shown']);
+    });
+
+    it('follows setLevel', () => {
+      const logger = new Logger('info');
+      logger.setLevel('debug');
+      logger.debug('now shown');
+      expect(written('error')).toEqual(['DEBUG: now shown']);
+    });
+
+    it('logs at info while the level cannot be resolved, then takes it once it can', () => {
+      let level: 'error' | null = null;
+      const resolve = vi.fn(() => level);
+      const logger = new Logger(resolve);
+      logger.info('shown at info meanwhile');
+      level = 'error';
+      logger.warn('hidden at error');
+      logger.info('hidden too');
+      expect(written('error')).toEqual(['INFO: shown at info meanwhile']);
+      expect(written('warn')).toEqual([]);
+      // Resolved once, then kept.
+      const calls = resolve.mock.calls.length;
+      logger.error('shown');
+      expect(resolve.mock.calls.length).toBe(calls);
     });
   });
 
   describe('message formatting', () => {
-    it('should format messages with timestamp and level', () => {
-      const logger = new Logger('debug');
-      logger.info('test message');
-
-      const call = consoleSpy.info.mock.calls[0][0];
-      expect(call).toMatch(/^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] INFO: test message$/);
+    it('prefixes an ISO timestamp and the level', () => {
+      new Logger('debug').info('test message');
+      expect(String(consoleSpy.error.mock.calls[0]?.[0])).toMatch(
+        /^\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\] INFO: test message$/,
+      );
     });
 
-    it('should include metadata in formatted message', () => {
-      const logger = new Logger('debug');
-      const metadata = { key: 'value', number: 42 };
-      logger.info('test message', metadata);
-
-      const call = consoleSpy.info.mock.calls[0][0];
-      expect(call).toContain('test message');
-      expect(call).toContain(JSON.stringify(metadata));
+    it('appends metadata as JSON', () => {
+      new Logger('debug').info('test message', { key: 'value', number: 42 });
+      expect(written('error')).toEqual(['INFO: test message {"key":"value","number":42}']);
     });
 
-    it('should format error objects properly', () => {
-      const logger = new Logger('debug');
-      const error = new Error('test error');
-      logger.error('test message', error);
-
-      const call = consoleSpy.error.mock.calls[0][0];
-      expect(call).toContain('test message');
-      expect(call).toContain('"message":"test error"');
-      expect(call).toContain('"stack"');
+    it('writes an Error as its message and stack', () => {
+      new Logger('debug').error('test message', new Error('test error'));
+      const line = written('error')[0] ?? '';
+      expect(line).toContain('ERROR: test message');
+      expect(line).toContain('"message":"test error"');
+      expect(line).toContain('"stack"');
     });
   });
 
-  describe('default log level', () => {
-    it('should default to info log level', () => {
-      const logger = new Logger();
-      logger.debug('debug message');
-      logger.info('info message');
-
-      expect(consoleSpy.debug).not.toHaveBeenCalled();
-      expect(consoleSpy.info).toHaveBeenCalledOnce();
+  describe('sinks', () => {
+    it('hands every written line to each sink, and nothing that was filtered out', () => {
+      const logger = new Logger('info');
+      const sink = vi.fn();
+      logger.addSink(sink);
+      logger.debug('filtered');
+      logger.info('kept');
+      logger.warn('kept too');
+      expect(sink.mock.calls.map(([line]) => String(line).replace(/^\[[^\]]+\] /, ''))).toEqual([
+        'INFO: kept',
+        'WARN: kept too',
+      ]);
     });
   });
 });
