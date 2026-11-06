@@ -67,12 +67,13 @@ function worldData(accountRole = 3) {
  * Fake socket. Answers `world` with the snapshot, and the first `session`
  * listener (the handshake) with `handshakeUserId` on the next microtask.
  * `reload` changes how the later `world` requests (reloads) are answered:
- * with another snapshot, or not at all until `answerReload()`.
+ * with another snapshot, or not at all until `answerReload()`; `holdFirst`
+ * holds the first load the same way.
  */
 function fakeSocket(
   snapshot = worldData(),
   handshakeUserId: string | null = USER_ID,
-  reload: { snapshot?: unknown; hold?: boolean } = {},
+  reload: { snapshot?: unknown; hold?: boolean; holdFirst?: boolean } = {},
 ) {
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
   const heldReloads: Array<(data: unknown) => void> = [];
@@ -106,9 +107,9 @@ function fakeSocket(
       const ack = args[args.length - 1];
       if (event === 'world' && typeof ack === 'function') {
         worldRequests += 1;
-        if (worldRequests === 1) {
+        if (worldRequests === 1 && !reload.holdFirst) {
           ack(structuredClone(snapshot));
-        } else if (reload.hold) {
+        } else if (reload.hold || worldRequests === 1) {
           heldReloads.push(ack as (data: unknown) => void);
         } else {
           ack(structuredClone(reload.snapshot ?? snapshot));
@@ -627,6 +628,124 @@ describe('FoundryClient world reload after a plain reconnection', () => {
 
     await expect(refresh).rejects.toThrow();
     expect(vi.getTimerCount()).toBe(0);
+  });
+});
+
+describe('FoundryClient first world load', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(axios.create).mockReturnValue({
+      interceptors: { request: { use: vi.fn() }, response: { use: vi.fn() } },
+    } as never);
+    vi.mocked(authenticateFoundry).mockResolvedValue({ session: 'cookie-1', userId: USER_ID });
+  });
+
+  /** Connects with the first `world` answer held until `answerReload()`. */
+  async function loading() {
+    const fake = fakeSocket(worldData(), USER_ID, { holdFirst: true });
+    queueSockets(fake);
+    const client = newClient();
+    const connecting = client.connect();
+    await vi.waitFor(() => expect(fake.worldRequestCount()).toBe(1));
+    return { client, fake, connecting };
+  }
+
+  const actorNames = (client: InstanceType<typeof FoundryClient>) =>
+    client
+      .getWorldData()
+      ?.actors.map((actor) => actor.name)
+      .sort();
+
+  it('replays a broadcast that arrives before the world answer onto the snapshot', async () => {
+    const { client, fake, connecting } = await loading();
+
+    fake.fire('modifyDocument', {
+      type: 'Actor',
+      action: 'create',
+      result: [{ _id: 'earlyActor000001', name: 'Early', type: 'npc' }],
+    });
+    fake.fire('userActivity', 'humanGamemaster1', { active: true });
+    expect(client.getWorldData()).toBeNull();
+    // A snapshot FoundryVTT built before the broadcast.
+    fake.answerReload(worldWithActor('Fresh'));
+    await connecting;
+
+    expect(actorNames(client)).toEqual(['Early', 'Fresh']);
+    expect(client.getWorldData()?.activeUsers).toContain('humanGamemaster1');
+    expect(client.isWorldDataStale()).toBe(false);
+    expect(client.connectionStatus().state).toBe('connected');
+    await client.disconnect();
+  });
+
+  it(`leaves the cache stale past ${WORLD_REPLAY_MAX_CHANGES} changes during the first load`, async () => {
+    const { client, fake, connecting } = await loading();
+
+    for (let i = 0; i <= WORLD_REPLAY_MAX_CHANGES; i++) {
+      fake.fire('modifyDocument', {
+        type: 'Actor',
+        action: 'update',
+        result: [{ _id: 'missingActor0001', name: `n${i}` }],
+      });
+    }
+    fake.answerReload(worldWithActor('Fresh'));
+    await connecting;
+
+    expect(actorNames(client)).toEqual(['Fresh']);
+    expect(client.isWorldDataStale()).toBe(true);
+    await client.disconnect();
+  });
+
+  it('asks nothing for an autosave during a reauthentication load, then re-reads the entry', async () => {
+    const first = fakeSocket();
+    const second = fakeSocket(worldData(), USER_ID, { holdFirst: true });
+    queueSockets(first, second);
+    const client = newClient();
+    await client.connect();
+    const journalId = 'journalEntry0001';
+
+    first.fire('shutdown');
+    await vi.waitFor(() => expect(second.worldRequestCount()).toBe(1));
+    second.fire(
+      'pm.autosave',
+      `JournalEntry.${journalId}.JournalEntryPage.journalPage00001#text.content`,
+      '<p>x</p>',
+    );
+    const requests = () =>
+      second.socket.emit.mock.calls
+        .filter(([event]) => event === 'modifyDocument')
+        .map(([, request]) => request);
+    expect(requests()).toEqual([]);
+
+    second.answerReload(worldData());
+    await vi.waitFor(() => expect(client.connectionStatus().state).toBe('connected'));
+
+    expect(requests()).toEqual([expect.objectContaining({ type: 'JournalEntry', action: 'get' })]);
+    await client.disconnect();
+  });
+
+  it('removes its data listeners when the handshake fails', async () => {
+    const fake = fakeSocket(worldData(), null);
+    queueSockets(fake);
+    const client = newClient();
+
+    await expect(client.connect()).rejects.toThrow('session event returned no userId');
+
+    const removed = fake.socket.off.mock.calls.map(([event]) => event);
+    expect(removed).toEqual(
+      expect.arrayContaining([
+        'modifyDocument',
+        'modifyDocumentBatch',
+        'userActivity',
+        'pm.autosave',
+      ]),
+    );
+    fake.fire('modifyDocument', {
+      type: 'Actor',
+      action: 'create',
+      result: [{ _id: 'lateActor0000001', name: 'Late', type: 'npc' }],
+    });
+    expect(client.getWorldData()).toBeNull();
+    await client.disconnect();
   });
 });
 

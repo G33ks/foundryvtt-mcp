@@ -670,10 +670,12 @@ export class FoundryClient {
   /** Rejects the running reload and clears its timer; set while one waits for its answer. */
   private cancelWorldReload: ((reason: string) => void) | null = null;
   /**
-   * Cache changes made while a reload runs, replayed onto the new snapshot
-   * ({@link changeCache}); `null` when no reload runs.
+   * Cache changes made while a snapshot loads (first load or reload),
+   * replayed onto it ({@link changeCache}); `null` when none loads.
    */
   private worldReplay: WorldReplay | null = null;
+  /** Journal entries autosaved while the socket could not be asked; re-read once it can. */
+  private readonly autosavedDuringLoad = new Set<string>();
   /** Counts socket drops: a reload that saw one leaves the cache stale. */
   private socketDrops = 0;
   /**
@@ -826,16 +828,17 @@ export class FoundryClient {
     const { session } = await authenticateFoundry(this.config.baseUrl, user, password);
 
     // Connect authenticated socket and load world data
-    this.worldData = await this.connectAndLoadWorld(session);
-    this.worldDataStale = false;
+    const { overflowed } = await this.connectAndLoadWorld(session);
+    this.worldDataStale = overflowed;
     this.session = session;
     this.awaitingSession = false;
     this.setConnectionState('connected', null);
     logger.info('Connected to FoundryVTT via Socket.IO', {
-      actors: this.worldData.actors.length,
-      scenes: this.worldData.scenes.length,
-      items: this.worldData.items.length,
+      actors: this.worldData?.actors.length ?? 0,
+      scenes: this.worldData?.scenes.length ?? 0,
+      items: this.worldData?.items.length ?? 0,
     });
+    this.rereadJournalsAutosavedDuringLoad();
     for (const listener of this.sessionListeners) {
       try {
         listener(session);
@@ -1069,78 +1072,108 @@ export class FoundryClient {
   }
 
   /**
-   * Connects Socket.IO with an authenticated session and loads worldData.
+   * Connects Socket.IO with an authenticated session and loads worldData
+   * ({@link loadWorldSnapshot}, which installs it).
+   *
+   * The data listeners are attached before the world is asked for: a
+   * broadcast sent while FoundryVTT builds and sends the snapshot is kept
+   * and replayed onto it, instead of being lost. The lifecycle listeners
+   * (`connect`, `disconnect`, `session`, `shutdown`) come only once the
+   * snapshot is in: before that, the handshake's own `session` handler
+   * decides, and a `session` event must not read as connected yet.
+   *
+   * @returns whether the replay overflowed (the cache is then stale)
    */
-  private connectAndLoadWorld(session: string): Promise<WorldData> {
+  private async connectAndLoadWorld(session: string): Promise<{ overflowed: boolean }> {
     // A previous socket must not outlive its replacement (see `detachSocket`).
     this.detachSocket();
+    const socket = io(this.config.baseUrl, sessionSocketOptions(session));
+    this.socket = socket;
+    this.attachDataListeners(socket);
+    const deadline = Date.now() + WORLD_LOAD_TIMEOUT_MS;
+    const timeoutMessage = `Timeout waiting for world data (${WORLD_LOAD_TIMEOUT_MS / 1000}s)`;
 
+    try {
+      await this.waitForSessionUser(socket, WORLD_LOAD_TIMEOUT_MS, timeoutMessage);
+      const { overflowed } = await this.loadWorldSnapshot(socket, {
+        timeoutMs: Math.max(deadline - Date.now(), 0),
+        timeoutMessage,
+        schemaWarning: 'WorldData failed schema validation — proceeding with raw data',
+      });
+      // Liveness (laurigates/foundryvtt-mcp#217): a socket that drops on its own must stop reading
+      // as connected, and one that socket.io reconnects must read as
+      // connected again. Both are removed in `disconnect()`.
+      socket.on('connect', this.onSocketConnect);
+      socket.on('disconnect', this.onSocketDisconnect);
+      // Authentication (01.11 zombie socket): FoundryVTT answers every
+      // (re)connection with `session`; one without a user means the
+      // server forgot the session (restart) or no world is running.
+      socket.on('session', this.onSessionEvent);
+      // The world was shut down: its sessions outlive it, its sockets
+      // do not (a socket is only bound to a user when it connects).
+      socket.on('shutdown', this.onWorldShutdown);
+      return { overflowed };
+    } catch (error) {
+      this.detachDataListeners(socket);
+      socket.disconnect();
+      throw error;
+    }
+  }
+
+  /**
+   * Keeps the cache live from the moment the socket exists
+   * (laurigates/foundryvtt-mcp#205); see {@link changeCache} for the
+   * changes that arrive while a snapshot loads.
+   */
+  private attachDataListeners(socket: Socket): void {
+    socket.on('modifyDocument', this.onDocumentBroadcast);
+    // Batches and operations with server-side side effects arrive here
+    // instead, never on both channels.
+    socket.on('modifyDocumentBatch', this.onDocumentBatchBroadcast);
+    // Presence (laurigates/foundryvtt-mcp#218): `activeUsers` is not a document collection, so it
+    // only moves on this event.
+    socket.on('userActivity', this.onUserActivity);
+    // Collaborative-editor autosaves bypass `modifyDocument` entirely.
+    socket.on('pm.autosave', this.onEditorAutosave);
+  }
+
+  private detachDataListeners(socket: Socket): void {
+    socket.off('modifyDocument', this.onDocumentBroadcast);
+    socket.off('modifyDocumentBatch', this.onDocumentBatchBroadcast);
+    socket.off('userActivity', this.onUserActivity);
+    socket.off('pm.autosave', this.onEditorAutosave);
+  }
+
+  /** The handshake: FoundryVTT's first `session` event must name a user. */
+  private waitForSessionUser(
+    socket: Socket,
+    timeoutMs: number,
+    timeoutMessage: string,
+  ): Promise<void> {
     return new Promise((resolve, reject) => {
-      this.socket = io(this.config.baseUrl, sessionSocketOptions(session));
-
       const cleanup = () => {
-        this.socket?.off('session', onSession);
-        this.socket?.off('connect_error', onConnectError);
+        clearTimeout(timeout);
+        socket.off('session', onSession);
+        socket.off('connect_error', onConnectError);
       };
-
       const timeout = setTimeout(() => {
         cleanup();
-        this.socket?.disconnect();
-        reject(new Error(`Timeout waiting for world data (${WORLD_LOAD_TIMEOUT_MS / 1000}s)`));
-      }, WORLD_LOAD_TIMEOUT_MS);
-
+        reject(new Error(timeoutMessage));
+      }, timeoutMs);
       const onSession = (data: { userId?: string } | null) => {
+        cleanup();
         if (!data?.userId) {
-          clearTimeout(timeout);
-          cleanup();
-          this.socket?.disconnect();
-          return reject(new Error('Authentication failed — session event returned no userId'));
+          reject(new Error('Authentication failed — session event returned no userId'));
+          return;
         }
-
-        this.socket?.emit('world', (worldData: WorldData) => {
-          clearTimeout(timeout);
-          cleanup();
-          const parsed = WorldDataSchema.safeParse(worldData);
-          if (!parsed.success) {
-            logger.warn('WorldData failed schema validation — proceeding with raw data', {
-              issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-            });
-          }
-          // Keep the snapshot live from here on (laurigates/foundryvtt-mcp#205). Attached only after a
-          // successful handshake so the reject paths have no listener to leak.
-          this.socket?.on('modifyDocument', this.onDocumentBroadcast);
-          // Batches and operations with server-side side effects arrive here
-          // instead, never on both channels.
-          this.socket?.on('modifyDocumentBatch', this.onDocumentBatchBroadcast);
-          // Presence (laurigates/foundryvtt-mcp#218): `activeUsers` is not a document collection, so it
-          // only moves on this event.
-          this.socket?.on('userActivity', this.onUserActivity);
-          // Collaborative-editor autosaves bypass `modifyDocument` entirely.
-          this.socket?.on('pm.autosave', this.onEditorAutosave);
-          // Liveness (laurigates/foundryvtt-mcp#217): a socket that drops on its own must stop reading
-          // as connected, and one that socket.io reconnects must read as
-          // connected again. Both are removed in `disconnect()`.
-          this.socket?.on('connect', this.onSocketConnect);
-          this.socket?.on('disconnect', this.onSocketDisconnect);
-          // Authentication (01.11 zombie socket): FoundryVTT answers every
-          // (re)connection with `session`; one without a user means the
-          // server forgot the session (restart) or no world is running.
-          this.socket?.on('session', this.onSessionEvent);
-          // The world was shut down: its sessions outlive it, its sockets
-          // do not (a socket is only bound to a user when it connects).
-          this.socket?.on('shutdown', this.onWorldShutdown);
-          resolve(worldData);
-        });
+        resolve();
       };
-
       const onConnectError = (err: Error) => {
-        clearTimeout(timeout);
         cleanup();
         reject(new Error(`Socket.IO connection failed: ${err.message}`));
       };
-
-      this.socket.on('session', onSession);
-      this.socket.on('connect_error', onConnectError);
+      socket.on('session', onSession);
+      socket.on('connect_error', onConnectError);
     });
   }
 
@@ -1152,7 +1185,7 @@ export class FoundryClient {
    * leaves the cache untouched (and stale) rather than taking the connection down.
    */
   private onDocumentBroadcast = (payload: unknown): void => {
-    if (!this.worldData) {
+    if (!this.hasCacheTarget()) {
       return;
     }
     const broadcast = parseDocumentBroadcast(payload);
@@ -1170,7 +1203,7 @@ export class FoundryClient {
    * Bound field rather than a method so the same reference reaches `socket.off()`.
    */
   private onDocumentBatchBroadcast = (payload: unknown): void => {
-    if (!this.worldData) {
+    if (!this.hasCacheTarget()) {
       return;
     }
     for (const broadcast of parseDocumentBatch(payload) ?? []) {
@@ -1180,16 +1213,18 @@ export class FoundryClient {
 
   /** Cache, event log and journal overwrite watch for one document broadcast. Never throws. */
   private handleDocumentBroadcast(broadcast: DocumentBroadcast): void {
-    if (!this.worldData) {
+    if (!this.hasCacheTarget()) {
       return;
     }
 
     try {
       const applied = this.changeCache((worldData) => applyDocumentBroadcast(worldData, broadcast));
       logger.debug(
-        applied
-          ? `Applied ${broadcast.action} ${broadcast.type} broadcast to cached worldData`
-          : `Ignored ${broadcast.action} ${broadcast.type} broadcast (not cached)`,
+        !this.worldData
+          ? `Kept ${broadcast.action} ${broadcast.type} broadcast for the world data being loaded`
+          : applied
+            ? `Applied ${broadcast.action} ${broadcast.type} broadcast to cached worldData`
+            : `Ignored ${broadcast.action} ${broadcast.type} broadcast (not cached)`,
       );
     } catch (error) {
       logger.warn('Failed to apply document broadcast to cached worldData', {
@@ -1197,6 +1232,12 @@ export class FoundryClient {
         action: broadcast.action,
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+
+    if (!this.worldData) {
+      // First load of the session: the event log and the overwrite watch
+      // start with the snapshot.
+      return;
     }
 
     // Recorded regardless of cache outcome — an uncached type (e.g. Setting)
@@ -1262,13 +1303,34 @@ export class FoundryClient {
       content: html,
       source: { kind: 'autosave' },
     });
+    if (!this.canSendOnSocket()) {
+      // A reauthentication is loading the world on a new socket, or the
+      // session is not known yet: nothing may be asked now. Re-read once it
+      // can. (On a first load the request may go: its answer goes through
+      // changeCache, so it reaches the snapshot being loaded.)
+      this.autosavedDuringLoad.add(journalId);
+      return;
+    }
+    this.rereadAutosavedJournal(journalId);
+  };
+
+  private rereadAutosavedJournal(journalId: string): void {
     this.fetchJournalEntry(journalId).catch((error: unknown) => {
       logger.warn('Could not re-read a journal entry after an editor autosave', {
         journalId,
         error: error instanceof Error ? error.message : String(error),
       });
     });
-  };
+  }
+
+  /** Re-reads the entries autosaved while the socket could not be asked. */
+  private rereadJournalsAutosavedDuringLoad(): void {
+    const journalIds = [...this.autosavedDuringLoad];
+    this.autosavedDuringLoad.clear();
+    for (const journalId of journalIds) {
+      this.rereadAutosavedJournal(journalId);
+    }
+  }
 
   /** The connected user plus the connector's other sessions (headless GM). */
   private connectorUserIds(): Set<string> {
@@ -1418,7 +1480,7 @@ export class FoundryClient {
    * Never throws: an unrecognized payload leaves presence as it was.
    */
   private onUserActivity = (userId: unknown, activityData?: unknown): void => {
-    if (!this.worldData) {
+    if (!this.hasCacheTarget()) {
       return;
     }
 
@@ -1432,7 +1494,7 @@ export class FoundryClient {
       logger.debug(
         `User ${activity.userId} is now ${activity.active ? 'active' : 'inactive'} (userActivity)`,
       );
-      const name = this.worldData.users?.find((user) => user._id === activity.userId)?.name;
+      const name = this.worldData?.users?.find((user) => user._id === activity.userId)?.name;
       this.eventLog.append({
         kind: 'presence',
         type: '',
@@ -1506,6 +1568,7 @@ export class FoundryClient {
       if (this.worldDataStale) {
         this.reloadAfterReconnection();
       }
+      this.rereadJournalsAutosavedDuringLoad();
       return;
     }
     this.reauthenticate('FoundryVTT no longer recognises the session (server restart?)').catch(
@@ -1560,10 +1623,7 @@ export class FoundryClient {
     if (!this.socket) {
       return;
     }
-    this.socket.off('modifyDocument', this.onDocumentBroadcast);
-    this.socket.off('modifyDocumentBatch', this.onDocumentBatchBroadcast);
-    this.socket.off('userActivity', this.onUserActivity);
-    this.socket.off('pm.autosave', this.onEditorAutosave);
+    this.detachDataListeners(this.socket);
     this.socket.off('connect', this.onSocketConnect);
     this.socket.off('disconnect', this.onSocketDisconnect);
     this.socket.off('session', this.onSessionEvent);
@@ -1762,7 +1822,6 @@ export class FoundryClient {
     }
     const reload = this.reloadWorldData().finally(() => {
       this.worldReload = null;
-      this.worldReplay = null;
     });
     this.worldReload = reload;
     return reload;
@@ -1775,79 +1834,108 @@ export class FoundryClient {
     }
     this.assertAuthenticated();
     const drops = this.socketDrops;
-    const replay: WorldReplay = { changes: [], overflowed: false };
-    this.worldReplay = replay;
-
-    const data = await new Promise<WorldData>((resolve, reject) => {
-      let settled = false;
-      const settle = () => {
-        settled = true;
-        clearTimeout(timeoutId);
-        this.cancelWorldReload = null;
-      };
-      const timeoutId = setTimeout(() => {
-        settle();
-        reject(new Error('Refresh timeout'));
-      }, WORLD_LOAD_TIMEOUT_MS);
-      this.cancelWorldReload = (reason) => {
-        settle();
-        reject(new Error(`World data refresh cancelled: ${reason}`));
-      };
-
-      socket.emit('world', (payload: WorldData) => {
-        if (settled) {
-          return;
-        }
-        settle();
-        const parsed = WorldDataSchema.safeParse(payload);
-        if (!parsed.success) {
-          logger.warn('WorldData refresh failed schema validation — proceeding with raw data', {
-            issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
-          });
-        }
-        resolve(payload);
-      });
+    const { data, overflowed } = await this.loadWorldSnapshot(socket, {
+      timeoutMs: WORLD_LOAD_TIMEOUT_MS,
+      timeoutMessage: 'Refresh timeout',
+      schemaWarning: 'WorldData refresh failed schema validation — proceeding with raw data',
     });
-
-    if (this.socket !== socket) {
-      throw new Error('World data refresh cancelled: the connection was replaced');
-    }
-    for (const change of replay.changes) {
-      try {
-        change(data);
-      } catch (error) {
-        logger.warn('Failed to replay a cache change onto the reloaded world data', {
-          error: errorMessage(error),
-        });
-      }
-    }
-    this.worldData = data;
-    this.worldDataStale = replay.overflowed || this.socketDrops !== drops;
+    this.worldDataStale = overflowed || this.socketDrops !== drops;
     logger.info('World data refreshed', {
       actors: data.actors.length,
       items: data.items.length,
     });
-    if (replay.overflowed) {
-      logger.warn(
-        `More than ${WORLD_REPLAY_MAX_CHANGES} cache changes arrived while the world data was loading, too many to replay — the cache stays stale until the next refresh`,
-      );
+  }
+
+  /**
+   * Asks FoundryVTT for the whole world on `socket`, replays onto it the
+   * cache changes that arrived meanwhile ({@link changeCache}), and installs
+   * it as the cache. Shared by the first load of a session and the reloads.
+   * An answer after the timeout, a cancellation ({@link cancelWorldReload})
+   * or a replaced socket is ignored.
+   *
+   * @returns the installed snapshot, and whether the replay overflowed
+   */
+  private async loadWorldSnapshot(
+    socket: Socket,
+    options: { timeoutMs: number; timeoutMessage: string; schemaWarning: string },
+  ): Promise<{ data: WorldData; overflowed: boolean }> {
+    const replay: WorldReplay = { changes: [], overflowed: false };
+    this.worldReplay = replay;
+    try {
+      const data = await new Promise<WorldData>((resolve, reject) => {
+        let settled = false;
+        const settle = () => {
+          settled = true;
+          clearTimeout(timeoutId);
+          this.cancelWorldReload = null;
+        };
+        const timeoutId = setTimeout(() => {
+          settle();
+          reject(new Error(options.timeoutMessage));
+        }, options.timeoutMs);
+        this.cancelWorldReload = (reason) => {
+          settle();
+          reject(new Error(`World data refresh cancelled: ${reason}`));
+        };
+
+        socket.emit('world', (payload: WorldData) => {
+          if (settled) {
+            return;
+          }
+          settle();
+          const parsed = WorldDataSchema.safeParse(payload);
+          if (!parsed.success) {
+            logger.warn(options.schemaWarning, {
+              issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+            });
+          }
+          resolve(payload);
+        });
+      });
+
+      if (this.socket !== socket) {
+        throw new Error('World data refresh cancelled: the connection was replaced');
+      }
+      for (const change of replay.changes) {
+        try {
+          change(data);
+        } catch (error) {
+          logger.warn('Failed to replay a cache change onto the reloaded world data', {
+            error: errorMessage(error),
+          });
+        }
+      }
+      this.worldData = data;
+      if (replay.overflowed) {
+        logger.warn(
+          `More than ${WORLD_REPLAY_MAX_CHANGES} cache changes arrived while the world data was loading, too many to replay — the cache stays stale until the next refresh`,
+        );
+      } else if (replay.changes.length > 0) {
+        logger.debug(
+          `Replayed ${replay.changes.length} cache change(s) onto the loaded world data`,
+        );
+      }
+      return { data, overflowed: replay.overflowed };
+    } finally {
+      if (this.worldReplay === replay) {
+        this.worldReplay = null;
+      }
     }
   }
 
   /**
-   * Applies a change to the cached world. While a reload runs, the change is
-   * also kept for the new snapshot: changes are idempotent upserts and
-   * removals applied in arrival order, so replaying one the snapshot already
-   * holds is harmless. Past {@link WORLD_REPLAY_MAX_CHANGES} the kept changes
-   * are dropped and the reload leaves the cache stale.
+   * Applies a change to the cached world. While a snapshot loads (the first
+   * one of a session, or a reload), the change is also kept for it: changes
+   * are idempotent upserts and removals applied in arrival order, so
+   * replaying one the snapshot already holds is harmless. Before the first
+   * snapshot there is no cache: the change is only kept. Past
+   * {@link WORLD_REPLAY_MAX_CHANGES} the kept changes are dropped and the
+   * load leaves the cache stale.
    *
    * @returns what `change` returned, or `undefined` without a cache
    */
   private changeCache<T>(change: (worldData: WorldData) => T): T | undefined {
-    if (!this.worldData) {
-      return undefined;
-    }
-    const result = change(this.worldData);
+    const result = this.worldData ? change(this.worldData) : undefined;
     const replay = this.worldReplay;
     if (replay && !replay.overflowed) {
       if (replay.changes.length >= WORLD_REPLAY_MAX_CHANGES) {
@@ -1858,6 +1946,11 @@ export class FoundryClient {
       }
     }
     return result;
+  }
+
+  /** True while there is a cache, or a snapshot loading that a change must reach. */
+  private hasCacheTarget(): boolean {
+    return this.worldData !== null || this.worldReplay !== null;
   }
 
   getWorldData(): WorldData | null {
