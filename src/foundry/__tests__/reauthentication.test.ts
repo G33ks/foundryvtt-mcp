@@ -28,8 +28,14 @@ vi.mock('../../utils/logger.js', () => ({
 }));
 vi.mock('../../config/index.js', () => ({ config: { logLevel: 'info' } }));
 
-const { FoundryClient, REAUTH_BASE_RETRY_MS, REAUTH_MAX_RETRY_MS, WORLD_REPLAY_MAX_CHANGES } =
-  await import('../client.js');
+const {
+  describeConnectError,
+  FoundryClient,
+  RECONNECT_ERROR_LOG_INTERVAL_MS,
+  REAUTH_BASE_RETRY_MS,
+  REAUTH_MAX_RETRY_MS,
+  WORLD_REPLAY_MAX_CHANGES,
+} = await import('../client.js');
 const { authenticateFoundry, NoActiveWorldError } = await import('../auth.js');
 const { io } = await import('socket.io-client');
 const { logger } = await import('../../utils/logger.js');
@@ -746,6 +752,109 @@ describe('FoundryClient first world load', () => {
     });
     expect(client.getWorldData()).toBeNull();
     await client.disconnect();
+  });
+});
+
+describe('FoundryClient reconnection log', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(axios.create).mockReturnValue({
+      interceptors: { request: { use: vi.fn() }, response: { use: vi.fn() } },
+    } as never);
+    vi.mocked(authenticateFoundry).mockResolvedValue({ session: 'cookie-1', userId: USER_ID });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function droppedSocket() {
+    const fake = fakeSocket();
+    queueSockets(fake);
+    const client = newClient();
+    await client.connect();
+    vi.useFakeTimers();
+    fake.socket.connected = false;
+    fake.fire('disconnect', 'transport close');
+    return { client, fake };
+  }
+
+  const reconnectWarnings = () => warnings('FoundryVTT socket reconnection failed');
+
+  it('logs the first failed attempt, then one a minute or when the error changes', async () => {
+    const { client, fake } = await droppedSocket();
+
+    fake.fire('connect_error', new Error('websocket error'));
+    vi.advanceTimersByTime(10_000);
+    fake.fire('connect_error', new Error('websocket error'));
+    expect(reconnectWarnings().map(([message]) => message)).toEqual([
+      'FoundryVTT socket reconnection failed (attempt 1): websocket error',
+    ]);
+
+    fake.fire('connect_error', new Error('timeout'));
+    vi.advanceTimersByTime(RECONNECT_ERROR_LOG_INTERVAL_MS);
+    fake.fire('connect_error', new Error('timeout'));
+    expect(reconnectWarnings().map(([message]) => message)).toEqual([
+      'FoundryVTT socket reconnection failed (attempt 1): websocket error',
+      'FoundryVTT socket reconnection failed (attempt 3): timeout',
+      'FoundryVTT socket reconnection failed (attempt 4): timeout',
+    ]);
+    await client.disconnect();
+  });
+
+  it('says how long the outage lasted and how many attempts failed once it is back', async () => {
+    const { client, fake } = await droppedSocket();
+    for (let i = 0; i < 5; i++) {
+      vi.advanceTimersByTime(15_000);
+      fake.fire('connect_error', new Error('websocket error'));
+    }
+
+    fake.socket.connected = true;
+    fake.fire('connect');
+    fake.fire('session', { userId: USER_ID, sessionId: 'x' });
+
+    const infos = vi.mocked(logger.info).mock.calls.map(([message]) => String(message));
+    expect(infos).toContain(
+      'FoundryVTT connection restored after 75 s and 5 failed reconnection attempt(s)',
+    );
+    await client.disconnect();
+  });
+
+  it('never writes the session cookie from a transport error', async () => {
+    const { client, fake } = await droppedSocket();
+    const error = Object.assign(new Error('websocket error'), {
+      description: {
+        message:
+          'Unexpected server response: 502 for wss://foundry.example/socket.io/?session=secret-cookie&EIO=4',
+      },
+      context: { url: 'wss://foundry.example/socket.io/?session=secret-cookie' },
+    });
+
+    fake.fire('connect_error', error);
+
+    const logged = JSON.stringify([
+      vi.mocked(logger.warn).mock.calls,
+      vi.mocked(logger.info).mock.calls,
+      vi.mocked(logger.debug).mock.calls,
+    ]);
+    expect(logged).not.toContain('secret-cookie');
+    expect(reconnectWarnings()[0]?.[0]).toBe(
+      'FoundryVTT socket reconnection failed (attempt 1): websocket error (Unexpected server response: 502 for wss://foundry.example/socket.io/?session=<redacted>&EIO=4)',
+    );
+    await client.disconnect();
+  });
+});
+
+describe('describeConnectError', () => {
+  it('adds the transport error, masks session cookies, and cuts long texts', () => {
+    expect(describeConnectError(new Error('xhr poll error'))).toBe('xhr poll error');
+    expect(
+      describeConnectError(Object.assign(new Error('websocket error'), { description: 'boom' })),
+    ).toBe('websocket error (boom)');
+    expect(describeConnectError(new Error('bad Cookie: session=abc123; x=1'))).toBe(
+      'bad Cookie: session=<redacted>; x=1',
+    );
+    expect(describeConnectError(new Error('x'.repeat(500)))).toHaveLength(300);
   });
 });
 

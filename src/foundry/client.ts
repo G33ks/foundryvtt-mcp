@@ -617,6 +617,43 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * During a socket outage, a failed reconnection attempt is logged at most
+ * once per this interval — or at once when its message changes.
+ */
+export const RECONNECT_ERROR_LOG_INTERVAL_MS = 60_000;
+
+/** Longest reconnection error text kept for the log. */
+const CONNECT_ERROR_MAX_LENGTH = 300;
+
+/**
+ * Hides a session cookie in a text bound for the log. The socket URL
+ * carries it in its query (`?session=…`), and the cookie header as
+ * `session=…`: a transport error that quotes either must not leak it.
+ */
+export function redactSession(text: string): string {
+  return text.replace(/session=[^&\s;,"')]+/gi, 'session=<redacted>');
+}
+
+/**
+ * One line for a socket.io `connect_error`: its message, plus the message of
+ * the underlying transport error when it has one (e.g. "websocket error
+ * (getaddrinfo ENOTFOUND …)"). Never the error object itself, which holds
+ * the WebSocket and its URL. Session cookies are masked.
+ */
+export function describeConnectError(error: unknown): string {
+  const message = errorMessage(error);
+  const description = isRecord(error) ? error.description : undefined;
+  const detail =
+    typeof description === 'string'
+      ? description
+      : isRecord(description) && typeof description.message === 'string'
+        ? description.message
+        : undefined;
+  const text = detail && detail !== message ? `${message} (${detail})` : message;
+  return redactSession(text).slice(0, CONNECT_ERROR_MAX_LENGTH);
+}
+
 /** Label of a FoundryVTT user role, e.g. `Assistant GM`. */
 export function roleLabel(role: number): string {
   return ROLE_LABELS[role] ?? `role ${role}`;
@@ -676,6 +713,16 @@ export class FoundryClient {
   private worldReplay: WorldReplay | null = null;
   /** Journal entries autosaved while the socket could not be asked; re-read once it can. */
   private readonly autosavedDuringLoad = new Set<string>();
+  /**
+   * The socket transport's current outage: since when, how many
+   * reconnection attempts failed, and the last one logged. `null` while up.
+   */
+  private outage: {
+    since: number;
+    failedAttempts: number;
+    loggedAt: number;
+    loggedMessage: string | null;
+  } | null = null;
   /** Counts socket drops: a reload that saw one leaves the cache stale. */
   private socketDrops = 0;
   /**
@@ -946,8 +993,9 @@ export class FoundryClient {
     this.connectionState = state;
     this.connectionError = state === 'connected' ? null : error;
     if (state === 'connected') {
-      if (previous !== 'connected' && this.loggedConnection !== null) {
-        logger.info('FoundryVTT connection restored');
+      const summary = previous !== 'connected' ? this.takeOutageSummary() : '';
+      if (previous !== 'connected' && (this.loggedConnection !== null || summary)) {
+        logger.info(`FoundryVTT connection restored${summary}`);
       }
       this.loggedConnection = null;
       for (const wake of this.connectionWaiters) {
@@ -1112,6 +1160,8 @@ export class FoundryClient {
       // The world was shut down: its sessions outlive it, its sockets
       // do not (a socket is only bound to a user when it connects).
       socket.on('shutdown', this.onWorldShutdown);
+      // Each failed reconnection attempt while the socket is down.
+      socket.on('connect_error', this.onReconnectError);
       return { overflowed };
     } catch (error) {
       this.detachDataListeners(socket);
@@ -1170,7 +1220,7 @@ export class FoundryClient {
       };
       const onConnectError = (err: Error) => {
         cleanup();
-        reject(new Error(`Socket.IO connection failed: ${err.message}`));
+        reject(new Error(`Socket.IO connection failed: ${describeConnectError(err)}`));
       };
       socket.on('session', onSession);
       socket.on('connect_error', onConnectError);
@@ -1598,6 +1648,7 @@ export class FoundryClient {
 
   private onSocketDisconnect = (reason?: unknown): void => {
     this.socketDrops += 1;
+    this.outage ??= { since: Date.now(), failedAttempts: 0, loggedAt: 0, loggedMessage: null };
     // Socket.IO never answers a request sent before the drop.
     this.cancelWorldReload?.('the socket dropped while the world data was loading');
     this.worldDataStale = this.worldData !== null;
@@ -1609,6 +1660,48 @@ export class FoundryClient {
       reason: typeof reason === 'string' ? reason : undefined,
     });
   };
+
+  /**
+   * A reconnection attempt of socket.io failed (socket.io emits
+   * `connect_error` for each one while the socket is down). The first
+   * failure is logged, then one line per {@link RECONNECT_ERROR_LOG_INTERVAL_MS},
+   * or at once when the error changes; the count goes into the line written
+   * when the connection is back ({@link takeOutageSummary}).
+   *
+   * Bound field rather than a method so the same reference reaches `socket.off()`.
+   */
+  private onReconnectError = (error: unknown): void => {
+    this.outage ??= { since: Date.now(), failedAttempts: 0, loggedAt: 0, loggedMessage: null };
+    const outage = this.outage;
+    outage.failedAttempts += 1;
+    const message = describeConnectError(error);
+    const now = Date.now();
+    if (
+      outage.loggedMessage === null ||
+      message !== outage.loggedMessage ||
+      now - outage.loggedAt >= RECONNECT_ERROR_LOG_INTERVAL_MS
+    ) {
+      outage.loggedAt = now;
+      outage.loggedMessage = message;
+      logger.warn(
+        `FoundryVTT socket reconnection failed (attempt ${outage.failedAttempts}): ${message}`,
+      );
+    }
+  };
+
+  /**
+   * Ends the outage record: e.g. " after 42 s and 9 failed reconnection
+   * attempt(s)", or `''` when there was none.
+   */
+  private takeOutageSummary(): string {
+    const outage = this.outage;
+    if (!outage) {
+      return '';
+    }
+    this.outage = null;
+    const seconds = Math.round((Date.now() - outage.since) / 1000);
+    return ` after ${seconds} s and ${outage.failedAttempts} failed reconnection attempt(s)`;
+  }
 
   /**
    * Closes the current socket and removes every persistent listener bound to
@@ -1628,6 +1721,7 @@ export class FoundryClient {
     this.socket.off('disconnect', this.onSocketDisconnect);
     this.socket.off('session', this.onSessionEvent);
     this.socket.off('shutdown', this.onWorldShutdown);
+    this.socket.off('connect_error', this.onReconnectError);
     this.socket.disconnect();
     this.socket = null;
   }
@@ -1646,6 +1740,7 @@ export class FoundryClient {
     this.loggedConnection = null;
     this.awaitingSession = false;
     this.restLinkLive = true;
+    this.outage = null;
     logger.info('FoundryVTT client disconnected');
   }
 
