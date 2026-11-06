@@ -22,6 +22,7 @@ import { packageVersion } from './shared/version.js';
 import { getAllTools } from './tools/definitions.js';
 import { getAllResources } from './tools/resources.js';
 import { logger } from './utils/logger.js';
+import { withBareErrors } from './utils/mcp-errors.js';
 
 export interface McpBackend {
   callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult>;
@@ -61,15 +62,16 @@ export function createMcpServer(backend: McpBackend): Server {
     };
   });
 
-  // Handle tool calls
+  // Handle tool calls. Errors leave with their bare message: the client adds
+  // the "MCP error <code>: " prefix itself (see withBareErrors).
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    return backend.callTool(name, args || {});
+    return withBareErrors(() => backend.callTool(name, args || {}));
   });
 
   // Handle resource reads
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
-    return backend.readResource(request.params.uri);
+    return withBareErrors(() => backend.readResource(request.params.uri));
   });
 
   return server;

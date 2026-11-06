@@ -16,6 +16,7 @@ import { type Config, configFromSettings, getConfig } from '../config/index.js';
 import { displayValue, KNOWN_SETTINGS, resolveSettings } from '../config/sources.js';
 import type { CoreStatus, FoundryCore } from '../core.js';
 import { logger } from '../utils/logger.js';
+import { bareMessage } from '../utils/mcp-errors.js';
 import { isRefusal } from '../utils/refusal.js';
 import { compareBuilds } from './build-order.js';
 import { configDigests, configFingerprint } from './config-hash.js';
@@ -57,11 +58,7 @@ export interface SharedProcessOptions {
   shutdownGraceMs?: number;
 }
 
-/** McpError prefixes its message with "MCP error <code>: "; send the bare text. */
-function bareMessage(error: McpError): string {
-  return error.message.replace(/^MCP error -?\d+: /, '');
-}
-
+/** Sends the bare text of an McpError: the relay rebuilds the McpError. */
 export function toIpcError(error: unknown): IpcError {
   if (error instanceof McpError) {
     return {
