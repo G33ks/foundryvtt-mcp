@@ -5,6 +5,14 @@
 ### Added
 
 - **Companion module lines in the log**: the GM page's console lines from the companion module (bridge connection, handshake, errors) and the uncaught errors thrown from its code reach the connector's log, at `info` or `warn`. Only the module's own scripts and its own message text are copied; no page, document or command content.
+- **Failed reconnections in the log**: during a network cut, the first failed reconnection attempt of the socket is logged, then one line a minute or whenever the error changes, and the "connection restored" line says how long the cut lasted and how many attempts failed. Session cookies are masked in these lines.
+- **`status` shows a stale world cache**: a `World cache: stale since <time> — <reason>` line while the cached world does not follow live changes.
+
+### Changed
+
+- Only the calls that read the cached world or go through the socket wait for a reconnection; tools of the companion module, of the REST API module and local ones (`generate_npc`, `list_scene_assets`, …) go ahead at once. `foundry://` resources that read the cache now wait like tools. Each of the 114 tools is classified in `src/tools/tool-dependencies.ts`.
+- A tool that goes through the companion module waits up to 10 s for it while the headless GM page is starting, loading `/game`, reconnecting or was just logged in, and is refused at once, with the reason, when the module cannot come. Writes of the companion module still wait in the same queue as the other writes.
+- The headless GM session reads `loading-game` ("Opening /game with the connector's session"), not `waiting-for-session`, while it loads the game with the session in hand.
 
 ### Fixed
 
@@ -12,6 +20,8 @@
 - After a network cut, when FoundryVTT still knows the session, the world cache is reloaded on its own instead of staying stale until `refresh_world_data`. Changes received during the reload are kept.
 - FoundryVTT v14 login sends `Sec-Fetch-Site: same-origin` with `Origin`, which some v14 setups require. From duckpuppy's fork (Patrick Aikens).
 - The GM page opens at 1920×1080: the 1280×720 default is below FoundryVTT's minimum window size. From duckpuppy's fork (Patrick Aikens).
+- A change broadcast while the world loads at connection time is no longer lost: it is kept and replayed onto the loaded world, as for a reload.
+- When the module bridge failed to start, tools that need it say so instead of "the module bridge is disabled".
 
 ## 2.0.0 — 2026-11-05
 
