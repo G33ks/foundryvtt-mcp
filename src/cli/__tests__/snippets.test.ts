@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { packageName } from '../../shared/version.js';
 import {
   claudeCodeCommand,
+  claudeCodePowerShellNote,
   claudeDesktopSnippet,
   connectorCommand,
   installKind,
@@ -84,5 +85,14 @@ describe('claudeCodeCommand', () => {
     expect(claudeCodeCommand(POSIX_NODE, ENTRIES.posix.global, 'local')).toBe(
       `claude mcp add foundryvtt --scope local -- "${POSIX_NODE}" "${ENTRIES.posix.global}"`,
     );
+  });
+});
+
+describe('claudeCodePowerShellNote', () => {
+  it("tells PowerShell users of a claude.ps1 to write '--', for Windows paths only", () => {
+    expect(claudeCodePowerShellNote(WINDOWS_NODE)).toBe(
+      "In PowerShell, if `Get-Command claude` shows a claude.ps1 (npm install), write '--' instead of --.",
+    );
+    expect(claudeCodePowerShellNote(POSIX_NODE)).toBeNull();
   });
 });

@@ -61,7 +61,9 @@ export function claudeDesktopSnippet(node: string, entry: string): string {
 /**
  * `claude mcp add` command registering the connector in Claude Code. The
  * paths go between double quotes, which PowerShell, cmd and POSIX shells
- * all read the same way for a path (no `"` in a path on Windows).
+ * all read the same way for a path (no `"` in a path on Windows). The `--`
+ * reaches `claude` from every shell when it is an executable or a `.cmd`
+ * shim; see {@link claudeCodePowerShellNote} for the one exception.
  */
 export function claudeCodeCommand(
   node: string,
@@ -69,4 +71,18 @@ export function claudeCodeCommand(
   scope: 'user' | 'local' = 'user',
 ): string {
   return `claude mcp add ${SERVER_NAME} --scope ${scope} -- "${node}" "${entry}"`;
+}
+
+/**
+ * The one case where {@link claudeCodeCommand} breaks: in PowerShell, when
+ * `claude` is the `claude.ps1` shim of an npm global install, PowerShell
+ * itself takes `--` as its end-of-parameters marker and never passes it on
+ * (a native `claude.exe` or a `.cmd` receives it). Written `'--'`, it
+ * arrives in all three cases. Only for Windows paths; `null` otherwise.
+ */
+export function claudeCodePowerShellNote(node: string): string | null {
+  if (!/^[A-Za-z]:\\/.test(node)) {
+    return null;
+  }
+  return "In PowerShell, if `Get-Command claude` shows a claude.ps1 (npm install), write '--' instead of --.";
 }

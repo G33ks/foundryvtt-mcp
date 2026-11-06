@@ -290,6 +290,8 @@ With the settings in the [configuration file](#configuration-file), add to `clau
 
 `claude mcp add foundryvtt --scope user -- "<NODE>" "<ENTRY>"` (all your projects; `--scope local` for the current project only), or in `~/.claude.json` (or a project's `.mcp.json`):
 
+> **Windows PowerShell:** the command works as printed when `claude` is the installer's `claude.exe` (or a `.cmd`). If `Get-Command claude` shows a `claude.ps1` (installed with npm), PowerShell swallows the `--`: write `'--'` instead.
+
 ```json
 {
   "mcpServers": {

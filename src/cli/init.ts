@@ -29,6 +29,7 @@ import { quoteValue, UnwritableValueError, type WriteResult, writeConfig } from 
 import { PromptCancelled, type Prompter, terminalProblem, terminalPrompter } from './prompt.js';
 import {
   claudeCodeCommand,
+  claudeCodePowerShellNote,
   claudeDesktopSnippet,
   connectorCommand,
   installKind,
@@ -453,6 +454,10 @@ async function runInteractive(deps: InitDeps): Promise<number> {
     print(`  ${claudeCodeCommand(deps.node, deps.entry)}`);
     print('or for the current project only, on this machine:');
     print(`  ${claudeCodeCommand(deps.node, deps.entry, 'local')}`);
+    const powerShellNote = claudeCodePowerShellNote(deps.node);
+    if (powerShellNote) {
+      print(powerShellNote);
+    }
     print('');
     print(
       `Both name this Node.js: ${deps.node}. After changing or updating Node.js (nvm, installer), run \`${deps.command} init\` again for new ones.`,

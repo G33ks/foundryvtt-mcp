@@ -174,6 +174,9 @@ describe('init — new installation', () => {
     expect(out).toContain('"C:\\\\Users\\\\me\\\\foundryvtt-mcp\\\\dist\\\\index.js"');
     expect(out).toContain(`claude mcp add foundryvtt --scope user -- "${NODE}" "${ENTRY}"`);
     expect(out).toContain(`claude mcp add foundryvtt --scope local -- "${NODE}" "${ENTRY}"`);
+    expect(out).toContain(
+      "if `Get-Command claude` shows a claude.ps1 (npm install), write '--' instead of --.",
+    );
     expect(out).toContain('"command": "C:\\\\Program Files\\\\nodejs\\\\node.exe"');
     expect(out).toContain(`Both name this Node.js: ${NODE}.`);
     expect(out).toContain(`run \`node "${ENTRY}" init\` again`);
