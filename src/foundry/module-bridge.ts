@@ -172,6 +172,8 @@ export class ModuleBridge {
   private socket: WebSocket | null = null;
   private connectedSince: Date | null = null;
   private pending = new Map<string, PendingRequest>();
+  /** Callers of {@link waitUntilConnected}, woken by the next authentication. */
+  private readonly connectionWaiters = new Set<(connected: boolean) => void>();
   private nextId = 1;
   private readonly port: number;
   private readonly expectedOrigin: string;
@@ -344,6 +346,33 @@ export class ModuleBridge {
         { remoteAddress },
       );
     }
+    this.wakeConnectionWaiters(true);
+  }
+
+  private wakeConnectionWaiters(connected: boolean): void {
+    for (const wake of [...this.connectionWaiters]) {
+      wake(connected);
+    }
+  }
+
+  /**
+   * Waits until an authenticated module is connected.
+   *
+   * @returns true once connected, false when `timeoutMs` ran out first or the bridge stopped
+   */
+  waitUntilConnected(timeoutMs: number): Promise<boolean> {
+    if (this.isConnected()) {
+      return Promise.resolve(true);
+    }
+    return new Promise((resolve) => {
+      const wake = (connected: boolean) => {
+        clearTimeout(timer);
+        this.connectionWaiters.delete(wake);
+        resolve(connected);
+      };
+      const timer = setTimeout(() => wake(false), timeoutMs);
+      this.connectionWaiters.add(wake);
+    });
   }
 
   private checkAuthResponse(
@@ -415,6 +444,7 @@ export class ModuleBridge {
       pending.reject(new Error('Module bridge shutting down'));
     }
     this.pending.clear();
+    this.wakeConnectionWaiters(false);
     this.socket?.close();
     this.socket = null;
     this.connectedSince = null;

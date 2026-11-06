@@ -417,3 +417,30 @@ describe('ModuleBridge.prove', () => {
     });
   });
 });
+
+describe('ModuleBridge.waitUntilConnected', () => {
+  it('answers at once when a module is connected', async () => {
+    const { bridge } = await bridgeWithModule();
+    await expect(bridge.waitUntilConnected(10)).resolves.toBe(true);
+  });
+
+  it('wakes up when a module authenticates', async () => {
+    const port = await freePort();
+    const bridge = await startBridge(port);
+    const waiting = bridge.waitUntilConnected(5000);
+
+    await authenticate(bridge, await client(port));
+
+    await expect(waiting).resolves.toBe(true);
+  });
+
+  it('gives up after the timeout, and when the bridge stops', async () => {
+    const port = await freePort();
+    const bridge = await startBridge(port);
+    await expect(bridge.waitUntilConnected(20)).resolves.toBe(false);
+
+    const waiting = bridge.waitUntilConnected(5000);
+    await bridge.stop();
+    await expect(waiting).resolves.toBe(false);
+  });
+});

@@ -401,6 +401,49 @@ describe('HeadlessGmSession shared mode', () => {
     await session.stop();
   });
 
+  it('reads as failing while /game retries, and says since when it is logged in', async () => {
+    const { session, env } = await startShared('cookie-1');
+    expect(session.isRetrying()).toBe(false);
+    const since = session.loggedInSince();
+    expect(since).toBeTypeOf('number');
+
+    vi.useFakeTimers();
+    env.page.goto.mockRejectedValueOnce(new Error('page.goto: net::ERR_CONNECTION_REFUSED'));
+    await env.pageNavigates('/no');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(session.isRetrying()).toBe(true);
+    expect(session.loggedInSince()).toBeNull();
+
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(session.isActive()).toBe(true);
+    expect(session.isRetrying()).toBe(false);
+    expect(session.loggedInSince()).toBeTypeOf('number');
+    await session.stop();
+  });
+
+  it('reads as failing while the connector cannot get a new session', async () => {
+    const env = fakeEnvironment();
+    env.state.landing = () => `${FOUNDRY_URL}/join`;
+    launchMock.mockResolvedValue(env.browser);
+    const src = fakeSource('cookie-1');
+    src.source.reauthenticate.mockRejectedValue(new Error('connect ETIMEDOUT'));
+    const session = new HeadlessGmSession({
+      foundryUrl: FOUNDRY_URL,
+      username: 'mcp-api',
+      sessionSource: src.source,
+    });
+    await session.start();
+    await settle();
+    expect(session.isRetrying()).toBe(true);
+
+    env.state.landing = (url) => url;
+    src.newSession('cookie-2');
+    expect(session.isRetrying()).toBe(false);
+    await settle();
+    expect(session.isActive()).toBe(true);
+    await session.stop();
+  });
+
   it('blocks a navigation to /join and reloads /game instead, without reauthenticating', async () => {
     const { session, env, src } = await startShared('cookie-1');
 

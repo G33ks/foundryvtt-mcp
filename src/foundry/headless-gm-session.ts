@@ -400,6 +400,10 @@ export class HeadlessGmSession {
   private lastError: string | null = null;
   private retryDelayMs = BASE_RETRY_MS;
   private retryTimer: NodeJS.Timeout | null = null;
+  /** When {@link active} last became true. */
+  private activeSince: number | null = null;
+  /** Shared mode: the connector could not get a new session; it retries on its own. */
+  private reauthFailed = false;
   private watchdogTimer: NodeJS.Timeout | null = null;
   private bridgeDownTicks = 0;
   private stopped = false;
@@ -524,6 +528,20 @@ export class HeadlessGmSession {
     return this.active;
   }
 
+  /** When the session became logged in (epoch ms), while it still is; `null` otherwise. */
+  loggedInSince(): number | null {
+    return this.active ? this.activeSince : null;
+  }
+
+  /**
+   * True while the session is failing: a failed attempt waits for its next
+   * try (login, or loading /game), or the connector could not provide a new
+   * session. The retries go on in the background, with growing delays.
+   */
+  isRetrying(): boolean {
+    return (this.retryTimer !== null && this.lastError !== null) || this.reauthFailed;
+  }
+
   /** `shared`: the page reuses the connector's session; `separate`: its own account. */
   mode(): 'shared' | 'separate' {
     return this.options.sessionSource ? 'shared' : 'separate';
@@ -607,6 +625,7 @@ export class HeadlessGmSession {
   /** Shared mode: installs a new session cookie, then (re)loads `/game`. */
   private useSession(session: string): void {
     this.reauthRequested = false;
+    this.reauthFailed = false;
     clearTimeout(this.retryTimer ?? undefined);
     this.retryTimer = null;
     this.sessionQueued = true;
@@ -721,6 +740,7 @@ export class HeadlessGmSession {
     }
     const wasLoggedIn = this.sharedState === 'logged-in';
     this.active = true;
+    this.activeSince = Date.now();
     this.sharedState = 'logged-in';
     this.lastError = null;
     this.retryDelayMs = BASE_RETRY_MS;
@@ -778,6 +798,7 @@ export class HeadlessGmSession {
     sessionSource.reauthenticate(`headless GM page: ${reason}`).catch((error: unknown) => {
       // The connector keeps retrying on its own; the page waits for its cookie.
       this.lastError = `${reason}; reauthentication failed: ${errorText(error)}`;
+      this.reauthFailed = true;
     });
   }
 
@@ -828,6 +849,7 @@ export class HeadlessGmSession {
     }
     clearTimeout(this.retryTimer ?? undefined);
     this.retryTimer = setTimeout(() => {
+      this.retryTimer = null;
       this.attemptLogin().catch((error) => {
         // attemptLogin itself never throws (see its own try/catch) — this is
         // a last-resort guard so a bug there can never kill the retry loop.
@@ -901,6 +923,7 @@ export class HeadlessGmSession {
       }
 
       this.active = true;
+      this.activeSince = Date.now();
       this.lastError = null;
       this.retryDelayMs = BASE_RETRY_MS;
       logger.info(`Headless GM session logged in as ${this.options.username}`);

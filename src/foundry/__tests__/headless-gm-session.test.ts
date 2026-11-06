@@ -430,9 +430,12 @@ describe('HeadlessGmSession', () => {
       password: 'mcp',
     });
     await session.start();
+    // The first attempt is scheduled, not failing yet.
+    expect(session.isRetrying()).toBe(false);
     await vi.advanceTimersByTimeAsync(0);
 
     expect(session.isActive()).toBe(false);
+    expect(session.isRetrying()).toBe(true);
     expect(session.statusText()).toContain('No user named "missing-user"');
     expect(page.goto).toHaveBeenCalledTimes(1);
 

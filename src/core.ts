@@ -32,6 +32,7 @@ import { defaultStateDir } from './shared/paths.js';
 import type { HealthRuntime } from './tools/handlers/diagnostics.js';
 import { routeResourceRequest, routeToolRequest } from './tools/index.js';
 import {
+  needsBridge,
   resourceDependency,
   type ToolDependency,
   toolDependency,
@@ -53,6 +54,19 @@ export type HeadlessGmState = 'running' | 'not-started' | 'launch-failed' | 'dis
  * socket.io transport reconnection a few.
  */
 export const TOOL_RECONNECT_WAIT_MS = 15_000;
+
+/**
+ * How long a call that needs the companion module waits for it while the
+ * headless page is starting or reconnecting. The module authenticates about
+ * 0.6 s after `game.ready`, about 4 s after the browser launch.
+ */
+export const BRIDGE_CONNECT_WAIT_MS = 10_000;
+
+/**
+ * A page logged in for longer than this without a module is not about to
+ * get one: the watchdog reloads it, and a call is refused at once meanwhile.
+ */
+export const BRIDGE_LOGGED_IN_GRACE_MS = 15_000;
 
 /**
  * True when the headless GM page shares the connector's account (and
@@ -375,6 +389,9 @@ export class FoundryCore {
 
     try {
       await this.waitForReconnection(toolDependency(name));
+      if (needsBridge(name, args)) {
+        await this.waitForModule();
+      }
       return (await routeToolRequest(
         name,
         args,
@@ -428,6 +445,56 @@ export class FoundryCore {
       ErrorCode.InvalidRequest,
       `Reconnecting to FoundryVTT… (${state}${error ? `: ${error}` : ''}). ` +
         'The connector retries on its own; try again in a moment.',
+    );
+  }
+
+  /**
+   * A call that needs the companion module waits for it while the headless
+   * page is on its way (browser starting, /game loading, page reconnecting,
+   * just logged in), up to {@link BRIDGE_CONNECT_WAIT_MS}. It is refused at
+   * once when the module cannot come: the bridge is disabled or failed to
+   * start, the browser could not be launched, no headless session is
+   * configured, the session is failing, or the page has been logged in for
+   * more than {@link BRIDGE_LOGGED_IN_GRACE_MS} without a module.
+   */
+  private async waitForModule(): Promise<void> {
+    const bridge = this.moduleBridge;
+    if (bridge?.isConnected()) {
+      return;
+    }
+    const refuse = (reason: string) =>
+      refusalError(ErrorCode.InvalidRequest, `The companion module is not connected: ${reason}`);
+    if (!bridge) {
+      throw refuse(
+        this.bridgeError !== null
+          ? `the module bridge failed to start (${this.bridgeError}). Fix the cause (often the port is taken), then restart the shared process (foundryvtt-mcp stop).`
+          : 'the module bridge is disabled. Set FOUNDRY_MODULE_BRIDGE_ENABLED=true and install the companion Foundry module.',
+      );
+    }
+    const session = this.headlessGmSession;
+    if (!session) {
+      throw refuse(
+        this.headlessLaunchError !== null
+          ? `the headless GM browser could not be launched (${this.headlessLaunchError}).`
+          : 'no headless GM session is configured (FOUNDRY_HEADLESS_GM_ENABLED and credentials), and the module only connects from it.',
+      );
+    }
+    if (session.isRetrying()) {
+      throw refuse(
+        `the headless GM session is failing and retries on its own — ${session.statusText()}`,
+      );
+    }
+    const loggedInSince = session.loggedInSince();
+    if (loggedInSince !== null && Date.now() - loggedInSince > BRIDGE_LOGGED_IN_GRACE_MS) {
+      throw refuse(
+        'the headless GM page is logged in but the module has not connected; the watchdog reloads the page. Check that the companion module is enabled in the world.',
+      );
+    }
+    if (await bridge.waitUntilConnected(BRIDGE_CONNECT_WAIT_MS)) {
+      return;
+    }
+    throw refuse(
+      `still waiting for it after ${BRIDGE_CONNECT_WAIT_MS / 1000} s — ${session.statusText()}. Try again in a moment.`,
     );
   }
 
