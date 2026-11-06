@@ -3233,7 +3233,7 @@ export const eventTools = [
         excludeSelf: {
           type: 'boolean',
           description:
-            "Drop events this server's own writes caused, when FoundryVTT echoes them back (default true)",
+            "Drop events caused by this server's own account (default true). FoundryVTT does not send a client the broadcast of its own writes, so on v14 the connector's writes never reach the event log and false adds nothing for them; it still lets through changes saved by the same account elsewhere (the headless GM page, an editor open as that user).",
           default: true,
         },
       },

@@ -42,6 +42,7 @@ import { isWriteTool } from './tools/write-tools.js';
 import { DiagnosticSystem } from './utils/diagnostics.js';
 import { redactToolArgs } from './utils/log-args.js';
 import { logger } from './utils/logger.js';
+import { bareMessage } from './utils/mcp-errors.js';
 import { isRefusal, refusalError } from './utils/refusal.js';
 import { SerialQueue } from './utils/serial-queue.js';
 
@@ -127,6 +128,14 @@ export interface CoreStatus {
 export interface FoundryCoreOptions {
   /** Relays of the shared process hosting this core, for `get_health_status`. */
   relays?: () => NonNullable<HealthRuntime['relays']>;
+}
+
+/** The reason of a refusal for the log: an McpError's text without its "MCP error <code>: " prefix. */
+function refusalReason(error: unknown): string {
+  if (error instanceof McpError) {
+    return bareMessage(error);
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 /** One line for get_health_status: the configuration file and where settings come from. */
@@ -409,10 +418,7 @@ export class FoundryCore {
       if (isRefusal(error)) {
         // Turned down by design (e.g. an outdated journal page version): the
         // caller is told why; the log needs one line, not a stack.
-        logger.warn('Tool call refused', {
-          name,
-          reason: error instanceof Error ? error.message : String(error),
-        });
+        logger.warn('Tool call refused', { name, reason: refusalReason(error) });
       } else {
         logger.error('Tool execution failed:', error);
       }
@@ -534,10 +540,7 @@ export class FoundryCore {
       )) as ReadResourceResult;
     } catch (error) {
       if (isRefusal(error)) {
-        logger.warn('Resource read refused', {
-          uri,
-          reason: error instanceof Error ? error.message : String(error),
-        });
+        logger.warn('Resource read refused', { uri, reason: refusalReason(error) });
       } else {
         logger.error('Resource read failed:', error);
       }

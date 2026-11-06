@@ -81,13 +81,17 @@ describe('FoundryCore tool logging', () => {
     const core = new FoundryCore();
 
     const call = core.callTool('update_journal_page', {});
-    await expect(call).rejects.toThrow(/Failed to update journal page: Page "Recap" has changed/);
+    // The refusal's own message, with no "Failed to update journal page: " in front.
+    await expect(call).rejects.toThrow(
+      /^MCP error -32600: Page "Recap" has changed since it was read\. Nothing was written\.$/,
+    );
 
     expect(error).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledTimes(1);
+    // The logged reason carries no "MCP error -32600: " prefix either.
     expect(warn).toHaveBeenCalledWith('Tool call refused', {
       name: 'update_journal_page',
-      reason: expect.stringContaining('has changed since it was read'),
+      reason: 'Page "Recap" has changed since it was read. Nothing was written.',
     });
   });
 

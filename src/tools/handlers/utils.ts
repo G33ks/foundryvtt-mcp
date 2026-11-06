@@ -42,9 +42,10 @@ export async function withToolError<T>(toolName: string, fn: () => Promise<T>): 
     if (error instanceof McpError) {
       throw error;
     }
-    // Expected refusals are logged once, as a warning, by FoundryCore.
+    // Expected refusals are logged once, as a warning, by FoundryCore. Their
+    // message already says what was refused and why: no "Failed to …" prefix.
     if (error instanceof RefusedError) {
-      throw refusalError(ErrorCode.InvalidRequest, `Failed to ${toolName}: ${error.message}`);
+      throw refusalError(ErrorCode.InvalidRequest, error.message);
     }
     logger.error(`Failed to ${toolName}:`, error);
     throw new McpError(
