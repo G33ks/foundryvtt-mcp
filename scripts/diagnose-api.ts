@@ -209,8 +209,12 @@ async function runDiagnostics() {
   console.log('🔍 Analysis:');
   
   if (statusTest?.status === 'PASS') {
+    // /api/status is served by FoundryVTT itself: it says the server answers,
+    // not that the REST API module is installed. Only the keyed requests tell.
     console.log('   ✅ FoundryVTT server is accessible');
-    console.log('   ✅ REST API module is likely installed');
+    if (!API_KEY) {
+      console.log('   ℹ️  The REST API module cannot be detected without an API key');
+    }
   } else if (statusTest?.status === 'FAIL') {
     console.log('   ❌ FoundryVTT server connection issues');
     console.log('   💡 Check if FoundryVTT is running and accessible');
