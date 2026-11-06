@@ -31,6 +31,12 @@ import { BRIDGE_PROTOCOL_VERSION, ModuleBridge } from './foundry/module-bridge.j
 import { defaultStateDir } from './shared/paths.js';
 import type { HealthRuntime } from './tools/handlers/diagnostics.js';
 import { routeResourceRequest, routeToolRequest } from './tools/index.js';
+import {
+  resourceDependency,
+  type ToolDependency,
+  toolDependency,
+  waitsForSocket,
+} from './tools/tool-dependencies.js';
 import { isWriteTool } from './tools/write-tools.js';
 import { DiagnosticSystem } from './utils/diagnostics.js';
 import { redactToolArgs } from './utils/log-args.js';
@@ -47,9 +53,6 @@ export type HeadlessGmState = 'running' | 'not-started' | 'launch-failed' | 'dis
  * socket.io transport reconnection a few.
  */
 export const TOOL_RECONNECT_WAIT_MS = 15_000;
-
-/** Tools that report the connection itself, and so must not wait for it. */
-const NO_RECONNECT_WAIT_TOOLS = new Set(['get_health_status']);
 
 /**
  * True when the headless GM page shares the connector's account (and
@@ -371,7 +374,7 @@ export class FoundryCore {
     logger.info('Executing tool', { name, args: redactToolArgs(args) });
 
     try {
-      await this.waitForReconnection(name);
+      await this.waitForReconnection(toolDependency(name));
       return (await routeToolRequest(
         name,
         args,
@@ -406,13 +409,15 @@ export class FoundryCore {
   }
 
   /**
-   * A call made while the connection is being restored waits for it (a write
-   * keeps its place in the write queue meanwhile), then is refused with the
-   * reason if it is still down: reads would answer from a cache nobody keeps
-   * live, and nothing may be sent on an anonymous socket.
+   * A call that needs the socket, made while the connection is being
+   * restored, waits for it (a write keeps its place in the write queue
+   * meanwhile), then is refused with the reason if it is still down: reads
+   * would answer from a cache nobody keeps live, and nothing may be sent on
+   * an anonymous socket. Calls that never touch the socket (module, REST,
+   * local, health) go ahead at once; see {@link toolDependency}.
    */
-  private async waitForReconnection(name: string): Promise<void> {
-    if (NO_RECONNECT_WAIT_TOOLS.has(name) || !this.foundryClient.isReconnecting()) {
+  private async waitForReconnection(dependency: ToolDependency | undefined): Promise<void> {
+    if (!waitsForSocket(dependency) || !this.foundryClient.isReconnecting()) {
       return;
     }
     if (await this.foundryClient.waitUntilConnected(TOOL_RECONNECT_WAIT_MS)) {
@@ -451,13 +456,21 @@ export class FoundryCore {
     logger.info('Reading resource', { uri });
 
     try {
+      await this.waitForReconnection(resourceDependency(uri));
       return (await routeResourceRequest(
         uri,
         this.foundryClient,
         this.diagnosticsClient,
       )) as ReadResourceResult;
     } catch (error) {
-      logger.error('Resource read failed:', error);
+      if (isRefusal(error)) {
+        logger.warn('Resource read refused', {
+          uri,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+      } else {
+        logger.error('Resource read failed:', error);
+      }
 
       if (error instanceof McpError) {
         throw error;

@@ -157,4 +157,55 @@ describe('FoundryCore single-account mode', () => {
     expect(wait).not.toHaveBeenCalled();
     expect(route).toHaveBeenCalledWith('get_health_status');
   });
+
+  it('runs module, REST and local tools at once during a reconnection', async () => {
+    const core = new FoundryCore();
+    vi.spyOn(core.foundryClient, 'isReconnecting').mockReturnValue(true);
+    const wait = vi.spyOn(core.foundryClient, 'waitUntilConnected');
+    // The module is connected: the bridge wait (if any) has nothing to wait for.
+    vi.spyOn(
+      (core as unknown as { moduleBridge: { isConnected(): boolean } }).moduleBridge,
+      'isConnected',
+    ).mockReturnValue(true);
+
+    for (const name of ['get_targets', 'search_compendium', 'roll_dice', 'generate_npc']) {
+      await core.callTool(name, {});
+    }
+
+    expect(wait).not.toHaveBeenCalled();
+    expect(route.mock.calls.map(([name]) => name)).toEqual([
+      'get_targets',
+      'search_compendium',
+      'roll_dice',
+      'generate_npc',
+    ]);
+  });
+
+  it('has a mixed tool wait for the socket', async () => {
+    const core = new FoundryCore();
+    vi.spyOn(core.foundryClient, 'isReconnecting').mockReturnValue(true);
+    const wait = vi.spyOn(core.foundryClient, 'waitUntilConnected').mockResolvedValue(true);
+
+    await core.callTool('create_actor_item', { source: { type: 'inline', item: {} } });
+
+    expect(wait).toHaveBeenCalledWith(TOOL_RECONNECT_WAIT_MS);
+  });
+
+  it('has a cache resource wait for a reconnection, not the REST diagnostics', async () => {
+    const core = new FoundryCore();
+    vi.spyOn(core.foundryClient, 'isReconnecting').mockReturnValue(true);
+    const wait = vi.spyOn(core.foundryClient, 'waitUntilConnected').mockResolvedValue(false);
+    vi.spyOn(core.foundryClient, 'connectionStatus').mockReturnValue({
+      state: 'disconnected',
+      error: 'the socket dropped',
+    });
+
+    await expect(core.readResource('foundry://actors')).rejects.toThrow(
+      'Reconnecting to FoundryVTT… (disconnected: the socket dropped).',
+    );
+    expect(wait).toHaveBeenCalledTimes(1);
+
+    await core.readResource('foundry://system/diagnostics');
+    expect(wait).toHaveBeenCalledTimes(1);
+  });
 });
