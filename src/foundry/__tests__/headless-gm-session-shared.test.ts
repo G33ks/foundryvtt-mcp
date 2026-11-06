@@ -6,7 +6,11 @@
 
 import type { Mock } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HeadlessGmSession, type SessionSource } from '../headless-gm-session.js';
+import {
+  HEADLESS_VIEWPORT,
+  HeadlessGmSession,
+  type SessionSource,
+} from '../headless-gm-session.js';
 
 const launchMock = vi.fn();
 vi.mock('playwright-core', () => ({
@@ -175,6 +179,7 @@ describe('HeadlessGmSession shared mode', () => {
     const { session, env } = await startShared('cookie-1');
 
     expect(env.browser.newContext).toHaveBeenCalledTimes(1);
+    expect(env.browser.newContext).toHaveBeenCalledWith({ viewport: HEADLESS_VIEWPORT });
     expect(env.browser.newPage).not.toHaveBeenCalled();
     expect(env.context.clearCookies).toHaveBeenCalled();
     expect(env.context.addCookies).toHaveBeenCalledWith([

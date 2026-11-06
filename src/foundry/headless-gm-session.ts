@@ -50,7 +50,7 @@
  * connected" until this resolves itself or the operator fixes the cause.
  */
 
-import type { Browser, BrowserContext, Frame, Page, Route } from 'playwright-core';
+import type { Browser, BrowserContext, ConsoleMessage, Frame, Page, Route } from 'playwright-core';
 import { chromium } from 'playwright-core';
 import { logger } from '../utils/logger.js';
 import {
@@ -173,6 +173,76 @@ export const HEADLESS_BROWSER_ARGS: readonly string[] = [
     'BraveLocalhostAccessPermission',
   ].join(',')}`,
 ];
+
+/**
+ * Size of the headless GM page. Playwright's default, 1280x720, is below
+ * FoundryVTT's 1366x768 minimum: Foundry warns, and canvas work such as
+ * `capture_scene` misbehaves.
+ */
+export const HEADLESS_VIEWPORT = { width: 1920, height: 1080 } as const;
+
+/** Where the companion module's scripts are served from. */
+const BRIDGE_SCRIPT_PATH = '/modules/foundryvtt-mcp-bridge/';
+/** The prefixes the companion module puts on its console lines. */
+const BRIDGE_CONSOLE_PREFIXES = ['FoundryVTT MCP Bridge | ', 'foundryvtt-mcp-bridge | '];
+const BRIDGE_CONSOLE_MAX_LENGTH = 500;
+const BRIDGE_PAGE_ERROR_MAX_LENGTH = 200;
+/** A stack frame (Chromium format) inside one of the module's scripts. */
+const BRIDGE_STACK_FRAME = /^\s+at .*\/modules\/foundryvtt-mcp-bridge\//m;
+
+function isBridgeScript(url: string): boolean {
+  try {
+    return new URL(url).pathname.startsWith(BRIDGE_SCRIPT_PATH);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The part of a page console message worth copying to the log: a companion
+ * module line, printed by one of the module's own scripts, reduced to its
+ * first argument. Further arguments (a received command, an error) and
+ * every other script's lines stay out of the log, so no page, document or
+ * command content reaches it. `msg.text()` is never used: it renders every
+ * argument, including an object's own fields.
+ *
+ * @returns the line, cut to {@link BRIDGE_CONSOLE_MAX_LENGTH}, or `null`
+ */
+export async function bridgeConsoleText(
+  message: Pick<ConsoleMessage, 'location' | 'args'>,
+): Promise<string | null> {
+  if (!isBridgeScript(message.location().url)) {
+    return null;
+  }
+  const first = message.args()[0];
+  if (!first) {
+    return null;
+  }
+  let value: unknown;
+  try {
+    value = await first.jsonValue();
+  } catch {
+    // The page navigated away before the argument could be read.
+    return null;
+  }
+  if (typeof value !== 'string' || !BRIDGE_CONSOLE_PREFIXES.some((p) => value.startsWith(p))) {
+    return null;
+  }
+  return value.slice(0, BRIDGE_CONSOLE_MAX_LENGTH);
+}
+
+/**
+ * `name: message` of an uncaught page error thrown from the companion
+ * module's code (a stack frame in its scripts), without the stack.
+ *
+ * @returns the text, cut to {@link BRIDGE_PAGE_ERROR_MAX_LENGTH}, or `null`
+ */
+export function bridgePageErrorText(error: Error): string | null {
+  if (!BRIDGE_STACK_FRAME.test(error.stack ?? '')) {
+    return null;
+  }
+  return `${error.name}: ${error.message}`.slice(0, BRIDGE_PAGE_ERROR_MAX_LENGTH);
+}
 
 /** Page binding behind `window.foundryMcpBridge`; see {@link BRIDGE_INIT_SCRIPT}. */
 const BRIDGE_BINDING = '__foundryMcpBridgeCall';
@@ -356,11 +426,21 @@ export class HeadlessGmSession {
     const { sessionSource } = this.options;
     if (sessionSource) {
       // A context of its own: the shared cookie never mixes with anything else.
-      this.context = await this.browser.newContext();
+      this.context = await this.browser.newContext({ viewport: HEADLESS_VIEWPORT });
       this.page = await this.context.newPage();
     } else {
-      this.page = await this.browser.newPage();
+      this.page = await this.browser.newPage({ viewport: HEADLESS_VIEWPORT });
     }
+    // The companion module reports bridge failures only in the browser console.
+    this.page.on('console', (message) => {
+      void this.logBridgeConsole(message);
+    });
+    this.page.on('pageerror', (error) => {
+      const text = bridgePageErrorText(error);
+      if (text) {
+        logger.warn(`Headless GM page error (bridge): ${text}`);
+      }
+    });
     if (this.options.bridgeCredentials) {
       // Before the first navigation, so the module finds it on its first `ready`.
       await this.exposeBridgeCredentials(this.page, this.options.bridgeCredentials);
@@ -860,6 +940,22 @@ export class HeadlessGmSession {
     }
     this.bridgeDownTicks = 0;
     this.reloadForBridgeRecovery();
+  }
+
+  /** Copies a companion module console line to the log ({@link bridgeConsoleText}). Never throws. */
+  private async logBridgeConsole(message: ConsoleMessage): Promise<void> {
+    const text = await bridgeConsoleText(message);
+    if (!text) {
+      return;
+    }
+    const type = message.type();
+    if (type === 'warning' || type === 'error') {
+      logger.warn(
+        `Headless GM page [bridge console.${type === 'warning' ? 'warn' : type}]: ${text}`,
+      );
+    } else {
+      logger.info(`Headless GM page [bridge console.${type}]: ${text}`);
+    }
   }
 
   /**

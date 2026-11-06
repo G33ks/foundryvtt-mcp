@@ -4,7 +4,14 @@
 
 import type { Mock } from 'vitest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { HEADLESS_BROWSER_ARGS, HeadlessGmSession } from '../headless-gm-session.js';
+import { logger } from '../../utils/logger.js';
+import {
+  bridgeConsoleText,
+  bridgePageErrorText,
+  HEADLESS_BROWSER_ARGS,
+  HEADLESS_VIEWPORT,
+  HeadlessGmSession,
+} from '../headless-gm-session.js';
 
 const launchMock = vi.fn();
 vi.mock('playwright-core', () => ({
@@ -97,6 +104,27 @@ function fakePage(state: {
       framenavigatedHandler?.(mainFrame);
     },
   };
+}
+
+const BRIDGE_SCRIPT = 'http://localhost:30000/modules/foundryvtt-mcp-bridge/scripts/transport.js';
+const CORE_SCRIPT = 'http://localhost:30000/scripts/foundry.mjs';
+
+/** A fake Playwright `ConsoleMessage`: `console.<type>(...args)` from `scriptUrl`. */
+function consoleMessage(type: string, scriptUrl: string, args: unknown[]) {
+  return {
+    type: () => type,
+    text: vi.fn(() => args.map(String).join(' ')),
+    location: () => ({ url: scriptUrl, lineNumber: 1, columnNumber: 1 }),
+    args: () => args.map((value) => ({ jsonValue: vi.fn().mockResolvedValue(value) })),
+  };
+}
+
+/** An error as Playwright's `pageerror` reports it, thrown from `scriptUrl`. */
+function errorWithStack(name: string, message: string, scriptUrl: string): Error {
+  const error = new Error(message);
+  error.name = name;
+  error.stack = `${name}: ${message}\n    at handle (${scriptUrl}:109:15)`;
+  return error;
 }
 
 function fakeBrowser(page: FakePage): FakeBrowser {
@@ -316,6 +344,73 @@ describe('HeadlessGmSession', () => {
     });
     expect(session.isActive()).toBe(true);
     expect(session.statusText()).toContain('mcp-api');
+    await session.stop();
+  });
+
+  it('opens its page at 1920x1080, above FoundryVTT minimum window size', async () => {
+    const page = fakePage({
+      url: 'http://localhost:30000/join',
+      evaluateResult: true,
+      succeedOnClick: true,
+    });
+    const browser = fakeBrowser(page);
+    launchMock.mockResolvedValue(browser);
+
+    const session = new HeadlessGmSession({
+      foundryUrl: 'http://localhost:30000',
+      username: 'mcp-api',
+      password: 'mcp',
+    });
+    await session.start();
+
+    expect(HEADLESS_VIEWPORT).toEqual({ width: 1920, height: 1080 });
+    expect(browser.newPage).toHaveBeenCalledWith({ viewport: HEADLESS_VIEWPORT });
+    await session.stop();
+  });
+
+  it("logs the companion module's console lines and page errors, nothing else", async () => {
+    const page = fakePage({
+      url: 'http://localhost:30000/join',
+      evaluateResult: true,
+      succeedOnClick: true,
+    });
+    launchMock.mockResolvedValue(fakeBrowser(page));
+    const info = vi.spyOn(logger, 'info').mockImplementation(() => undefined);
+    const warn = vi.spyOn(logger, 'warn').mockImplementation(() => undefined);
+
+    const session = new HeadlessGmSession({
+      foundryUrl: 'http://localhost:30000',
+      username: 'mcp-api',
+      password: 'mcp',
+    });
+    await session.start();
+    const handler = (event: string) =>
+      page.on.mock.calls.find(([name]) => name === event)?.[1] as (arg: unknown) => void;
+    // The login runs alongside and logs lines of its own.
+    const pageLines = (spy: typeof info) =>
+      spy.mock.calls.filter(([line]) => String(line).startsWith('Headless GM page'));
+
+    handler('console')(
+      consoleMessage('log', BRIDGE_SCRIPT, ['FoundryVTT MCP Bridge | authenticated']),
+    );
+    handler('console')(
+      consoleMessage('warning', BRIDGE_SCRIPT, ['FoundryVTT MCP Bridge | handshake failed: x']),
+    );
+    handler('console')(consoleMessage('log', CORE_SCRIPT, ['Foundry VTT | Drawing game canvas']));
+    handler('pageerror')(errorWithStack('TypeError', 'boom', BRIDGE_SCRIPT));
+    handler('pageerror')(errorWithStack('Error', 'core failure', CORE_SCRIPT));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(pageLines(info)).toEqual([
+      ['Headless GM page [bridge console.log]: FoundryVTT MCP Bridge | authenticated'],
+    ]);
+    // Console lines wait for their argument to be read; page errors do not.
+    expect(pageLines(warn).sort()).toEqual([
+      ['Headless GM page [bridge console.warn]: FoundryVTT MCP Bridge | handshake failed: x'],
+      ['Headless GM page error (bridge): TypeError: boom'],
+    ]);
+    info.mockRestore();
+    warn.mockRestore();
     await session.stop();
   });
 
@@ -712,5 +807,92 @@ describe('HeadlessGmSession', () => {
       expect(page.addInitScript).not.toHaveBeenCalled();
       await session.stop();
     });
+  });
+});
+
+describe('bridgeConsoleText', () => {
+  it("keeps a companion module line, from the module's own script", async () => {
+    const message = consoleMessage('log', BRIDGE_SCRIPT, ['FoundryVTT MCP Bridge | authenticated']);
+
+    await expect(bridgeConsoleText(message)).resolves.toBe('FoundryVTT MCP Bridge | authenticated');
+  });
+
+  it('accepts the foundryvtt-mcp-bridge prefix too', async () => {
+    const message = consoleMessage('warning', BRIDGE_SCRIPT, [
+      'foundryvtt-mcp-bridge | Failed to search documents in world.monsters:',
+    ]);
+
+    await expect(bridgeConsoleText(message)).resolves.toBe(
+      'foundryvtt-mcp-bridge | Failed to search documents in world.monsters:',
+    );
+  });
+
+  it('keeps the first argument only, never the rendered text', async () => {
+    const message = consoleMessage('error', BRIDGE_SCRIPT, [
+      'FoundryVTT MCP Bridge | received malformed command',
+      { id: 'a', content: '<p>page body</p>' },
+    ]);
+
+    await expect(bridgeConsoleText(message)).resolves.toBe(
+      'FoundryVTT MCP Bridge | received malformed command',
+    );
+    expect(message.text).not.toHaveBeenCalled();
+  });
+
+  it('cuts the line at 500 characters', async () => {
+    const long = `FoundryVTT MCP Bridge | ${'x'.repeat(600)}`;
+
+    const text = await bridgeConsoleText(consoleMessage('log', BRIDGE_SCRIPT, [long]));
+
+    expect(text).toBe(long.slice(0, 500));
+  });
+
+  it('ignores the prefix when another script prints it', async () => {
+    const message = consoleMessage('log', CORE_SCRIPT, ['FoundryVTT MCP Bridge | spoofed']);
+
+    await expect(bridgeConsoleText(message)).resolves.toBeNull();
+  });
+
+  it('ignores module lines without a prefix, or whose first argument is not a string', async () => {
+    await expect(
+      bridgeConsoleText(consoleMessage('log', BRIDGE_SCRIPT, ['some other line'])),
+    ).resolves.toBeNull();
+    await expect(
+      bridgeConsoleText(
+        consoleMessage('log', BRIDGE_SCRIPT, [{ text: 'FoundryVTT MCP Bridge | x' }]),
+      ),
+    ).resolves.toBeNull();
+    await expect(bridgeConsoleText(consoleMessage('log', BRIDGE_SCRIPT, []))).resolves.toBeNull();
+  });
+
+  it('ignores a line whose argument can no longer be read (page navigated)', async () => {
+    const message = consoleMessage('log', BRIDGE_SCRIPT, ['FoundryVTT MCP Bridge | x']);
+    message.args = () => [{ jsonValue: vi.fn().mockRejectedValue(new Error('context destroyed')) }];
+
+    await expect(bridgeConsoleText(message)).resolves.toBeNull();
+  });
+});
+
+describe('bridgePageErrorText', () => {
+  it('keeps name and message of an error thrown from the companion module', () => {
+    expect(bridgePageErrorText(errorWithStack('TypeError', 'boom', BRIDGE_SCRIPT))).toBe(
+      'TypeError: boom',
+    );
+  });
+
+  it('cuts it at 200 characters', () => {
+    const error = errorWithStack('Error', 'y'.repeat(300), BRIDGE_SCRIPT);
+
+    expect(bridgePageErrorText(error)).toBe(`Error: ${'y'.repeat(300)}`.slice(0, 200));
+  });
+
+  it('ignores errors whose stack has no frame in the module', () => {
+    expect(bridgePageErrorText(errorWithStack('Error', 'core failure', CORE_SCRIPT))).toBeNull();
+    const mentionsPath = errorWithStack(
+      'Error',
+      'cannot load /modules/foundryvtt-mcp-bridge/x.js',
+      CORE_SCRIPT,
+    );
+    expect(bridgePageErrorText(mentionsPath)).toBeNull();
   });
 });
