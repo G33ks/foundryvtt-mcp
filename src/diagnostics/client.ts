@@ -42,12 +42,39 @@ function httpStatus(error: unknown): number | undefined {
 }
 
 /**
- * System health comes from the REST API module only. Without `FOUNDRY_API_KEY`
- * (or with a module that lacks the endpoint) asking for it is not a failure:
- * an expected refusal, logged as one warning line at most.
+ * Logs, log search, error diagnosis and system health come from the REST API
+ * module only. Without `FOUNDRY_API_KEY` (or with a module that lacks the
+ * endpoint) asking for them is not a failure: an expected refusal, logged as
+ * one warning line at most — and no request is sent.
  */
 export class RestApiRequiredError extends RefusedError {
   override name = 'RestApiRequiredError';
+}
+
+/** The REST API module did not answer a diagnostics request; see {@link restFailure}. */
+export class RestApiUnavailableError extends RestApiRequiredError {
+  override name = 'RestApiUnavailableError';
+}
+
+/** Longest reason kept from a failed request (a schema error lists every issue). */
+const MAX_FAILURE_REASON_LENGTH = 200;
+
+/**
+ * A diagnostics request to the REST API module failed: one short warning
+ * line, the full error at debug level, and a refusal for the caller, so the
+ * tool call that asked logs a warning rather than two errors with stacks.
+ */
+function restFailure(what: string, error: unknown): RestApiUnavailableError {
+  const status = httpStatus(error);
+  const reason = (
+    status !== undefined ? `HTTP ${status}` : error instanceof Error ? error.message : String(error)
+  ).slice(0, MAX_FAILURE_REASON_LENGTH);
+  logger.warn(`DiagnosticsClient | ${what} unavailable from the REST API module: ${reason}`);
+  logger.debug(
+    `DiagnosticsClient | ${what} request failed`,
+    error instanceof Error ? { message: error.message, stack: error.stack } : error,
+  );
+  return new RestApiUnavailableError(`${what} unavailable from the REST API module: ${reason}`);
 }
 
 /**
@@ -80,6 +107,15 @@ export class DiagnosticsClient {
   /** The health endpoint answered 404 once already: warned, not again. */
   private healthEndpointMissingWarned = false;
 
+  /** Refuses, without any request, when no `FOUNDRY_API_KEY` is set. */
+  private requireRestApi(what: string): void {
+    if (!this.foundryClient.hasRestApi()) {
+      throw new RestApiRequiredError(
+        `${what} requires the REST API module (FOUNDRY_API_KEY is not set)`,
+      );
+    }
+  }
+
   constructor(private foundryClient: FoundryClient) {}
 
   /**
@@ -107,6 +143,7 @@ export class DiagnosticsClient {
    * ```
    */
   async getRecentLogs(params: LogSearchParams = {}): Promise<LogResponse> {
+    this.requireRestApi('Recent logs');
     try {
       logger.debug('DiagnosticsClient | Getting recent logs', params);
 
@@ -141,10 +178,7 @@ export class DiagnosticsClient {
 
       return parsed;
     } catch (error) {
-      logger.error('DiagnosticsClient | Failed to get recent logs:', error);
-      throw new Error(
-        `Failed to retrieve recent logs: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
+      throw restFailure('Recent logs', error);
     }
   }
 
@@ -176,6 +210,7 @@ export class DiagnosticsClient {
    * ```
    */
   async searchLogs(params: LogPatternSearchParams): Promise<LogSearchResponse> {
+    this.requireRestApi('Log search');
     try {
       logger.debug('DiagnosticsClient | Searching logs', params);
 
@@ -203,10 +238,7 @@ export class DiagnosticsClient {
 
       return parsed;
     } catch (error) {
-      logger.error('DiagnosticsClient | Failed to search logs:', error);
-      throw new Error(
-        `Failed to search logs: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
+      throw restFailure('Log search', error);
     }
   }
 
@@ -229,11 +261,7 @@ export class DiagnosticsClient {
    * ```
    */
   async getSystemHealth(): Promise<SystemHealth> {
-    if (!this.foundryClient.hasRestApi()) {
-      throw new RestApiRequiredError(
-        'System health requires the REST API module (FOUNDRY_API_KEY is not set)',
-      );
-    }
+    this.requireRestApi('System health');
     try {
       logger.debug('DiagnosticsClient | Getting system health');
 
@@ -259,10 +287,7 @@ export class DiagnosticsClient {
           'System health is unavailable: the REST API module does not provide /api/diagnostics/health (HTTP 404)',
         );
       }
-      logger.error('DiagnosticsClient | Failed to get system health:', error);
-      throw new Error(
-        `Failed to retrieve system health: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
+      throw restFailure('System health', error);
     }
   }
 
@@ -290,6 +315,7 @@ export class DiagnosticsClient {
    * ```
    */
   async diagnoseErrors(timeframe: number = 3600): Promise<ErrorDiagnosis> {
+    this.requireRestApi('Error diagnosis');
     try {
       logger.debug('DiagnosticsClient | Diagnosing errors', { timeframe });
 
@@ -308,10 +334,7 @@ export class DiagnosticsClient {
 
       return parsed;
     } catch (error) {
-      logger.error('DiagnosticsClient | Failed to diagnose errors:', error);
-      throw new Error(
-        `Failed to diagnose errors: ${error instanceof Error ? error.message : 'Unknown error'}`,
-      );
+      throw restFailure('Error diagnosis', error);
     }
   }
 

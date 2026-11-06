@@ -96,7 +96,7 @@ describe('DiagnosticsClient', () => {
       mockFoundryClient.get.mockRejectedValue(error);
 
       await expect(diagnosticsClient.getRecentLogs()).rejects.toThrow(
-        'Failed to retrieve recent logs: API Error',
+        'Recent logs unavailable from the REST API module: API Error',
       );
     });
   });
@@ -156,7 +156,7 @@ describe('DiagnosticsClient', () => {
 
     it('should throw error when pattern is missing', async () => {
       await expect(diagnosticsClient.searchLogs({} as LogPatternSearchParams)).rejects.toThrow(
-        'Failed to search logs',
+        'Log search unavailable from the REST API module',
       );
     });
   });
@@ -213,7 +213,7 @@ describe('DiagnosticsClient', () => {
       mockFoundryClient.get.mockRejectedValue(new Error('Server Error'));
 
       await expect(diagnosticsClient.getSystemHealth()).rejects.toThrow(
-        'Failed to retrieve system health: Server Error',
+        'System health unavailable from the REST API module: Server Error',
       );
     });
 
@@ -431,6 +431,58 @@ describe('DiagnosticsClient', () => {
       const result = await diagnosticsClient.isAvailable();
 
       expect(result).toBe(false);
+    });
+  });
+
+  describe('without FOUNDRY_API_KEY', () => {
+    it.each([
+      ['getRecentLogs', () => diagnosticsClient.getRecentLogs(), 'Recent logs'],
+      ['searchLogs', () => diagnosticsClient.searchLogs({ pattern: 'TypeError' }), 'Log search'],
+      ['diagnoseErrors', () => diagnosticsClient.diagnoseErrors(), 'Error diagnosis'],
+    ])('%s refuses without any request or log line', async (_name, call, what) => {
+      const { logger } = await import('../../utils/logger.js');
+      vi.mocked(logger.error).mockClear();
+      vi.mocked(logger.warn).mockClear();
+      mockFoundryClient.hasRestApi.mockReturnValue(false);
+
+      const error = await call().catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(RestApiRequiredError);
+      expect(isRefusal(error)).toBe(true);
+      expect((error as Error).message).toBe(
+        `${what} requires the REST API module (FOUNDRY_API_KEY is not set)`,
+      );
+      expect(mockFoundryClient.get).not.toHaveBeenCalled();
+      expect(logger.error).not.toHaveBeenCalled();
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('a failed REST request', () => {
+    it('logs one short warning, the stack at debug level, and refuses', async () => {
+      const { logger } = await import('../../utils/logger.js');
+      vi.mocked(logger.error).mockClear();
+      vi.mocked(logger.warn).mockClear();
+      vi.mocked(logger.debug).mockClear();
+      const failure = Object.assign(new Error('Request failed with status code 500'), {
+        response: { status: 500 },
+      });
+      mockFoundryClient.get.mockRejectedValue(failure);
+
+      const error = await diagnosticsClient.diagnoseErrors().catch((e: unknown) => e);
+
+      expect(isRefusal(error)).toBe(true);
+      expect((error as Error).message).toBe(
+        'Error diagnosis unavailable from the REST API module: HTTP 500',
+      );
+      expect(logger.error).not.toHaveBeenCalled();
+      expect(vi.mocked(logger.warn).mock.calls).toEqual([
+        ['DiagnosticsClient | Error diagnosis unavailable from the REST API module: HTTP 500'],
+      ]);
+      expect(vi.mocked(logger.debug)).toHaveBeenCalledWith(
+        'DiagnosticsClient | Error diagnosis request failed',
+        expect.objectContaining({ stack: expect.stringContaining('Error') }),
+      );
     });
   });
 });
