@@ -7,6 +7,7 @@
 - **Companion module lines in the log**: the GM page's console lines from the companion module (bridge connection, handshake, errors) and the uncaught errors thrown from its code reach the connector's log, at `info` or `warn`. Only the module's own scripts and its own message text are copied; no page, document or command content.
 - **Failed reconnections in the log**: during a network cut, the first failed reconnection attempt of the socket is logged, then one line a minute or whenever the error changes, and the "connection restored" line says how long the cut lasted and how many attempts failed. Session cookies are masked in these lines.
 - **`status` shows a stale world cache**: a `World cache: stale since <time> — <reason>` line while the cached world does not follow live changes.
+- **Journal overwrites kept across restarts**: the overwrites detected in the last 24 hours are also kept in `journal-conflicts.json` in the state directory (ids, names, reason, who saved and the copy's path, no page text), so `get_health_status` still lists them after the shared process restarts. A copy whose file is gone is marked `(copy missing)`.
 
 ### Changed
 
@@ -23,6 +24,9 @@
 - A change broadcast while the world loads at connection time is no longer lost: it is kept and replayed onto the loaded world, as for a reload.
 - When the module bridge failed to start, tools that need it say so instead of "the module bridge is disabled".
 - `status` no longer reads a first connection in progress as failed: FoundryVTT shows `connecting…`, and the module bridge and the headless GM session `not started yet (connecting to FoundryVTT)` (they read "FoundryVTT connection failed", or "disabled" before the connection was set up).
+- Errors reach MCP clients with one `MCP error <code>: ` prefix instead of two, for every code, through a relay and all-in-one (#15).
+- `get_recent_logs`, `search_logs` and `diagnose_errors` without `FOUNDRY_API_KEY` are refused at once, with no request to FoundryVTT. A failed request to the REST API module logs one short warning (the stack at `debug`) instead of three errors with stacks.
+- `get_chat_messages` and `watch_events` read a message's author from `author` (FoundryVTT v12 and later), then `user`: a message without a speaker alias no longer shows "Unknown" (#13).
 
 ## 2.0.0 — 2026-11-05
 

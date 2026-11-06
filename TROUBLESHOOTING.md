@@ -161,7 +161,7 @@ The client entries name the Node.js that ran `init` by its path, which changes w
 
 Detection compares paragraphs of text, not HTML, so markup rewritten by FoundryVTT or the editor does not count as a loss. Changes made by the connector's own accounts (`FOUNDRY_USERNAME` and the headless GM user) are never reported.
 
-**Where the copies are**: in the state directory (see [Shared Process](#where-are-the-logs)), under `journal-history\<journalId>\<pageId>\`. Each copy is a `<time>-<reason>.html` file — the page body exactly as stored — with a `.json` next to it: entry and page names, reason, version token, `overwrittenBy` (who replaced that version, or is about to: a user name, the connector account for its own writes, or `editor-autosave (unknown user)`), `versionBy` (whose version an overwrite copy holds), `connectorAccount` and the date. A copy is written before every page write (`before-replace`, `before-append`) and for every detected overwrite; a page write is refused if its copy cannot be written. Each page keeps its 20 most recent copies, none older than 30 days. `get_health_status` prints the folder; `daemon.log` records ids, version tokens and copy paths, never page text.
+**Where the copies are**: in the state directory (see [Shared Process](#where-are-the-logs)), under `journal-history\<journalId>\<pageId>\`. Each copy is a `<time>-<reason>.html` file — the page body exactly as stored — with a `.json` next to it: entry and page names, reason, version token, `overwrittenBy` (who replaced that version, or is about to: a user name, the connector account for its own writes, or `editor-autosave (unknown user)`), `versionBy` (whose version an overwrite copy holds), `connectorAccount` and the date. A copy is written before every page write (`before-replace`, `before-append`) and for every detected overwrite; a page write is refused if its copy cannot be written. Each page keeps its 20 most recent copies, none older than 30 days. `get_health_status` prints the folder and lists the overwrites of the last 24 hours, also after a restart of the shared process (they are kept in `journal-conflicts.json`), with the path of each copy — followed by `(copy missing)` if that file is gone; `daemon.log` records ids, version tokens and copy paths, never page text.
 
 **Restoring by hand**:
 1. Find the copy: the path is in the warning, the whisper and `get_health_status`, or sort the page's folder by name (the newest is last).
@@ -215,6 +215,8 @@ In the state directory — `%LOCALAPPDATA%\foundryvtt-mcp\` on Windows, `$XDG_ST
 | `relay.log` (+ `.1` … `.3`) | Every relay: start, connection to the shared process, exit. Relays also keep logging to stderr, i.e. to the MCP client's own log. |
 | `daemon.json` | pid, version, start time, pipe and log path of the running shared process. |
 | `token` | Secret the relays present to the shared process. Do not share it. |
+| `journal-history\` | Local copies of journal pages (see *Journal integrity*). |
+| `journal-conflicts.json` | The journal overwrites detected in the last 24 hours, listed by `get_health_status`: ids, names, reason, who saved and the copy's path — no page text. Kept across restarts; deleting it only empties that list. |
 
 `foundryvtt-mcp status` prints the paths actually in use. Set `LOG_LEVEL=debug` in the configuration file for more detail, then `foundryvtt-mcp stop` (it applies to the shared process started next).
 
@@ -288,7 +290,7 @@ Claude Desktop starts MCP servers in `C:\Windows\System32`, where no `.env` file
 #### Diagnostics Tools Not Working
 **Symptoms**: Health monitoring and log tools fail
 **Solutions**:
-1. **REST API module required**: `get_system_health`, `get_recent_logs`, `search_logs` and `diagnose_errors` need the optional Foundry Local REST API module; `get_health_status` answers without it and only adds the server's health when it is there
+1. **REST API module required**: `get_system_health`, `get_recent_logs`, `search_logs` and `diagnose_errors` need the optional Foundry Local REST API module; without `FOUNDRY_API_KEY` they are refused at once (`… requires the REST API module (FOUNDRY_API_KEY is not set)`), with no request. `get_health_status` answers without it and only adds the server's health when it is there. When the module does not answer, the tool says `… unavailable from the REST API module: <HTTP status or error>`, and `daemon.log` has one warning line (`LOG_LEVEL=debug` adds the stack).
 2. **Install module**: it is a separate project, not distributed by this repository — see [the configuration guide](docs/guides/configuration.md#optional-diagnostics-tools)
 3. **Enable module**: Activate it in your world's module settings
 4. **Set API key**: Add `FOUNDRY_API_KEY` to your configuration file, then run `foundryvtt-mcp stop`
