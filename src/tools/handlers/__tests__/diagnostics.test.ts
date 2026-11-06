@@ -3,6 +3,9 @@
  * filtering plus the get_system_health / get_health_status reports.
  */
 
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { type DiagnosticsClient, RestApiRequiredError } from '../../../diagnostics/client.js';
 import type { LogEntry, SystemHealth } from '../../../diagnostics/types.js';
@@ -655,8 +658,37 @@ describe('handleGetHealthStatus', () => {
     );
     expect(text).toContain('⚠️ 1 overwrite(s) detected in the last 24 hours:');
     expect(text).toContain(
-      '- 2026-11-01T20:00:00.000Z — "Recap" of "Session 11" (0123456789abcdef/fedcba9876543210), overwritten-by-editor-autosave; copy: /state/journal-history/a.html',
+      '- 2026-11-01T20:00:00.000Z — "Recap" of "Session 11" (0123456789abcdef/fedcba9876543210), overwritten-by-editor-autosave; copy: /state/journal-history/a.html (copy missing)',
     );
+  });
+
+  it('gives the path of a local copy that is still there, without a note', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'fvtt-mcp-health-copy-'));
+    const copy = path.join(dir, 'a.html');
+    writeFileSync(copy, '<p>x</p>');
+    const conflict: JournalConflict = {
+      at: Date.parse('2026-11-01T20:00:00.000Z'),
+      journalId: '0123456789abcdef',
+      pageId: 'fedcba9876543210',
+      journalName: 'Session 11',
+      pageName: 'Recap',
+      reason: 'overwritten-by-Alice',
+      savedBy: 'Alice',
+      historyPath: copy,
+    };
+    try {
+      const text = getText(
+        await handleGetHealthStatus(
+          {},
+          worldClient(true, false, [conflict]),
+          healthClient(makeHealth()),
+        ),
+      );
+      expect(text).toContain(`overwritten-by-Alice; copy: ${copy}`);
+      expect(text).not.toContain('(copy missing)');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

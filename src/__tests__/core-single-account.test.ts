@@ -65,6 +65,8 @@ describe('FoundryCore single-account mode', () => {
     const clientConfig = (core.foundryClient as unknown as { config: Record<string, unknown> })
       .config;
     expect(clientConfig.connectorUsernames).toBeUndefined();
+    // The list of journal overwrites is kept next to the local copies.
+    expect(String(clientConfig.journalConflictsFile)).toMatch(/journal-conflicts\.json$/);
   });
 
   it('keeps a separate account when FOUNDRY_HEADLESS_GM_USERNAME names another one', () => {

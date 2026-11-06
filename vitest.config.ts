@@ -1,3 +1,5 @@
+import os from 'node:os';
+import path from 'node:path';
 import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
@@ -11,6 +13,8 @@ export default defineConfig({
       LOG_LEVEL: 'error', // Reduce log noise in tests
       // Never read the developer's own configuration file (config/sources.ts).
       FOUNDRY_MCP_CONFIG: '__vitest_no_config_file__.env',
+      // Nor its state directory (journal copies, journal-conflicts.json, logs).
+      FOUNDRY_MCP_STATE_DIR: path.join(os.tmpdir(), 'foundryvtt-mcp-vitest-state'),
     },
     coverage: {
       provider: 'v8',

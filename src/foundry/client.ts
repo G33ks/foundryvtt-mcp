@@ -24,6 +24,7 @@ import { authenticateFoundry, NoActiveWorldError, sessionSocketOptions } from '.
 import { evaluateDiceFormula } from './dice-formula.js';
 import type { EventFilter, EventReadResult } from './event-log.js';
 import { summarizeDocumentBroadcast, WorldEventLog } from './event-log.js';
+import { JournalConflictFile } from './journal-conflicts.js';
 import { JournalHistory } from './journal-history.js';
 import {
   conflictAuthor,
@@ -333,6 +334,11 @@ export interface FoundryClientConfig {
    * Defaults to `journal-history` in the shared-process state directory.
    */
   journalHistoryDir?: string;
+  /**
+   * File keeping the detected journal overwrites across restarts (see
+   * journal-conflicts.ts). Without it, the list lives in memory only.
+   */
+  journalConflictsFile?: string;
   /**
    * Usernames of the connector's other sessions (the headless GM). Their
    * changes are the connector's own and never count as overwrites.
@@ -768,7 +774,10 @@ export class FoundryClient {
       ...config,
     };
     this.eventLog = new WorldEventLog(config.eventBufferSize ?? 500);
-    this.journalWatch = new JournalWatch();
+    this.journalWatch = new JournalWatch(
+      Date.now,
+      config.journalConflictsFile ? new JournalConflictFile(config.journalConflictsFile) : null,
+    );
     this.journalHistory = new JournalHistory(
       config.journalHistoryDir ?? pathJoin(defaultStateDir(), 'journal-history'),
     );

@@ -187,6 +187,7 @@ export class FoundryCore {
     }
     // Same state directory as the shared process's daemon.json, in both modes.
     clientConfig.journalHistoryDir = path.join(defaultStateDir(), 'journal-history');
+    clientConfig.journalConflictsFile = path.join(defaultStateDir(), 'journal-conflicts.json');
     // Shared account: the page reuses the connector's own session, so the
     // connector's user id already covers it. Separate account: its changes
     // are the connector's own too.

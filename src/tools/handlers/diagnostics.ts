@@ -4,6 +4,7 @@
  * Handles system diagnostics, logging, and health monitoring.
  */
 
+import { existsSync } from 'node:fs';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { type DiagnosticsClient, RestApiRequiredError } from '../../diagnostics/client.js';
 import type { LogEntry } from '../../diagnostics/types.js';
@@ -381,6 +382,18 @@ ${errorLines}`,
 }
 
 /**
+ * Where the local copy of an overwritten page is: its path, "(copy missing)"
+ * after it when the file is gone (the list outlives restarts, the folder may
+ * have been cleaned), or "none" when no copy could be written.
+ */
+function describeCopy(historyPath: string | null): string {
+  if (historyPath === null) {
+    return 'none';
+  }
+  return existsSync(historyPath) ? historyPath : `${historyPath} (copy missing)`;
+}
+
+/**
  * Handles comprehensive health status requests
  *
  * The system-health section reads the nested fields `SystemHealthSchema`
@@ -515,7 +528,7 @@ export async function handleGetHealthStatus(
             ...conflicts.map(
               (c) =>
                 `- ${new Date(c.at).toISOString()} — "${c.pageName}" of "${c.journalName}" ` +
-                `(${c.journalId}/${c.pageId}), ${c.reason}; copy: ${c.historyPath ?? 'none'}`,
+                `(${c.journalId}/${c.pageId}), ${c.reason}; copy: ${describeCopy(c.historyPath)}`,
             ),
           ].join('\n');
 

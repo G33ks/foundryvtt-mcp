@@ -25,6 +25,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import type { JournalConflictFile } from './journal-conflicts.js';
 
 /** How long a written page stays watched for an overwrite. */
 export const WATCH_TTL_MS = 6 * 60 * 60 * 1000;
@@ -274,8 +275,10 @@ function pageKey(journalId: string, pageId: string): string {
 }
 
 /**
- * In-memory integrity state for journal pages: writes in flight, watched
- * writes, recent editor autosaves, pending warnings and recent conflicts.
+ * Integrity state for journal pages: writes in flight, watched writes, recent
+ * editor autosaves and pending warnings, in memory; the recent conflicts also
+ * in a file when one is given ({@link JournalConflictFile}), so they survive
+ * a restart.
  */
 export class JournalWatch {
   private readonly watches = new Map<string, WatchedWrite & { expiresAt: number }>();
@@ -284,7 +287,17 @@ export class JournalWatch {
   private readonly warnings: string[] = [];
   private conflicts: JournalConflict[] = [];
 
-  constructor(private readonly now: () => number = Date.now) {}
+  constructor(
+    private readonly now: () => number = Date.now,
+    private readonly conflictFile: Pick<JournalConflictFile, 'load' | 'save'> | null = null,
+  ) {
+    if (conflictFile) {
+      this.conflicts = conflictFile.load();
+      if (this.pruneConflicts()) {
+        conflictFile.save(this.conflicts);
+      }
+    }
+  }
 
   /** Starts collecting foreign changes to a page while a connector write is in flight. */
   beginWrite(journalId: string, pageId: string): void {
@@ -369,11 +382,14 @@ export class JournalWatch {
   recordConflict(conflict: JournalConflict): void {
     this.conflicts.push(conflict);
     this.pruneConflicts();
+    this.conflictFile?.save(this.conflicts);
   }
 
   /** Conflicts detected within {@link CONFLICT_RETENTION_MS}, oldest first. */
   recentConflicts(): JournalConflict[] {
-    this.pruneConflicts();
+    if (this.pruneConflicts()) {
+      this.conflictFile?.save(this.conflicts);
+    }
     return [...this.conflicts];
   }
 
@@ -386,8 +402,11 @@ export class JournalWatch {
     }
   }
 
-  private pruneConflicts(): void {
+  /** @returns whether any conflict was dropped */
+  private pruneConflicts(): boolean {
     const cutoff = this.now() - CONFLICT_RETENTION_MS;
+    const before = this.conflicts.length;
     this.conflicts = this.conflicts.filter((conflict) => conflict.at > cutoff);
+    return this.conflicts.length !== before;
   }
 }
