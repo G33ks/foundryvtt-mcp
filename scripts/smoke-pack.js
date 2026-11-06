@@ -150,19 +150,41 @@ function validateFilesEntries() {
   console.log(`✅ All ${checked.length} "files" entries reference existing paths or globs`);
 }
 
-// npm is a .cmd shim on Windows, which Node only spawns through a shell —
-// quote the arguments so temp paths containing spaces survive it.
+// npm is a .cmd shim on Windows, which Node spawns only through a shell (and
+// `shell: true` with arguments is deprecated, DEP0190). Run npm's own script
+// with this Node instead: the one `npm run` names in npm_execpath, else the
+// npm bundled next to node.exe.
 const isWindows = process.platform === 'win32';
+function npmCliPath() {
+  const fromNpmRun = process.env.npm_execpath;
+  if (fromNpmRun?.endsWith('.js') && existsSync(fromNpmRun)) {
+    return fromNpmRun;
+  }
+  return join(dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+}
 function runNpm(args, options) {
-  return spawnSync(isWindows ? 'npm.cmd' : 'npm', isWindows ? args.map((a) => `"${a}"`) : args, {
+  return isWindows
+    ? spawnSync(process.execPath, [npmCliPath(), ...args], options)
+    : spawnSync('npm', args, options);
+}
+
+/**
+ * Runs a `.cmd` file with its arguments through cmd.exe, without the `shell`
+ * option: each argument is quoted (a `"` doubled), and the whole command line
+ * goes between one more pair of quotes, which `/s` strips.
+ */
+function runCmdFile(file, args, options) {
+  const quote = (arg) => `"${arg.replace(/"/g, '""')}"`;
+  const line = `"${[file, ...args].map(quote).join(' ')}"`;
+  return spawnSync(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', line], {
     ...options,
-    shell: isWindows,
+    windowsVerbatimArguments: true,
   });
 }
 
 // ── 2. Pack ───────────────────────────────────────────────────────────────
 function packTarball() {
-  const tmp = mkdtempSync(join(tmpdir(), 'foundryvtt-mcp-pack-'));
+  const tmp = mkdtempSync(join(tmpdir(), 'fvtt-mcp-pack-'));
   registerCleanup(tmp);
   const result = runNpm(['pack', '--pack-destination', tmp, '--json'], {
     cwd: repoRoot,
@@ -220,7 +242,7 @@ function checkPackedFiles(paths) {
 
 // ── 3. Install into a fresh consumer project ──────────────────────────────
 function installInConsumer(tarball) {
-  const consumer = mkdtempSync(join(tmpdir(), 'foundryvtt-mcp-consumer-'));
+  const consumer = mkdtempSync(join(tmpdir(), 'fvtt-mcp-consumer-'));
   registerCleanup(consumer);
 
   // Minimal consumer package.json — avoids npm init prompts and lifecycle scripts.
@@ -252,18 +274,20 @@ function checkInstalledBin(consumer) {
   if (!binName) {
     fail('package.json declares no "bin"');
   }
-  // npm installs a .cmd shim on Windows, which Node only runs through a shell.
+  // npm installs a .cmd shim on Windows: the one users run, so it is the one tested.
   const bin = join(consumer, 'node_modules', '.bin', isWindows ? `${binName}.cmd` : binName);
   if (!existsSync(bin)) {
     fail(`installed bin missing: ${bin}`);
   }
-  const result = spawnSync(isWindows ? `"${bin}"` : bin, ['--version'], {
+  const options = {
     cwd: consumer,
     encoding: 'utf8',
     env: isolatedEnv(consumer, {}),
-    shell: isWindows,
     timeout: STARTUP_TIMEOUT_MS,
-  });
+  };
+  const result = isWindows
+    ? runCmdFile(bin, ['--version'], options)
+    : spawnSync(bin, ['--version'], options);
   const printed = (result.stdout ?? '').trim();
   if (result.status !== 0 || printed !== pkgJson.version) {
     fail(
