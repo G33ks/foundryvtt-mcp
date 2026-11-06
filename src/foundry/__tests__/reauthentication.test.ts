@@ -28,7 +28,8 @@ vi.mock('../../utils/logger.js', () => ({
 }));
 vi.mock('../../config/index.js', () => ({ config: { logLevel: 'info' } }));
 
-const { FoundryClient, REAUTH_BASE_RETRY_MS, REAUTH_MAX_RETRY_MS } = await import('../client.js');
+const { FoundryClient, REAUTH_BASE_RETRY_MS, REAUTH_MAX_RETRY_MS, WORLD_REPLAY_MAX_CHANGES } =
+  await import('../client.js');
 const { authenticateFoundry, NoActiveWorldError } = await import('../auth.js');
 const { io } = await import('socket.io-client');
 const { logger } = await import('../../utils/logger.js');
@@ -65,9 +66,17 @@ function worldData(accountRole = 3) {
 /**
  * Fake socket. Answers `world` with the snapshot, and the first `session`
  * listener (the handshake) with `handshakeUserId` on the next microtask.
+ * `reload` changes how the later `world` requests (reloads) are answered:
+ * with another snapshot, or not at all until `answerReload()`.
  */
-function fakeSocket(snapshot = worldData(), handshakeUserId: string | null = USER_ID) {
+function fakeSocket(
+  snapshot = worldData(),
+  handshakeUserId: string | null = USER_ID,
+  reload: { snapshot?: unknown; hold?: boolean } = {},
+) {
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+  const heldReloads: Array<(data: unknown) => void> = [];
+  let worldRequests = 0;
   let handshakeAnswered = false;
   const add = (event: string, handler: (...args: unknown[]) => void) => {
     listeners.set(event, [...(listeners.get(event) ?? []), handler]);
@@ -96,7 +105,14 @@ function fakeSocket(snapshot = worldData(), handshakeUserId: string | null = USE
     emit: vi.fn((event: string, ...args: unknown[]) => {
       const ack = args[args.length - 1];
       if (event === 'world' && typeof ack === 'function') {
-        ack(structuredClone(snapshot));
+        worldRequests += 1;
+        if (worldRequests === 1) {
+          ack(structuredClone(snapshot));
+        } else if (reload.hold) {
+          heldReloads.push(ack as (data: unknown) => void);
+        } else {
+          ack(structuredClone(reload.snapshot ?? snapshot));
+        }
       }
       return socket;
     }),
@@ -105,12 +121,19 @@ function fakeSocket(snapshot = worldData(), handshakeUserId: string | null = USE
       return socket;
     }),
   };
+  /** Answers every held reload with `data`. */
+  const answerReload = (data: unknown) => {
+    for (const ack of heldReloads.splice(0)) {
+      ack(structuredClone(data));
+    }
+  };
+  const worldRequestCount = () => worldRequests;
   const fire = (event: string, ...args: unknown[]) => {
     for (const handler of [...(listeners.get(event) ?? [])]) {
       handler(...args);
     }
   };
-  return { socket, fire };
+  return { socket, fire, answerReload, worldRequestCount };
 }
 
 type FakeSocket = ReturnType<typeof fakeSocket>;
@@ -398,6 +421,212 @@ describe('FoundryClient session ownership', () => {
     );
     expect(logged).not.toContain('secret-cookie');
     await client.disconnect();
+  });
+});
+
+/** A snapshot with one actor, `name`. */
+function worldWithActor(name: string) {
+  return {
+    ...worldData(),
+    actors: [{ _id: `${name.padEnd(12, '0')}Act1`.slice(0, 16), name, type: 'npc' }],
+  };
+}
+
+/** The transport drops and comes back; FoundryVTT still knows the session. */
+function plainReconnection(fake: FakeSocket): void {
+  fake.socket.connected = false;
+  fake.fire('disconnect', 'ping timeout');
+  fake.socket.connected = true;
+  fake.fire('connect');
+  fake.fire('session', { userId: USER_ID, sessionId: 'x' });
+}
+
+const warnings = (text: string) =>
+  vi.mocked(logger.warn).mock.calls.filter(([message]) => String(message).includes(text));
+
+describe('FoundryClient world reload after a plain reconnection', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(axios.create).mockReturnValue({
+      interceptors: { request: { use: vi.fn() }, response: { use: vi.fn() } },
+    } as never);
+    vi.mocked(authenticateFoundry).mockResolvedValue({ session: 'cookie-1', userId: USER_ID });
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  async function connected(reload: { snapshot?: unknown; hold?: boolean } = {}) {
+    const fake = fakeSocket(worldData(), USER_ID, reload);
+    queueSockets(fake);
+    const client = newClient();
+    await client.connect();
+    return { client, fake };
+  }
+
+  const actorNames = (client: InstanceType<typeof FoundryClient>) =>
+    client
+      .getWorldData()
+      ?.actors.map((actor) => actor.name)
+      .sort();
+
+  it('reloads the world in the background once FoundryVTT names the user again', async () => {
+    const { client, fake } = await connected({ snapshot: worldWithActor('Fresh') });
+
+    plainReconnection(fake);
+
+    await vi.waitFor(() => expect(client.isWorldDataStale()).toBe(false));
+    expect(actorNames(client)).toEqual(['Fresh']);
+    expect(fake.worldRequestCount()).toBe(2);
+    expect(authenticateFoundry).toHaveBeenCalledTimes(1);
+    expect(logger.info).toHaveBeenCalledWith('World data refreshed', expect.any(Object));
+    await client.disconnect();
+  });
+
+  it('does not reload a cache that is not stale', async () => {
+    const { client, fake } = await connected({ snapshot: worldWithActor('Fresh') });
+
+    fake.fire('session', { userId: USER_ID, sessionId: 'x' });
+    await flush();
+
+    expect(fake.worldRequestCount()).toBe(1);
+    await client.disconnect();
+  });
+
+  it('leaves the cache stale, with one warning, when the reload times out', async () => {
+    const { client, fake } = await connected({ hold: true });
+    vi.useFakeTimers();
+
+    plainReconnection(fake);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(client.isWorldDataStale()).toBe(true);
+    expect(warnings('Could not reload the world data')).toHaveLength(1);
+    // An answer after the timeout changes nothing.
+    fake.answerReload(worldWithActor('Late'));
+    expect(actorNames(client)).toEqual([]);
+    await client.disconnect();
+  });
+
+  it('does not reload while a reauthentication runs', async () => {
+    vi.mocked(authenticateFoundry)
+      .mockResolvedValueOnce({ session: 'cookie-1', userId: USER_ID })
+      .mockReturnValueOnce(new Promise(() => undefined));
+    const { client, fake } = await connected();
+
+    fake.socket.connected = false;
+    fake.fire('disconnect', 'transport close');
+    fake.fire('shutdown');
+    fake.socket.connected = true;
+    fake.fire('connect');
+    fake.fire('session', { userId: USER_ID, sessionId: 'x' });
+    await flush();
+
+    expect(fake.worldRequestCount()).toBe(1);
+    await client.disconnect();
+  });
+
+  it('shares one reload between the reconnection and refreshWorldData callers', async () => {
+    const { client, fake } = await connected({ hold: true });
+
+    plainReconnection(fake);
+    const fromTool = client.refreshWorldData();
+    const fromJournalFallback = client.refreshWorldData();
+    fake.answerReload(worldWithActor('Fresh'));
+    await Promise.all([fromTool, fromJournalFallback]);
+
+    expect(fake.worldRequestCount()).toBe(2);
+    expect(actorNames(client)).toEqual(['Fresh']);
+    await client.disconnect();
+  });
+
+  it('replays the changes received during the reload onto the new snapshot', async () => {
+    const { client, fake } = await connected({ hold: true });
+
+    plainReconnection(fake);
+    fake.fire('modifyDocument', {
+      type: 'Actor',
+      action: 'create',
+      result: [{ _id: 'lateActor0000001', name: 'Late', type: 'npc' }],
+    });
+    // Visible at once in the cache being replaced…
+    expect(actorNames(client)).toEqual(['Late']);
+    // …and still there in a snapshot built before it.
+    fake.answerReload(worldWithActor('Fresh'));
+
+    await vi.waitFor(() => expect(client.isWorldDataStale()).toBe(false));
+    expect(actorNames(client)).toEqual(['Fresh', 'Late']);
+    await client.disconnect();
+  });
+
+  it(`gives up the replay beyond ${WORLD_REPLAY_MAX_CHANGES} changes and keeps the cache stale`, async () => {
+    const { client, fake } = await connected({ hold: true });
+
+    plainReconnection(fake);
+    for (let i = 0; i <= WORLD_REPLAY_MAX_CHANGES; i++) {
+      fake.fire('modifyDocument', {
+        type: 'Actor',
+        action: 'update',
+        result: [{ _id: 'missingActor0001', name: `n${i}` }],
+      });
+    }
+    fake.answerReload(worldWithActor('Fresh'));
+
+    await vi.waitFor(() => expect(actorNames(client)).toEqual(['Fresh']));
+    expect(client.isWorldDataStale()).toBe(true);
+    expect(warnings('too many to replay')).toHaveLength(1);
+    await client.disconnect();
+  });
+
+  it('ignores the reload answer of a socket that a reauthentication replaced', async () => {
+    vi.mocked(authenticateFoundry)
+      .mockResolvedValueOnce({ session: 'cookie-1', userId: USER_ID })
+      .mockResolvedValueOnce({ session: 'cookie-2', userId: USER_ID });
+    const first = fakeSocket(worldData(), USER_ID, { hold: true });
+    const second = fakeSocket(worldWithActor('Second'));
+    queueSockets(first, second);
+    const client = newClient();
+    await client.connect();
+
+    plainReconnection(first);
+    const refresh = client.refreshWorldData();
+    first.fire('shutdown');
+    await expect(refresh).rejects.toThrow();
+    await vi.waitFor(() => expect(client.isConnected()).toBe(true));
+    first.answerReload(worldWithActor('Stale'));
+
+    expect(actorNames(client)).toEqual(['Second']);
+    expect(client.isWorldDataStale()).toBe(false);
+    await client.disconnect();
+  });
+
+  it('keeps the cache stale when the socket drops during the reload', async () => {
+    const { client, fake } = await connected({ hold: true });
+
+    plainReconnection(fake);
+    const refresh = client.refreshWorldData();
+    fake.socket.connected = false;
+    fake.fire('disconnect', 'ping timeout');
+
+    await expect(refresh).rejects.toThrow();
+    fake.answerReload(worldWithActor('Fresh'));
+    expect(actorNames(client)).toEqual([]);
+    expect(client.isWorldDataStale()).toBe(true);
+    await client.disconnect();
+  });
+
+  it('cancels a running reload, and its timer, on disconnect()', async () => {
+    const { client, fake } = await connected({ hold: true });
+    vi.useFakeTimers();
+
+    plainReconnection(fake);
+    const refresh = client.refreshWorldData();
+    refresh.catch(() => undefined);
+    await client.disconnect();
+
+    await expect(refresh).rejects.toThrow();
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
 

@@ -584,6 +584,18 @@ export const REAUTH_MAX_RETRY_MS = 120_000;
  * the old 10-15 s limits cut off.
  */
 const WORLD_LOAD_TIMEOUT_MS = 60_000;
+/**
+ * Most cache changes kept while a world reload runs, to replay onto the new
+ * snapshot. Past it the replay is abandoned and the cache stays stale.
+ */
+export const WORLD_REPLAY_MAX_CHANGES = 10_000;
+
+/** Cache changes kept while a world reload runs; see `FoundryClient.changeCache`. */
+interface WorldReplay {
+  changes: Array<(worldData: WorldData) => unknown>;
+  /** More than {@link WORLD_REPLAY_MAX_CHANGES}: `changes` was dropped. */
+  overflowed: boolean;
+}
 
 /** States in which the current session is known to be unusable. */
 const SESSION_LOST_STATES: ReadonlySet<ConnectionState> = new Set([
@@ -653,6 +665,17 @@ export class FoundryClient {
   private worldData: WorldData | null = null;
   /** Set when the socket drops with a cache still loaded (laurigates/foundryvtt-mcp#217). */
   private worldDataStale = false;
+  /** The world reload running, shared by every caller of {@link refreshWorldData}. */
+  private worldReload: Promise<void> | null = null;
+  /** Rejects the running reload and clears its timer; set while one waits for its answer. */
+  private cancelWorldReload: ((reason: string) => void) | null = null;
+  /**
+   * Cache changes made while a reload runs, replayed onto the new snapshot
+   * ({@link changeCache}); `null` when no reload runs.
+   */
+  private worldReplay: WorldReplay | null = null;
+  /** Counts socket drops: a reload that saw one leaves the cache stale. */
+  private socketDrops = 0;
   /**
    * Last observed outcome of a REST request: false once one failed to reach
    * FoundryVTT at all (laurigates/foundryvtt-mcp#217). Unused in Socket.IO mode.
@@ -1162,7 +1185,7 @@ export class FoundryClient {
     }
 
     try {
-      const applied = applyDocumentBroadcast(this.worldData, broadcast);
+      const applied = this.changeCache((worldData) => applyDocumentBroadcast(worldData, broadcast));
       logger.debug(
         applied
           ? `Applied ${broadcast.action} ${broadcast.type} broadcast to cached worldData`
@@ -1405,7 +1428,7 @@ export class FoundryClient {
       return;
     }
 
-    if (applyUserActivity(this.worldData, activity)) {
+    if (this.changeCache((worldData) => applyUserActivity(worldData, activity))) {
       logger.debug(
         `User ${activity.userId} is now ${activity.active ? 'active' : 'inactive'} (userActivity)`,
       );
@@ -1447,9 +1470,9 @@ export class FoundryClient {
    * FoundryVTT's `session` event names a user ({@link onSessionEvent}): after
    * a server restart the same reconnect yields an anonymous socket.
    *
-   * `worldDataStale` is deliberately *not* cleared: broadcasts emitted while
-   * the socket was down were never delivered and are not replayed, so the
-   * cache stays flagged until an explicit `refreshWorldData()`.
+   * `worldDataStale` is *not* cleared here: broadcasts emitted while the
+   * socket was down were never delivered and are not replayed. Once
+   * FoundryVTT names the user, {@link onSessionEvent} reloads the world.
    *
    * Bound field rather than a method so the same reference reaches `socket.off()`.
    */
@@ -1462,9 +1485,10 @@ export class FoundryClient {
 
   /**
    * Handles the `session` event FoundryVTT sends on every (re)connection of
-   * the socket. With a user, the reconnected socket is authenticated again;
-   * without one (server restarted, world not running), it is anonymous and
-   * the client authenticates anew.
+   * the socket. With a user, the reconnected socket is authenticated again,
+   * and a cache that went stale while it was down is reloaded in the
+   * background; without one (server restarted, world not running), it is
+   * anonymous and the client authenticates anew.
    *
    * Bound field rather than a method so the same reference reaches `socket.off()`.
    */
@@ -1477,9 +1501,10 @@ export class FoundryClient {
     if (userId) {
       if (this.connectionState !== 'connected') {
         this.setConnectionState('connected', null);
-        logger.info(
-          'FoundryVTT socket reconnected — cached world data is still stale until refreshed',
-        );
+        logger.info('FoundryVTT socket reconnected with the same session');
+      }
+      if (this.worldDataStale) {
+        this.reloadAfterReconnection();
       }
       return;
     }
@@ -1494,7 +1519,24 @@ export class FoundryClient {
     this.reauthenticate('the world was shut down').catch(() => undefined);
   };
 
+  /**
+   * Reloads the world without blocking anyone (tools keep answering from the
+   * stale cache meanwhile). A failure leaves the cache stale.
+   */
+  private reloadAfterReconnection(): void {
+    logger.info('Reloading the world data after the socket reconnected');
+    this.refreshWorldData().catch((error: unknown) => {
+      logger.warn(
+        'Could not reload the world data after the socket reconnected — the cache stays stale',
+        { error: errorMessage(error) },
+      );
+    });
+  }
+
   private onSocketDisconnect = (reason?: unknown): void => {
+    this.socketDrops += 1;
+    // Socket.IO never answers a request sent before the drop.
+    this.cancelWorldReload?.('the socket dropped while the world data was loading');
     this.worldDataStale = this.worldData !== null;
     if (this.reauthInFlight || this.connectionState !== 'connected') {
       return;
@@ -1514,6 +1556,7 @@ export class FoundryClient {
    * client, so this is reachable in-repo).
    */
   private detachSocket(): void {
+    this.cancelWorldReload?.('the connection closed while the world data was loading');
     if (!this.socket) {
       return;
     }
@@ -1705,41 +1748,116 @@ export class FoundryClient {
    * acknowledgement callback, exactly as in {@link connectAndLoadWorld}; it
    * never sends a separate `world` event, so listening for one always timed
    * out. An ack that arrives after the timeout is ignored.
+   *
+   * One reload at a time: concurrent callers (`refresh_world_data`, the
+   * journal read fallback, the reload after a reconnection) share it. Cache
+   * changes made while it runs are replayed onto the new snapshot, which the
+   * server may have built before them ({@link changeCache}). The cache stays
+   * stale when that replay overflowed or the socket dropped meanwhile. A
+   * drop, a replaced socket or `disconnect()` cancels the reload.
    */
-  async refreshWorldData(): Promise<void> {
-    if (!this.socket?.connected) {
+  refreshWorldData(): Promise<void> {
+    if (this.worldReload) {
+      return this.worldReload;
+    }
+    const reload = this.reloadWorldData().finally(() => {
+      this.worldReload = null;
+      this.worldReplay = null;
+    });
+    this.worldReload = reload;
+    return reload;
+  }
+
+  private async reloadWorldData(): Promise<void> {
+    const socket = this.socket;
+    if (!socket?.connected) {
       throw new Error('Not connected — cannot refresh world data');
     }
     this.assertAuthenticated();
+    const drops = this.socketDrops;
+    const replay: WorldReplay = { changes: [], overflowed: false };
+    this.worldReplay = replay;
 
-    this.worldData = await new Promise<WorldData>((resolve, reject) => {
+    const data = await new Promise<WorldData>((resolve, reject) => {
       let settled = false;
-      const timeoutId = setTimeout(() => {
+      const settle = () => {
         settled = true;
+        clearTimeout(timeoutId);
+        this.cancelWorldReload = null;
+      };
+      const timeoutId = setTimeout(() => {
+        settle();
         reject(new Error('Refresh timeout'));
       }, WORLD_LOAD_TIMEOUT_MS);
+      this.cancelWorldReload = (reason) => {
+        settle();
+        reject(new Error(`World data refresh cancelled: ${reason}`));
+      };
 
-      this.socket?.emit('world', (data: WorldData) => {
+      socket.emit('world', (payload: WorldData) => {
         if (settled) {
           return;
         }
-        settled = true;
-        clearTimeout(timeoutId);
-        const parsed = WorldDataSchema.safeParse(data);
+        settle();
+        const parsed = WorldDataSchema.safeParse(payload);
         if (!parsed.success) {
           logger.warn('WorldData refresh failed schema validation — proceeding with raw data', {
             issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
           });
         }
-        resolve(data);
+        resolve(payload);
       });
     });
 
-    this.worldDataStale = false;
+    if (this.socket !== socket) {
+      throw new Error('World data refresh cancelled: the connection was replaced');
+    }
+    for (const change of replay.changes) {
+      try {
+        change(data);
+      } catch (error) {
+        logger.warn('Failed to replay a cache change onto the reloaded world data', {
+          error: errorMessage(error),
+        });
+      }
+    }
+    this.worldData = data;
+    this.worldDataStale = replay.overflowed || this.socketDrops !== drops;
     logger.info('World data refreshed', {
-      actors: this.worldData.actors.length,
-      items: this.worldData.items.length,
+      actors: data.actors.length,
+      items: data.items.length,
     });
+    if (replay.overflowed) {
+      logger.warn(
+        `More than ${WORLD_REPLAY_MAX_CHANGES} cache changes arrived while the world data was loading, too many to replay — the cache stays stale until the next refresh`,
+      );
+    }
+  }
+
+  /**
+   * Applies a change to the cached world. While a reload runs, the change is
+   * also kept for the new snapshot: changes are idempotent upserts and
+   * removals applied in arrival order, so replaying one the snapshot already
+   * holds is harmless. Past {@link WORLD_REPLAY_MAX_CHANGES} the kept changes
+   * are dropped and the reload leaves the cache stale.
+   *
+   * @returns what `change` returned, or `undefined` without a cache
+   */
+  private changeCache<T>(change: (worldData: WorldData) => T): T | undefined {
+    if (!this.worldData) {
+      return undefined;
+    }
+    const result = change(this.worldData);
+    const replay = this.worldReplay;
+    if (replay && !replay.overflowed) {
+      if (replay.changes.length >= WORLD_REPLAY_MAX_CHANGES) {
+        replay.changes = [];
+        replay.overflowed = true;
+      } else {
+        replay.changes.push(change);
+      }
+    }
+    return result;
   }
 
   getWorldData(): WorldData | null {
@@ -2265,13 +2383,11 @@ export class FoundryClient {
     }
     const main = responses[responses.length - 1];
     const result = Array.isArray(main?.result) ? main.result : [];
-    if (this.worldData) {
-      // Side effects are not echoed back to this client either.
-      for (const sideEffect of responses.slice(0, -1)) {
-        const broadcast = parseDocumentBroadcast(sideEffect);
-        if (broadcast) {
-          applyDocumentBroadcast(this.worldData, broadcast);
-        }
+    // Side effects are not echoed back to this client either.
+    for (const sideEffect of responses.slice(0, -1)) {
+      const broadcast = parseDocumentBroadcast(sideEffect);
+      if (broadcast) {
+        this.changeCache((worldData) => applyDocumentBroadcast(worldData, broadcast));
       }
     }
     // FoundryVTT does not echo a client's own writes back on the
@@ -2283,15 +2399,14 @@ export class FoundryClient {
     // unconditionally: it is idempotent by construction (upserts by _id,
     // tolerates an already-gone delete id), so if Foundry *does* also
     // broadcast this write back later, re-applying it is a no-op.
-    if (this.worldData) {
-      const parentUuid = operation.parentUuid;
-      applyDocumentBroadcast(this.worldData, {
-        type,
-        action,
-        result,
-        ...(typeof parentUuid === 'string' && parentUuid ? { parentUuid } : {}),
-      });
-    }
+    const parentUuid = operation.parentUuid;
+    const ownWrite: DocumentBroadcast = {
+      type,
+      action,
+      result,
+      ...(typeof parentUuid === 'string' && parentUuid ? { parentUuid } : {}),
+    };
+    this.changeCache((worldData) => applyDocumentBroadcast(worldData, ownWrite));
     return result;
   }
 
@@ -3068,9 +3183,9 @@ export class FoundryClient {
     const raw = Array.isArray(response.result) ? response.result[0] : undefined;
     if (raw === undefined) {
       // Gone on the server: drop it from the cache too.
-      if (this.worldData) {
-        this.worldData.journal = this.worldData.journal.filter((j) => j._id !== journalId);
-      }
+      this.changeCache((worldData) => {
+        worldData.journal = worldData.journal.filter((j) => j._id !== journalId);
+      });
       return undefined;
     }
     const parsed = FetchedJournalSchema.safeParse(raw);
@@ -3079,14 +3194,14 @@ export class FoundryClient {
     }
     // Validated above; the cast only bridges `exactOptionalPropertyTypes`.
     const journal = parsed.data as WorldJournal;
-    if (this.worldData) {
-      const index = this.worldData.journal.findIndex((j) => j._id === journalId);
+    this.changeCache((worldData) => {
+      const index = worldData.journal.findIndex((j) => j._id === journalId);
       if (index === -1) {
-        this.worldData.journal.push(journal);
+        worldData.journal.push(journal);
       } else {
-        this.worldData.journal[index] = journal;
+        worldData.journal[index] = journal;
       }
-    }
+    });
     return journal;
   }
 

@@ -1051,29 +1051,37 @@ describe('FoundryClient', () => {
      * "✅ Connected" while serving a cache that missed every broadcast from the
      * outage is the sharper version of laurigates/foundryvtt-mcp#217's second impact bullet.
      */
-    it('get_health_status marks the cache stale after a drop and a reconnect', async () => {
+    it('get_health_status marks the cache stale after a drop, until the reconnection reloads it', async () => {
       const { handleGetHealthStatus } = await import('../../tools/handlers/diagnostics.js');
       const { client: connected, socket, fire } = await connectWithMockSocket();
       const diagnosticsClient = {
         getSystemHealth: vi.fn().mockRejectedValue(new Error('no REST module')),
       } as unknown as Parameters<typeof handleGetHealthStatus>[2];
+      const healthText = async () =>
+        (
+          (await handleGetHealthStatus({}, connected, diagnosticsClient)).content[0] as {
+            text: string;
+          }
+        ).text;
 
-      const before = await handleGetHealthStatus({}, connected, diagnosticsClient);
-      expect((before.content[0] as { text: string }).text).not.toMatch(/stale/i);
+      expect(await healthText()).not.toMatch(/stale/i);
 
       socket.connected = false;
       fire('disconnect', 'transport close');
       socket.connected = true;
       fire('connect');
+
+      const dropped = await healthText();
+      expect(dropped).toMatch(/stale/i);
+      expect(dropped).toContain('refresh_world_data');
+
+      // FoundryVTT still knows the session: the world is reloaded on its own.
       fire('session', { userId: 'test-user-id', sessionId: 'x' });
+      await vi.waitFor(() => expect(connected.isWorldDataStale()).toBe(false));
 
-      const after = (await handleGetHealthStatus({}, connected, diagnosticsClient)).content[0] as {
-        text: string;
-      };
-
-      expect(after.text).toContain('✅ Connected');
-      expect(after.text).toMatch(/stale/i);
-      expect(after.text).toContain('refresh_world_data');
+      const reloaded = await healthText();
+      expect(reloaded).toContain('✅ Connected');
+      expect(reloaded).not.toMatch(/stale/i);
     });
 
     it('removes the persistent connect listener on explicit disconnect()', async () => {
