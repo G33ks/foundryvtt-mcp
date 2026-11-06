@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Companion module lines in the log**: the GM page's console lines from the companion module (bridge connection, handshake, errors) and the uncaught errors thrown from its code reach the connector's log, at `info` or `warn`. Only the module's own scripts and its own message text are copied; no page, document or command content.
+
+### Fixed
+
+- `refresh_world_data` works: it read an event FoundryVTT never sends and always timed out. A world load now waits up to 60 s, for large worlds. From duckpuppy's fork (Patrick Aikens).
+- After a network cut, when FoundryVTT still knows the session, the world cache is reloaded on its own instead of staying stale until `refresh_world_data`. Changes received during the reload are kept.
+- FoundryVTT v14 login sends `Sec-Fetch-Site: same-origin` with `Origin`, which some v14 setups require. From duckpuppy's fork (Patrick Aikens).
+- The GM page opens at 1920×1080: the 1280×720 default is below FoundryVTT's minimum window size. From duckpuppy's fork (Patrick Aikens).
+
 ## 2.0.0 — 2026-11-05
 
 First release under the new name; earlier entries are from the original project.
