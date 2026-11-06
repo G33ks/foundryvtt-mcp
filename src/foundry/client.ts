@@ -1129,9 +1129,11 @@ export class FoundryClient {
    * Connects Socket.IO with an authenticated session and loads worldData
    * ({@link loadWorldSnapshot}, which installs it).
    *
-   * The data listeners are attached before the world is asked for: a
-   * broadcast sent while FoundryVTT builds and sends the snapshot is kept
-   * and replayed onto it, instead of being lost. The lifecycle listeners
+   * The data listeners and the replay are set up with the socket, before
+   * the handshake: a broadcast that arrives after FoundryVTT names the user
+   * but before the world is asked for (even in the same packet as the
+   * `session` event), or while FoundryVTT builds and sends the snapshot, is
+   * kept and replayed onto it instead of being lost. The lifecycle listeners
    * (`connect`, `disconnect`, `session`, `shutdown`) come only once the
    * snapshot is in: before that, the handshake's own `session` handler
    * decides, and a `session` event must not read as connected yet.
@@ -1141,6 +1143,8 @@ export class FoundryClient {
   private async connectAndLoadWorld(session: string): Promise<{ overflowed: boolean }> {
     // A previous socket must not outlive its replacement (see `detachSocket`).
     this.detachSocket();
+    const replay: WorldReplay = { changes: [], overflowed: false };
+    this.worldReplay = replay;
     const socket = io(this.config.baseUrl, sessionSocketOptions(session));
     this.socket = socket;
     this.attachDataListeners(socket);
@@ -1153,6 +1157,7 @@ export class FoundryClient {
         timeoutMs: Math.max(deadline - Date.now(), 0),
         timeoutMessage,
         schemaWarning: 'WorldData failed schema validation — proceeding with raw data',
+        replay,
       });
       // Liveness (laurigates/foundryvtt-mcp#217): a socket that drops on its own must stop reading
       // as connected, and one that socket.io reconnects must read as
@@ -1170,6 +1175,9 @@ export class FoundryClient {
       socket.on('connect_error', this.onReconnectError);
       return { overflowed };
     } catch (error) {
+      if (this.worldReplay === replay) {
+        this.worldReplay = null;
+      }
       this.detachDataListeners(socket);
       socket.disconnect();
       throw error;
@@ -2000,9 +2008,15 @@ export class FoundryClient {
    */
   private async loadWorldSnapshot(
     socket: Socket,
-    options: { timeoutMs: number; timeoutMessage: string; schemaWarning: string },
+    options: {
+      timeoutMs: number;
+      timeoutMessage: string;
+      schemaWarning: string;
+      /** A replay already collecting changes (the first load opens it with the socket). */
+      replay?: WorldReplay;
+    },
   ): Promise<{ data: WorldData; overflowed: boolean }> {
-    const replay: WorldReplay = { changes: [], overflowed: false };
+    const replay: WorldReplay = options.replay ?? { changes: [], overflowed: false };
     this.worldReplay = replay;
     try {
       const data = await new Promise<WorldData>((resolve, reject) => {

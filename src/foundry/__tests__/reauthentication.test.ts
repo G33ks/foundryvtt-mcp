@@ -74,12 +74,19 @@ function worldData(accountRole = 3) {
  * listener (the handshake) with `handshakeUserId` on the next microtask.
  * `reload` changes how the later `world` requests (reloads) are answered:
  * with another snapshot, or not at all until `answerReload()`; `holdFirst`
- * holds the first load the same way.
+ * holds the first load the same way. `afterHandshake` runs right after the
+ * handshake's `session` event, in the same turn, as for events that came in
+ * the same packet.
  */
 function fakeSocket(
   snapshot = worldData(),
   handshakeUserId: string | null = USER_ID,
-  reload: { snapshot?: unknown; hold?: boolean; holdFirst?: boolean } = {},
+  reload: {
+    snapshot?: unknown;
+    hold?: boolean;
+    holdFirst?: boolean;
+    afterHandshake?: (fire: (event: string, ...args: unknown[]) => void) => void;
+  } = {},
 ) {
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
   const heldReloads: Array<(data: unknown) => void> = [];
@@ -89,7 +96,10 @@ function fakeSocket(
     listeners.set(event, [...(listeners.get(event) ?? []), handler]);
     if (event === 'session' && !handshakeAnswered) {
       handshakeAnswered = true;
-      queueMicrotask(() => handler({ userId: handshakeUserId, sessionId: 'x' }));
+      queueMicrotask(() => {
+        handler({ userId: handshakeUserId, sessionId: 'x' });
+        reload.afterHandshake?.(fire);
+      });
     }
   };
   const socket = {
@@ -714,6 +724,50 @@ describe('FoundryClient first world load', () => {
     await client.disconnect();
   });
 
+  const earlyActor = (fire: (event: string, ...args: unknown[]) => void) =>
+    fire('modifyDocument', {
+      type: 'Actor',
+      action: 'create',
+      result: [{ _id: 'earlyActor000001', name: 'Early', type: 'npc' }],
+    });
+
+  it('keeps a broadcast that arrives right after the session event, before the world is asked for', async () => {
+    const fake = fakeSocket(worldData(), USER_ID, {
+      afterHandshake: (fire) => {
+        earlyActor(fire);
+        expect(fake.worldRequestCount()).toBe(0);
+      },
+    });
+    queueSockets(fake);
+    const client = newClient();
+
+    await client.connect();
+
+    expect(actorNames(client)).toEqual(['Early']);
+    expect(client.isWorldDataStale()).toBe(false);
+    await client.disconnect();
+  });
+
+  it('keeps it too after a reauthentication, not only in the cache being replaced', async () => {
+    const first = fakeSocket();
+    const second = fakeSocket(worldWithActor('Second'), USER_ID, {
+      afterHandshake: (fire) => {
+        earlyActor(fire);
+        expect(second.worldRequestCount()).toBe(0);
+      },
+    });
+    queueSockets(first, second);
+    const client = newClient();
+    await client.connect();
+
+    first.fire('shutdown');
+    await vi.waitFor(() => expect(client.connectionStatus().state).toBe('connected'));
+    await vi.waitFor(() => expect(second.worldRequestCount()).toBe(1));
+
+    expect(actorNames(client)).toEqual(['Early', 'Second']);
+    await client.disconnect();
+  });
+
   it(`leaves the cache stale past ${WORLD_REPLAY_MAX_CHANGES} changes during the first load`, async () => {
     const { client, fake, connecting } = await loading();
 
@@ -766,6 +820,8 @@ describe('FoundryClient first world load', () => {
     const client = newClient();
 
     await expect(client.connect()).rejects.toThrow('session event returned no userId');
+    // The replay opened with the socket is closed too.
+    expect((client as unknown as { worldReplay: unknown }).worldReplay).toBeNull();
 
     const removed = fake.socket.off.mock.calls.map(([event]) => event);
     expect(removed).toEqual(
