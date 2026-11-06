@@ -92,6 +92,9 @@ export function formatStatus(status: DaemonStatus): string[] {
     lines.push(`  Write queue:    ${status.writeQueue} pending`);
   }
   lines.push(`  FoundryVTT:     ${formatFoundryConnection(status)}`);
+  if (status.staleCache) {
+    lines.push(`  World cache:    ${formatStaleCache(status.staleCache)}`);
+  }
   if (status.account) {
     const role = status.account.role ? ` (${status.account.role})` : '';
     lines.push(`  Account:        ${status.account.name}${role}`);
@@ -188,6 +191,13 @@ export function formatTerminalConfig(settings: ResolvedSettings = resolveSetting
       })),
     ),
   ];
+}
+
+/** e.g. "stale since 2026-11-06T13:02:11.000Z — the socket dropped". */
+function formatStaleCache(stale: NonNullable<DaemonStatus['staleCache']>): string {
+  const since = stale.since ? ` since ${stale.since}` : '';
+  const reason = stale.reason ? ` — ${stale.reason}` : '';
+  return `stale${since}${reason}`;
 }
 
 function formatFoundryConnection(status: DaemonStatus): string {

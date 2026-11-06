@@ -85,6 +85,8 @@ export interface CoreStatus {
   foundryConnected: boolean;
   /** State of the Socket.IO link, and why it is down. */
   foundryConnection: ConnectionStatus;
+  /** Since when and why the cached world stopped following live changes; `null` while live. */
+  staleCache: { since: string | null; reason: string | null } | null;
   /** The connector's account, its role, and a warning about it if any. */
   account: { name: string; role: string | null; warning: string | null } | null;
   bridge: {
@@ -577,6 +579,7 @@ export class FoundryCore {
     return {
       foundryConnected: this.foundryClient.isConnected(),
       foundryConnection: this.foundryClient.connectionStatus(),
+      staleCache: this.foundryClient.worldDataStaleness(),
       account: account
         ? {
             name: account.name,

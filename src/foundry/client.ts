@@ -590,6 +590,9 @@ const WORLD_LOAD_TIMEOUT_MS = 60_000;
  */
 export const WORLD_REPLAY_MAX_CHANGES = 10_000;
 
+/** Why the cache is stale after a replay that overflowed. */
+const REPLAY_OVERFLOW_REASON = `more than ${WORLD_REPLAY_MAX_CHANGES} changes arrived while the world data was loading`;
+
 /** Cache changes kept while a world reload runs; see `FoundryClient.changeCache`. */
 interface WorldReplay {
   changes: Array<(worldData: WorldData) => unknown>;
@@ -702,6 +705,9 @@ export class FoundryClient {
   private worldData: WorldData | null = null;
   /** Set when the socket drops with a cache still loaded (laurigates/foundryvtt-mcp#217). */
   private worldDataStale = false;
+  /** Since when, and why, the cache is stale ({@link markWorldDataStale}); `null` when fresh. */
+  private worldDataStaleSince: Date | null = null;
+  private worldDataStaleReason: string | null = null;
   /** The world reload running, shared by every caller of {@link refreshWorldData}. */
   private worldReload: Promise<void> | null = null;
   /** Rejects the running reload and clears its timer; set while one waits for its answer. */
@@ -876,7 +882,7 @@ export class FoundryClient {
 
     // Connect authenticated socket and load world data
     const { overflowed } = await this.connectAndLoadWorld(session);
-    this.worldDataStale = overflowed;
+    this.markWorldDataStale(overflowed, REPLAY_OVERFLOW_REASON);
     this.session = session;
     this.awaitingSession = false;
     this.setConnectionState('connected', null);
@@ -1628,7 +1634,7 @@ export class FoundryClient {
 
   /** Bound field rather than a method so the same reference reaches `socket.off()`. */
   private onWorldShutdown = (): void => {
-    this.worldDataStale = this.worldData !== null;
+    this.markWorldDataStale(this.worldData !== null, 'the world was shut down');
     this.reauthenticate('the world was shut down').catch(() => undefined);
   };
 
@@ -1643,6 +1649,12 @@ export class FoundryClient {
         'Could not reload the world data after the socket reconnected — the cache stays stale',
         { error: errorMessage(error) },
       );
+      if (this.worldDataStale) {
+        this.markWorldDataStale(
+          true,
+          `the reload after the reconnection failed: ${errorMessage(error)}`,
+        );
+      }
     });
   }
 
@@ -1651,7 +1663,7 @@ export class FoundryClient {
     this.outage ??= { since: Date.now(), failedAttempts: 0, loggedAt: 0, loggedMessage: null };
     // Socket.IO never answers a request sent before the drop.
     this.cancelWorldReload?.('the socket dropped while the world data was loading');
-    this.worldDataStale = this.worldData !== null;
+    this.markWorldDataStale(this.worldData !== null, 'the socket dropped');
     if (this.reauthInFlight || this.connectionState !== 'connected') {
       return;
     }
@@ -1732,7 +1744,7 @@ export class FoundryClient {
     this.reauthTimer = null;
     this.detachSocket();
     this.worldData = null;
-    this.worldDataStale = false;
+    this.markWorldDataStale(false);
     this._isConnected = false;
     this.session = null;
     this.connectionState = 'disconnected';
@@ -1790,6 +1802,35 @@ export class FoundryClient {
    */
   isWorldDataStale(): boolean {
     return this.worldDataStale;
+  }
+
+  /** Since when and why the cache is stale, for `status`; `null` while it is live. */
+  worldDataStaleness(): { since: string | null; reason: string | null } | null {
+    if (!this.worldDataStale) {
+      return null;
+    }
+    return {
+      since: this.worldDataStaleSince?.toISOString() ?? null,
+      reason: this.worldDataStaleReason,
+    };
+  }
+
+  /**
+   * Marks the cache stale, or live again. A cache that stays stale keeps the
+   * time it became so; its reason is the latest one.
+   */
+  private markWorldDataStale(stale: boolean, reason?: string): void {
+    if (!stale) {
+      this.worldDataStale = false;
+      this.worldDataStaleSince = null;
+      this.worldDataStaleReason = null;
+      return;
+    }
+    if (!this.worldDataStale || this.worldDataStaleSince === null) {
+      this.worldDataStaleSince = new Date();
+    }
+    this.worldDataStale = true;
+    this.worldDataStaleReason = reason ?? this.worldDataStaleReason;
   }
 
   /**
@@ -1934,7 +1975,14 @@ export class FoundryClient {
       timeoutMessage: 'Refresh timeout',
       schemaWarning: 'WorldData refresh failed schema validation — proceeding with raw data',
     });
-    this.worldDataStale = overflowed || this.socketDrops !== drops;
+    if (overflowed) {
+      this.markWorldDataStale(true, REPLAY_OVERFLOW_REASON);
+    } else {
+      this.markWorldDataStale(
+        this.socketDrops !== drops,
+        'the socket dropped while the world data was reloading',
+      );
+    }
     logger.info('World data refreshed', {
       actors: data.actors.length,
       items: data.items.length,

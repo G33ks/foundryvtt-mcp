@@ -175,6 +175,36 @@ describe('HeadlessGmSession shared mode', () => {
     await session.stop();
   });
 
+  it('reads as loading the game, not waiting for a session, while /game loads with its cookie', async () => {
+    const env = fakeEnvironment();
+    let ready: () => void = () => undefined;
+    env.page.waitForFunction.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          ready = resolve;
+        }),
+    );
+    launchMock.mockResolvedValue(env.browser);
+    const src = fakeSource('cookie-1');
+    const session = new HeadlessGmSession({
+      foundryUrl: FOUNDRY_URL,
+      username: 'mcp-api',
+      sessionSource: src.source,
+    });
+    await session.start();
+    await settle();
+
+    expect(session.sessionState()).toBe('loading-game');
+    expect(session.statusText()).toBe(
+      "⏳ Opening /game with the connector's session — sharing the connector's session (mcp-api)",
+    );
+
+    ready();
+    await settle();
+    expect(session.sessionState()).toBe('logged-in');
+    await session.stop();
+  });
+
   it('installs the cookie in its own context and loads /game, never /join', async () => {
     const { session, env } = await startShared('cookie-1');
 

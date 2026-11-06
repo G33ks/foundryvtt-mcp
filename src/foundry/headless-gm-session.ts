@@ -317,12 +317,15 @@ export interface SessionSource {
 
 /**
  * Where a session stands. Shared mode: `waiting-for-session` (no cookie
- * yet), `logged-in`, `reauthenticating` (the cookie was refused; a new one
- * was asked for), `reconnecting` (FoundryVTT could not be reached; the page
- * retries with the same cookie). Separate account: `logging-in` or `logged-in`.
+ * yet), `loading-game` (the cookie is in, the first /game load waits for
+ * `game.ready`), `logged-in`, `reauthenticating` (the cookie was refused; a
+ * new one was asked for), `reconnecting` (FoundryVTT could not be reached;
+ * the page retries with the same cookie). Separate account: `logging-in` or
+ * `logged-in`.
  */
 export type HeadlessSessionState =
   | 'waiting-for-session'
+  | 'loading-game'
   | 'logging-in'
   | 'logged-in'
   | 'reauthenticating'
@@ -577,6 +580,9 @@ export class HeadlessGmSession {
     if (state === 'waiting-for-session') {
       return `⏳ Waiting for the connector's session — ${mode}`;
     }
+    if (state === 'loading-game') {
+      return `⏳ Opening /game with the connector's session — ${mode}`;
+    }
     if (state === 'reauthenticating') {
       return `⏳ Reauthenticating — ${mode}${this.lastError ? ` (${this.lastError})` : ''}`;
     }
@@ -673,6 +679,9 @@ export class HeadlessGmSession {
       // Not logged in until the game is ready again.
       this.sharedState = 'reconnecting';
       this.lastError = 'loading /game';
+    } else if (this.sharedState === 'waiting-for-session') {
+      // The session is in hand: what remains is the game itself.
+      this.sharedState = 'loading-game';
     }
     try {
       const gameUrl = new URL('/game', this.options.foundryUrl).toString();

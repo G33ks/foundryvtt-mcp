@@ -177,6 +177,41 @@ describe('formatStatus', () => {
     );
   });
 
+  it('says since when and why the world cache is stale, and nothing while it is live', () => {
+    expect(line(BASE, 'World cache')).toBeUndefined();
+    expect(line({ ...BASE, staleCache: null }, 'World cache')).toBeUndefined();
+    expect(
+      line(
+        {
+          ...BASE,
+          foundryConnected: false,
+          staleCache: { since: '2026-11-06T13:02:11.000Z', reason: 'the socket dropped' },
+        },
+        'World cache',
+      ),
+    ).toBe('  World cache:    stale since 2026-11-06T13:02:11.000Z — the socket dropped');
+  });
+
+  it('shows the loading-game state of the headless session', () => {
+    expect(
+      line(
+        {
+          ...BASE,
+          headlessGm: {
+            enabled: true,
+            active: false,
+            status: 'x',
+            state: 'running',
+            mode: 'shared',
+            modeText: "sharing the connector's session (mcp-api)",
+            sessionState: 'loading-game',
+          },
+        },
+        'Headless GM',
+      ),
+    ).toBe("  Headless GM:    loading-game — sharing the connector's session (mcp-api)");
+  });
+
   it('shows the account and a Gamemaster warning', () => {
     const status: DaemonStatus = {
       ...BASE,

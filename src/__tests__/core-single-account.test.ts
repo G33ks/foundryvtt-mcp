@@ -61,6 +61,7 @@ describe('FoundryCore single-account mode', () => {
     expect(status.headlessGm.mode).toBe('shared');
     expect(status.headlessGm.modeText).toBe("sharing the connector's session (mcp-api)");
     expect(status.headlessGm.sessionState).toBe('waiting-for-session');
+    expect(status.staleCache).toBeNull();
     const clientConfig = (core.foundryClient as unknown as { config: Record<string, unknown> })
       .config;
     expect(clientConfig.connectorUsernames).toBeUndefined();

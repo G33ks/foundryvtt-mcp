@@ -167,6 +167,11 @@ export const DaemonStatusSchema = z.object({
       error: z.string().nullable(),
     })
     .optional(),
+  // Absent from shared processes older than this field.
+  staleCache: z
+    .object({ since: z.string().nullable(), reason: z.string().nullable() })
+    .nullable()
+    .optional(),
   account: z
     .object({ name: z.string(), role: z.string().nullable(), warning: z.string().nullable() })
     .nullable()
@@ -197,16 +202,11 @@ export const DaemonStatusSchema = z.object({
       state: z.enum(['running', 'not-started', 'launch-failed', 'disabled']).optional(),
       mode: z.enum(['shared', 'separate']).nullable().optional(),
       modeText: z.string().nullable().optional(),
-      sessionState: z
-        .enum([
-          'waiting-for-session',
-          'logging-in',
-          'logged-in',
-          'reauthenticating',
-          'reconnecting',
-        ])
-        .nullable()
-        .optional(),
+      // A HeadlessSessionState ('waiting-for-session', 'loading-game',
+      // 'logging-in', 'logged-in', 'reauthenticating', 'reconnecting'), read
+      // as a plain string so that a state added later does not make an older
+      // `status` command reject the whole answer.
+      sessionState: z.string().nullable().optional(),
       // Absent from shared processes older than browser detection.
       browser: z
         .object({

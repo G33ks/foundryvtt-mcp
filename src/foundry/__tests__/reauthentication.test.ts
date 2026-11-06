@@ -516,6 +516,37 @@ describe('FoundryClient world reload after a plain reconnection', () => {
     await client.disconnect();
   });
 
+  it('says since when and why the cache is stale, keeping the time across reasons', async () => {
+    const { client, fake } = await connected({ hold: true });
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-06T13:00:00.000Z'));
+    expect(client.worldDataStaleness()).toBeNull();
+
+    fake.socket.connected = false;
+    fake.fire('disconnect', 'transport close');
+    expect(client.worldDataStaleness()).toEqual({
+      since: '2026-11-06T13:00:00.000Z',
+      reason: 'the socket dropped',
+    });
+
+    vi.setSystemTime(new Date('2026-11-06T13:00:30.000Z'));
+    fake.socket.connected = true;
+    fake.fire('connect');
+    fake.fire('session', { userId: USER_ID, sessionId: 'x' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(client.worldDataStaleness()).toEqual({
+      since: '2026-11-06T13:00:00.000Z',
+      reason: 'the reload after the reconnection failed: Refresh timeout',
+    });
+
+    // The next reload brings the cache back to life.
+    const refresh = client.refreshWorldData();
+    fake.answerReload(worldWithActor('Fresh'));
+    await refresh;
+    expect(client.worldDataStaleness()).toBeNull();
+    await client.disconnect();
+  });
+
   it('does not reload while a reauthentication runs', async () => {
     vi.mocked(authenticateFoundry)
       .mockResolvedValueOnce({ session: 'cookie-1', userId: USER_ID })
