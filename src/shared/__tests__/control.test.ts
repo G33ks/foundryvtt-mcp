@@ -66,6 +66,49 @@ describe('formatStatus', () => {
     );
   });
 
+  it('says a first connection in progress is connecting, not failed', () => {
+    const status: DaemonStatus = {
+      ...BASE,
+      foundryConnected: false,
+      foundryConnection: { state: 'disconnected', error: null },
+      bridge: { ...BRIDGE, state: 'not-started' },
+      headlessGm: {
+        enabled: true,
+        active: false,
+        status: '⏳ Logging in…',
+        launchError: null,
+        state: 'not-started',
+      },
+    };
+    expect(line(status, 'FoundryVTT')).toBe('  FoundryVTT:     connecting…');
+    expect(line(status, 'Module bridge')).toBe(
+      '  Module bridge:  not started yet (connecting to FoundryVTT)',
+    );
+    expect(line(status, 'Headless GM')).toBe(
+      '  Headless GM:    not started yet (connecting to FoundryVTT)',
+    );
+  });
+
+  it('says connecting before the core reports anything, instead of disabled', () => {
+    const status: DaemonStatus = { ...BASE, foundryConnected: undefined };
+    expect(line(status, 'FoundryVTT')).toBe('  FoundryVTT:     connecting…');
+    expect(line(status, 'Module bridge')).toBe(
+      '  Module bridge:  not started yet (connecting to FoundryVTT)',
+    );
+    expect(line(status, 'Headless GM')).toBe(
+      '  Headless GM:    not started yet (connecting to FoundryVTT)',
+    );
+  });
+
+  it('keeps "not connected" for a link that dropped, with its reason', () => {
+    const status: DaemonStatus = {
+      ...BASE,
+      foundryConnected: false,
+      foundryConnection: { state: 'disconnected', error: 'the socket dropped' },
+    };
+    expect(line(status, 'FoundryVTT')).toBe('  FoundryVTT:     not connected — the socket dropped');
+  });
+
   it('shows a bridge that failed to start with its error', () => {
     const status: DaemonStatus = {
       ...BASE,

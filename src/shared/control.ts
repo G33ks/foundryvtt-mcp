@@ -105,10 +105,14 @@ export function formatStatus(status: DaemonStatus): string[] {
   if (status.startupError) {
     lines.push(`  Startup error:  ${status.startupError}`);
   }
-  const bridgeState = bridge?.state ?? 'disabled';
+  const connecting = isConnecting(status);
+  // Before the core is built, nothing reports the bridge: it is not started yet.
+  const bridgeState = bridge?.state ?? (connecting ? 'not-started' : 'disabled');
   const notStarted = status.foundryConnected
     ? 'not started yet'
-    : 'not started (FoundryVTT connection failed)';
+    : connecting
+      ? 'not started yet (connecting to FoundryVTT)'
+      : 'not started (FoundryVTT connection failed)';
   lines.push(`  Module bridge:  ${formatBridge(bridge, bridgeState, notStarted)}`);
   if (bridgeState === 'listening' && bridge?.origin) {
     lines.push(`  Bridge origin:  ${bridge.origin}`);
@@ -200,9 +204,29 @@ function formatStaleCache(stale: NonNullable<DaemonStatus['staleCache']>): strin
   return `stale${since}${reason}`;
 }
 
+/**
+ * True while the shared process makes its first connection to FoundryVTT:
+ * not connected, no startup error, and either the core is not built yet (no
+ * connection nor bridge reported) or the link is still in its initial state
+ * (`disconnected` with no reason: every later disconnection carries one).
+ */
+function isConnecting(status: DaemonStatus): boolean {
+  if (status.foundryConnected || status.startupError) {
+    return false;
+  }
+  const connection = status.foundryConnection;
+  if (connection === undefined) {
+    return status.bridge === undefined && status.headlessGm === undefined;
+  }
+  return connection.state === 'disconnected' && connection.error === null;
+}
+
 function formatFoundryConnection(status: DaemonStatus): string {
   if (status.foundryConnected) {
     return 'connected';
+  }
+  if (isConnecting(status)) {
+    return 'connecting…';
   }
   const connection = status.foundryConnection;
   if (!connection || connection.state === 'disconnected') {
@@ -216,14 +240,14 @@ function formatBridge(
   state: NonNullable<NonNullable<DaemonStatus['bridge']>['state']>,
   notStarted: string,
 ): string {
+  if (state === 'not-started') {
+    return notStarted;
+  }
   if (!bridge || state === 'disabled') {
     return 'disabled';
   }
   if (state === 'failed') {
     return `failed to start — ${bridge.error ?? 'see the log'}`;
-  }
-  if (state === 'not-started') {
-    return notStarted;
   }
   return (
     `listening on port ${bridge.port}, protocol v${bridge.protocol}, authenticated module connected: ` +
@@ -239,6 +263,10 @@ function formatHeadlessGm(
 ): string {
   if (headlessGm?.launchError) {
     return `browser launch failed — ${headlessGm.launchError}`;
+  }
+  if (!headlessGm && bridgeState === 'not-started') {
+    // The core is not built yet (see isConnecting).
+    return notStarted;
   }
   const state = headlessGm?.state ?? 'disabled';
   if (!headlessGm || state === 'disabled') {

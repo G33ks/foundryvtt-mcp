@@ -22,6 +22,7 @@
 - The GM page opens at 1920×1080: the 1280×720 default is below FoundryVTT's minimum window size. From duckpuppy's fork (Patrick Aikens).
 - A change broadcast while the world loads at connection time is no longer lost: it is kept and replayed onto the loaded world, as for a reload.
 - When the module bridge failed to start, tools that need it say so instead of "the module bridge is disabled".
+- `status` no longer reads a first connection in progress as failed: FoundryVTT shows `connecting…`, and the module bridge and the headless GM session `not started yet (connecting to FoundryVTT)` (they read "FoundryVTT connection failed", or "disabled" before the connection was set up).
 
 ## 2.0.0 — 2026-11-05
 
