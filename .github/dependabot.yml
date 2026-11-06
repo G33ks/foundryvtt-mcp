@@ -9,6 +9,10 @@ updates:
       # @types/node follows the minimum supported Node version (22), not the latest.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # A TypeScript major changes the compiler and its checks: moved by hand,
+      # with the code it requires, not by a Dependabot pull request.
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
     groups:
       # Minor and patch updates in one pull request; each major on its own.
       npm-minor-and-patch:
