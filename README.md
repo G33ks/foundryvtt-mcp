@@ -17,22 +17,9 @@ This server empowers AI assistants (Claude Desktop, Claude Code, Oh My Pi, VS Co
 
 ## 🧭 How it works
 
-```mermaid
-flowchart LR
-  subgraph PC["Your computer"]
-    C1["AI client<br/>(Claude Desktop, Claude Code…)"] -->|"MCP (stdio)"| R1["Relay"]
-    C2["Another AI client"] -->|"MCP (stdio)"| R2["Relay"]
-    R1 & R2 -->|"named pipe /<br/>Unix socket"| D["Shared process"]
-    D -->|"launches"| B["Invisible GM browser<br/>+ companion module"]
-    D <-->|"bridge WebSocket<br/>(loopback, authenticated)"| B
-  end
-  subgraph S["Foundry server (local or remote)"]
-    F["FoundryVTT world"]
-  end
-  D -->|"Socket.IO:<br/>read & write documents"| F
-  B -->|"loads the game page<br/>as a GM user"| F
-  D -.->|"HTTP (optional):<br/>REST API module"| F
-```
+![How it works: on your computer, each AI client (Claude Desktop, Claude Code…) starts a relay over MCP stdio; the relays hand their requests through a named pipe or Unix socket to one shared process. That process reads and writes the FoundryVTT world over Socket.IO, optionally queries the REST API module over HTTP, and launches an invisible GM browser that loads the game page as a GM user; the companion module in that page talks to the shared process over an authenticated loopback WebSocket bridge.](https://raw.githubusercontent.com/G33ks/foundryvtt-mcp/main/docs/assets/how-it-works.png)
+
+<sub>Diagram source: [docs/assets/how-it-works.mmd](https://github.com/G33ks/foundryvtt-mcp/blob/main/docs/assets/how-it-works.mmd) (Mermaid).</sub>
 
 Your AI assistant starts a small relay program for this server. Every relay, from one assistant or several, hands its requests to the same background process, which keeps a single connection to Foundry open. That process reads and changes the world through Foundry's normal connection, the one any player's browser uses. Some things only a real Foundry page can do: capturing the canvas, rolling dice with Foundry's own engine, reading compendium documents, uploading files, pausing the game. For those, the background process runs an invisible browser, sharing its own Foundry session, where the companion module runs. The module talks only to that process, and only after each has proven its identity to the other.
 

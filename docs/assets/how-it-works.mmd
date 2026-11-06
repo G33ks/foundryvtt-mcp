@@ -1,0 +1,14 @@
+flowchart LR
+  subgraph PC["Your computer"]
+    C1["AI client<br/>(Claude Desktop, Claude Code…)"] -->|"MCP (stdio)"| R1["Relay"]
+    C2["Another AI client"] -->|"MCP (stdio)"| R2["Relay"]
+    R1 & R2 -->|"named pipe /<br/>Unix socket"| D["Shared process"]
+    D -->|"launches"| B["Invisible GM browser<br/>+ companion module"]
+    D <-->|"bridge WebSocket<br/>(loopback, authenticated)"| B
+  end
+  subgraph S["Foundry server (local or remote)"]
+    F["FoundryVTT world"]
+  end
+  D -->|"Socket.IO:<br/>read & write documents"| F
+  B -->|"loads the game page<br/>as a GM user"| F
+  D -.->|"HTTP (optional):<br/>REST API module"| F
