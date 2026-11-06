@@ -238,6 +238,10 @@ export async function authenticateFoundry(
         // FoundryVTT v14 rejects POST /join without an Origin header (HTTP 400),
         // so send the server's own origin as a browser would.
         Origin: new URL(baseUrl).origin,
+        // Some FoundryVTT v14 setups reject the join POST (HTTP 400) unless it
+        // carries Sec-Fetch-Site: same-origin, as a browser's same-origin fetch
+        // does (reported on 14.369). Origin alone is enough on others, so send both.
+        'Sec-Fetch-Site': 'same-origin',
       },
       // Accept 200 (success JSON), 302 (redirect to /game on success) and 401
       // (bad password). 401 carries FoundryVTT's own explanation in the body;

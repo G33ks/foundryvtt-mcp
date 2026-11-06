@@ -262,9 +262,11 @@ describe('authenticateFoundry — session cookie on the Socket.IO handshake (lau
 describe('authenticateFoundry — POST /join compatibility with FoundryVTT v14', () => {
   /**
    * FoundryVTT v14 answers a POST /join without an Origin header with HTTP 400,
-   * so the request must carry the server's own origin as a browser would. It
-   * also reads the user id from `userId` (camelCase) instead of v13's `userid`,
-   * answering JOIN.ErrorUserDoesNotExist otherwise — so both keys are sent.
+   * so the request must carry the server's own origin as a browser would. Some
+   * v14 setups also want `Sec-Fetch-Site: same-origin` (reported on 14.369).
+   * It also reads the user id from `userId` (camelCase) instead of v13's
+   * `userid`, answering JOIN.ErrorUserDoesNotExist otherwise — so both keys
+   * are sent.
    */
 
   beforeEach(() => {
@@ -285,6 +287,21 @@ describe('authenticateFoundry — POST /join compatibility with FoundryVTT v14',
       expect.any(Object),
       expect.objectContaining({
         headers: expect.objectContaining({ Origin: 'http://localhost:30000' }),
+      }),
+    );
+  });
+
+  it('sends Sec-Fetch-Site: same-origin alongside Origin', async () => {
+    await authenticateFoundry('http://localhost:30000', 'abc123DEF456ghij', 'pw');
+
+    expect(mockAxios.post).toHaveBeenCalledWith(
+      'http://localhost:30000/join',
+      expect.any(Object),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Origin: 'http://localhost:30000',
+          'Sec-Fetch-Site': 'same-origin',
+        }),
       }),
     );
   });
