@@ -217,7 +217,7 @@ function setDotPath(target: Record<string, unknown>, path: string, value: unknow
  * Prototype-polluting keys are dropped rather than merged (see
  * {@link FORBIDDEN_KEYS}).
  */
-function mergePatch(target: Record<string, unknown>, patch: Record<string, unknown>): void {
+export function mergePatch(target: Record<string, unknown>, patch: Record<string, unknown>): void {
   for (const [key, value] of Object.entries(patch)) {
     if (
       key === '__proto__' ||
@@ -341,6 +341,67 @@ function resolveParent(
   return { parentType, parent: parent as unknown as Record<string, unknown> };
 }
 
+/** `Scene.<sid>.Token.<tid>` or `Scene.<sid>.Token.<tid>.ActorDelta.<did>`. */
+const TOKEN_DELTA_PARENT_PATTERN =
+  /^Scene\.([a-zA-Z0-9]{16})\.Token\.([a-zA-Z0-9]{16})(?:\.ActorDelta\.([a-zA-Z0-9]{16}))?$/;
+
+/**
+ * Applies a write to an unlinked token's synthetic actor.
+ *
+ * FoundryVTT stores an unlinked token's own HP, items and effects in the
+ * token's `delta` (an ActorDelta), and its client sends those writes as
+ * `ActorDelta` updates parented to the token, or as embedded Item/ActiveEffect
+ * operations parented to `<token>.ActorDelta.<id>`. Both land in `token.delta`.
+ *
+ * @returns true/false when the broadcast targets a token delta (changed or
+ *   not), or null when it doesn't, so the caller falls through to the
+ *   ordinary parent resolution.
+ */
+function applyTokenDeltaBroadcast(
+  worldData: WorldData,
+  broadcast: DocumentBroadcast,
+): boolean | null {
+  const { type, action, result, parentUuid } = broadcast;
+  const match = parentUuid ? TOKEN_DELTA_PARENT_PATTERN.exec(parentUuid) : null;
+  if (!match) {
+    return null;
+  }
+  const [, sceneId, tokenId, deltaId] = match;
+  const scene = worldData.scenes?.find((sc) => sc._id === sceneId);
+  const token = scene?.tokens?.find((t) => (t as { _id?: string })._id === tokenId);
+  if (!token) {
+    return false;
+  }
+  if (!isRecord(token.delta)) {
+    token.delta = { _id: tokenId };
+  }
+  const delta = token.delta as Record<string, unknown>;
+
+  if (!deltaId) {
+    if (type !== 'ActorDelta' || action !== 'update') {
+      return false;
+    }
+    for (const doc of result) {
+      if (isRecord(doc)) {
+        mergePatch(delta, doc);
+      }
+    }
+    return true;
+  }
+
+  const field = EMBEDDED_COLLECTIONS.Actor?.[type];
+  if (!field) {
+    return false;
+  }
+  if (!Array.isArray(delta[field])) {
+    if (action !== 'create') {
+      return false;
+    }
+    delta[field] = [];
+  }
+  return applyToCollection(delta[field] as Array<Record<string, unknown>>, action, result);
+}
+
 /**
  * Applies a validated broadcast to the cached world state, in place.
  *
@@ -358,6 +419,11 @@ export function applyDocumentBroadcast(
   }
 
   if (parentUuid) {
+    const deltaApplied = applyTokenDeltaBroadcast(worldData, broadcast);
+    if (deltaApplied !== null) {
+      return deltaApplied;
+    }
+
     const resolved = resolveParent(worldData, parentUuid);
     if (!resolved) {
       return false;

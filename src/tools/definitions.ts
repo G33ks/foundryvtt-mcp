@@ -130,14 +130,23 @@ export const actorMutationTools = [
   {
     name: 'update_actor_attributes',
     description:
-      'Update fields on an actor\'s system data. Patch keys are dot-paths into actor.system (e.g. "attributes.hp.value", "attributes.hp.temp", "currency.gp", "resources.primary.value", "spells.spell1.value", "attributes.exhaustion") and values are absolute target values, never relative deltas. Validates HP <= max + temp, spell slots <= max, and exhaustion within 0-10 (2024) or 0-6 (2014), and returns the post-update value for every patched path. Use when: applying damage or healing, spending a spell slot or resource, or adjusting currency on a known actorId. Do not use when: changing an item the actor owns (use update_actor_item) or only reading current values (use get_actor_details). ' +
+      'Update fields on an actor\'s system data. Patch keys are dot-paths into actor.system (e.g. "attributes.hp.value", "attributes.hp.temp", "currency.gp", "resources.primary.value", "spells.spell1.value", "attributes.exhaustion") and values are absolute target values, never relative deltas. Validates HP <= max + temp, spell slots <= max, and exhaustion within 0-10 (2024) or 0-6 (2014), and returns the post-update value for every patched path. Use when: applying damage or healing, spending a spell slot or resource, or adjusting currency on a known actorId. For one token on a map - an unlinked copy of a monster, which has its own HP - give sceneId + tokenId instead of actorId: only that token changes, not the base actor or its other copies. Do not use when: changing an item the actor owns (use update_actor_item) or only reading current values (use get_actor_details). ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
       properties: {
         actorId: {
           type: 'string',
-          description: 'The ID of the actor to update',
+          description: 'The ID of the actor to update (omit when giving sceneId + tokenId)',
+        },
+        sceneId: {
+          type: 'string',
+          description: 'Scene id of the token to update, required together with tokenId',
+        },
+        tokenId: {
+          type: 'string',
+          description:
+            "Token id: updates that token's own actor (its delta, for an unlinked token) instead of actorId",
         },
         patch: {
           type: 'object',
@@ -149,7 +158,7 @@ export const actorMutationTools = [
           },
         },
       },
-      required: ['actorId', 'patch'],
+      required: ['patch'],
     },
   },
   {

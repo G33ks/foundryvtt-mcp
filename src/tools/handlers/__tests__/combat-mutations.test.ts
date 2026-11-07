@@ -423,7 +423,7 @@ describe('FoundryClient combat mutations', () => {
     ]);
 
     expect(result).toEqual({ combatId: COMBAT_ID, combatantCount: 1 });
-    expect(emit).toHaveBeenCalledTimes(2);
+    expect(emit).toHaveBeenCalledTimes(3);
 
     const [, combatBody] = emit.mock.calls[0] as unknown[] as [string, Record<string, unknown>];
     expect(combatBody).toMatchObject({
@@ -442,6 +442,14 @@ describe('FoundryClient combat mutations', () => {
         parentUuid: `Combat.${COMBAT_ID}`,
       },
     });
+
+    // Then begins it at round 1, like Foundry's own "Begin Combat"
+    const [, beginBody] = emit.mock.calls[2] as unknown[] as [string, Record<string, unknown>];
+    expect(beginBody).toMatchObject({
+      type: 'Combat',
+      action: 'update',
+      operation: { updates: [{ _id: COMBAT_ID, round: 1, turn: 0 }] },
+    });
   });
 
   it('startCombat skips the Combatant create when there are no combatants', async () => {
@@ -449,7 +457,8 @@ describe('FoundryClient combat mutations', () => {
     const { client, emit } = buildClient({});
     const result = await client.startCombat(SCENE_ID, []);
     expect(result).toEqual({ combatId: COMBAT_ID, combatantCount: 0 });
-    expect(emit).toHaveBeenCalledTimes(1);
+    // Combat create, then the round-1 begin
+    expect(emit).toHaveBeenCalledTimes(2);
   });
 
   it('startCombat rejects a malformed scene id', async () => {

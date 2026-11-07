@@ -439,7 +439,7 @@ describe('FoundryClient token mutations', () => {
       action: 'create',
       operation: {
         data: [{ name: 'Stunned', statuses: ['stunned'], img: 'x.png' }],
-        parentUuid: uuid,
+        parentUuid: `Scene.${SCENE_ID}.Token.${TOKEN_ID}.ActorDelta.${TOKEN_ID}`,
       },
     });
   });

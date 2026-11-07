@@ -225,14 +225,11 @@ export async function routeToolRequest(
     // Actor mutation tools (laurigates/foundryvtt-mcp#143) — WRITE via the Socket.IO modifyDocument
     // protocol (foundryClient); require FOUNDRY_WRITE_ENABLED=true + a GM user.
     case 'update_actor_attributes':
-      if (!('actorId' in args) || typeof args.actorId !== 'string') {
-        throw new Error('Missing required parameter: actorId');
-      }
       if (!('patch' in args) || typeof args.patch !== 'object' || args.patch === null) {
         throw new Error('Missing required parameter: patch');
       }
       return handleUpdateActorAttribute(
-        args as { actorId: string; patch: AttributePatch },
+        args as { actorId?: string; sceneId?: string; tokenId?: string; patch: AttributePatch },
         foundryClient,
       );
     case 'create_world_actor':

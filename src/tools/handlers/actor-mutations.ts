@@ -20,15 +20,24 @@ import { withToolError } from './utils.js';
  */
 export async function handleUpdateActorAttribute(
   args: {
-    actorId: string;
+    actorId?: string;
+    sceneId?: string;
+    tokenId?: string;
     patch: AttributePatch;
   },
   foundryClient: FoundryClient,
 ) {
-  const { actorId, patch } = args;
+  const { actorId, sceneId, tokenId, patch } = args;
+  const byToken = typeof tokenId === 'string' && tokenId.length > 0;
 
-  if (!actorId || typeof actorId !== 'string') {
-    throw new McpError(ErrorCode.InvalidParams, 'actorId is required and must be a string');
+  if (byToken && (typeof sceneId !== 'string' || !sceneId)) {
+    throw new McpError(ErrorCode.InvalidParams, 'sceneId is required together with tokenId');
+  }
+  if (!byToken && (!actorId || typeof actorId !== 'string')) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      'actorId (or sceneId + tokenId) is required and must be a string',
+    );
   }
   if (
     patch === null ||
@@ -43,7 +52,9 @@ export async function handleUpdateActorAttribute(
   }
 
   return withToolError('update actor attributes', async () => {
-    const result = await foundryClient.updateActorAttribute(actorId, patch);
+    const result = byToken
+      ? await foundryClient.updateTokenActorAttribute(sceneId as string, tokenId as string, patch)
+      : await foundryClient.updateActorAttribute(actorId as string, patch);
 
     const updatedList = Object.entries(result.updatedAttributes)
       .map(([path, value]) => `- **${path}** → ${String(value)}`)
@@ -54,7 +65,7 @@ export async function handleUpdateActorAttribute(
         {
           type: 'text',
           text: `⚔️ **Actor Attributes Updated**
-**Actor ID:** ${actorId}
+${byToken ? `**Token ID:** ${tokenId} (scene ${sceneId})` : `**Actor ID:** ${actorId}`}
 **Status:** ${result.success ? 'Success' : 'Failed'}
 
 **Updated attributes** (dot-paths into actor.system):

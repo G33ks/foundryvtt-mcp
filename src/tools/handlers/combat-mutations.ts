@@ -11,6 +11,7 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import type { WorldCombat, WorldScene } from '../../foundry/types.js';
+import { combatantName } from './combat.js';
 import {
   getCurrentCombatant,
   getTurnOrder,
@@ -94,7 +95,7 @@ export async function handleNextTurn(
     await foundryClient.updateCombat(combat._id, { turn, round });
 
     const current = getTurnOrder(combat)[turn];
-    const currentName = current ? current.name : 'unknown';
+    const currentName = current ? combatantName(current, combat, foundryClient) : 'unknown';
 
     return {
       content: [
@@ -192,7 +193,7 @@ export async function handleSetInitiative(
       if (turn !== undefined && turn !== combat.turn) {
         await foundryClient.updateCombat(resolvedCombatId, { turn });
         reanchored = `
-**Still acting:** ${acting.name} (turn ${turn + 1} of ${combat.combatants.length})`;
+**Still acting:** ${combatantName(acting, combat, foundryClient)} (turn ${turn + 1} of ${combat.combatants.length})`;
       }
     }
 

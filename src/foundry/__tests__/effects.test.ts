@@ -189,13 +189,16 @@ describe('FoundryClient — generalized ActiveEffects', () => {
     expect(req.operation.parentUuid).toBe(`Actor.${ACTOR_ID}`);
   });
 
-  it('sends the correct parentUuid for an unlinked token actor', async () => {
+  it("sends an unlinked token actor's effect to the token's ActorDelta", async () => {
     const { client, socket } = await connectClient();
     const uuid = `Scene.sceneAAAAAAAAAAA.Token.tokenAAAAAAAAAAA.Actor.${ACTOR_ID}`;
     await client.createActorEffect(uuid, { name: 'Blessed' });
     const modifyCall = socket.emit.mock.calls.find(([event]) => event === 'modifyDocument');
     const req = modifyCall?.[1] as { operation: { parentUuid: string } };
-    expect(req.operation.parentUuid).toBe(uuid);
+    // The delta id defaults to the token id (FoundryVTT's ActorDeltaField)
+    expect(req.operation.parentUuid).toBe(
+      'Scene.sceneAAAAAAAAAAA.Token.tokenAAAAAAAAAAA.ActorDelta.tokenAAAAAAAAAAA',
+    );
   });
 
   it('rejects a malformed actor UUID', async () => {
