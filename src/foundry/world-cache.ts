@@ -18,6 +18,7 @@
 
 import { z } from 'zod';
 import { isRecord } from '../utils/guards.js';
+import { logger } from '../utils/logger.js';
 import type { WorldActor, WorldCombat, WorldData, WorldScene } from './types.js';
 
 /** A `modifyDocument` broadcast, once validated. */
@@ -300,11 +301,10 @@ function applyToCollection(
 /**
  * Resolves the parent document a broadcast targets.
  *
- * Handles the simple `<Type>.<id>` form. The synthetic-token-actor form
- * (`Scene.<sid>.Token.<tid>.Actor.<aid>`, used for unlinked tokens) is **not**
- * resolved: that actor is a per-token delta rather than a document in any cached
- * collection, so those broadcasts are dropped and the affected token actor stays
- * stale until `refresh_world_data`.
+ * Handles the simple `<Type>.<id>` form only. An unlinked token's writes,
+ * parented to the token or to its ActorDelta, are applied before this by
+ * {@link applyTokenDeltaBroadcast}; the `Scene.<sid>.Token.<tid>.Actor.<aid>`
+ * form is not a parent FoundryVTT v14 accepts, so it resolves to nothing.
  */
 function resolveParent(
   worldData: WorldData,
@@ -341,17 +341,129 @@ function resolveParent(
   return { parentType, parent: parent as unknown as Record<string, unknown> };
 }
 
-/** `Scene.<sid>.Token.<tid>` or `Scene.<sid>.Token.<tid>.ActorDelta.<did>`. */
+/**
+ * `Scene.<sid>.Token.<tid>`, `….ActorDelta.<did>`, or `….ActorDelta.<did>.Item.<iid>`
+ * (an effect on one of the token's items).
+ */
 const TOKEN_DELTA_PARENT_PATTERN =
-  /^Scene\.([a-zA-Z0-9]{16})\.Token\.([a-zA-Z0-9]{16})(?:\.ActorDelta\.([a-zA-Z0-9]{16}))?$/;
+  /^Scene\.([a-zA-Z0-9]{16})\.Token\.([a-zA-Z0-9]{16})(?:\.ActorDelta\.([a-zA-Z0-9]{16})(?:\.Item\.([a-zA-Z0-9]{16}))?)?$/;
+
+/** The document with this `_id` in `collection`, when it is an array holding one. */
+function findById(collection: unknown, id: string): Record<string, unknown> | undefined {
+  if (!Array.isArray(collection)) {
+    return undefined;
+  }
+  return collection.find((doc): doc is Record<string, unknown> => isRecord(doc) && doc._id === id);
+}
+
+/**
+ * Applies an update to a token delta's items or effects.
+ *
+ * An entry the delta lacks but the base actor has is adopted first - copied
+ * from the base, then changed - as FoundryVTT's server does. An entry already
+ * in the delta is never copied again, so re-applying the update is a no-op.
+ *
+ * @returns true if the collection changed
+ */
+function updateDeltaCollection(
+  collection: Array<Record<string, unknown>>,
+  inherited: unknown,
+  result: unknown[],
+): boolean {
+  let changed = false;
+  for (const doc of result) {
+    if (!isRecord(doc) || typeof doc._id !== 'string') {
+      continue;
+    }
+    let target = findById(collection, doc._id);
+    if (!target) {
+      const source = findById(inherited, doc._id);
+      if (!source) {
+        continue;
+      }
+      target = structuredClone(source);
+      collection.push(target);
+    }
+    mergePatch(target, doc);
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * Applies a delete to a token delta's items or effects: an entry the base
+ * actor has becomes a tombstone (`{_id, _tombstone: true}`, FoundryVTT's mark
+ * that the token no longer inherits it), one of the token's own is removed.
+ *
+ * @returns true if the collection changed
+ */
+function deleteFromDeltaCollection(
+  collection: Array<Record<string, unknown>>,
+  inherited: unknown,
+  result: unknown[],
+): boolean {
+  let changed = false;
+  for (const id of result) {
+    if (typeof id !== 'string') {
+      continue;
+    }
+    const index = collection.findIndex((doc) => doc._id === id);
+    if (findById(inherited, id)) {
+      const tombstone = { _id: id, _tombstone: true };
+      if (index === -1) {
+        collection.push(tombstone);
+      } else {
+        collection[index] = tombstone;
+      }
+      changed = true;
+    } else if (index !== -1) {
+      collection.splice(index, 1);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/**
+ * Applies a create to a token delta's items or effects. A created document
+ * whose id the delta holds as a tombstone takes the tombstone's place, as
+ * FoundryVTT's `EmbeddedCollectionDelta#_set` replaces a managed entry's
+ * source; any other create is the usual upsert.
+ *
+ * @returns true if the collection changed
+ */
+function createInDeltaCollection(
+  collection: Array<Record<string, unknown>>,
+  result: unknown[],
+): boolean {
+  for (const doc of result) {
+    if (!isRecord(doc) || typeof doc._id !== 'string') {
+      continue;
+    }
+    const index = collection.findIndex(
+      (entry) => entry._id === doc._id && entry._tombstone === true,
+    );
+    if (index !== -1) {
+      collection[index] = sanitize(doc);
+    }
+  }
+  return applyToCollection(collection, 'create', result);
+}
 
 /**
  * Applies a write to an unlinked token's synthetic actor.
  *
  * FoundryVTT stores an unlinked token's own HP, items and effects in the
  * token's `delta` (an ActorDelta), and its client sends those writes as
- * `ActorDelta` updates parented to the token, or as embedded Item/ActiveEffect
- * operations parented to `<token>.ActorDelta.<id>`. Both land in `token.delta`.
+ * `ActorDelta` updates parented to the token, as embedded Item/ActiveEffect
+ * operations parented to `<token>.ActorDelta.<id>`, or as ActiveEffect
+ * operations on one of its items (`….ActorDelta.<id>.Item.<iid>`). All land in
+ * `token.delta`, which only holds what differs from the base actor: an
+ * inherited entry is adopted on its first change, tombstoned on delete, and a
+ * tombstone gives way to a document created again with its id (see
+ * {@link updateDeltaCollection}, {@link deleteFromDeltaCollection},
+ * {@link createInDeltaCollection}).
+ * The delta itself is created only once something is applied to it.
  *
  * @returns true/false when the broadcast targets a token delta (changed or
  *   not), or null when it doesn't, so the caller falls through to the
@@ -366,48 +478,102 @@ function applyTokenDeltaBroadcast(
   if (!match) {
     return null;
   }
-  const [, sceneId, tokenId, deltaId] = match;
+  const [, sceneId, tokenId, deltaId, itemId] = match;
   const scene = worldData.scenes?.find((sc) => sc._id === sceneId);
   const token = scene?.tokens?.find((t) => (t as { _id?: string })._id === tokenId);
   if (!token) {
     return false;
   }
-  if (!isRecord(token.delta)) {
-    token.delta = { _id: tokenId };
-  }
-  const delta = token.delta as Record<string, unknown>;
+  const baseActorId = typeof token.actorId === 'string' ? token.actorId : undefined;
+  const base = baseActorId
+    ? (worldData.actors?.find((actor) => actor._id === baseActorId) as unknown as
+        | Record<string, unknown>
+        | undefined)
+    : undefined;
+  const existingDelta = isRecord(token.delta) ? token.delta : undefined;
+  const ensureDelta = (): Record<string, unknown> => {
+    if (!isRecord(token.delta)) {
+      token.delta = { _id: deltaId ?? tokenId };
+    }
+    return token.delta as Record<string, unknown>;
+  };
 
   if (!deltaId) {
     if (type !== 'ActorDelta' || action !== 'update') {
       return false;
     }
-    for (const doc of result) {
-      if (isRecord(doc)) {
-        mergePatch(delta, doc);
-      }
+    const docs = result.filter(isRecord);
+    if (docs.length === 0) {
+      return false;
+    }
+    const delta = ensureDelta();
+    for (const doc of docs) {
+      mergePatch(delta, doc);
     }
     return true;
+  }
+
+  if (itemId) {
+    if (type !== 'ActiveEffect') {
+      return false;
+    }
+    const own = findById(existingDelta?.items, itemId);
+    const baseItem = findById(base?.items, itemId);
+    const item = own ?? (baseItem ? structuredClone(baseItem) : undefined);
+    if (!item || item._tombstone === true) {
+      logger.debug(
+        `Ignored ${action} ActiveEffect broadcast: item ${itemId} is not on token ${tokenId} or its base actor`,
+      );
+      return false;
+    }
+    if (!Array.isArray(item.effects)) {
+      if (action !== 'create') {
+        return false;
+      }
+      item.effects = [];
+    }
+    const changed = applyToCollection(
+      item.effects as Array<Record<string, unknown>>,
+      action,
+      result,
+    );
+    if (changed && !own) {
+      const delta = ensureDelta();
+      if (!Array.isArray(delta.items)) {
+        delta.items = [];
+      }
+      (delta.items as Array<Record<string, unknown>>).push(item);
+    }
+    return changed;
   }
 
   const field = EMBEDDED_COLLECTIONS.Actor?.[type];
   if (!field) {
     return false;
   }
-  if (!Array.isArray(delta[field])) {
-    if (action !== 'create') {
-      return false;
-    }
-    delta[field] = [];
+  const existing = Array.isArray(existingDelta?.[field])
+    ? (existingDelta[field] as Array<Record<string, unknown>>)
+    : undefined;
+  const collection = existing ?? [];
+  const inherited = base?.[field];
+  const changed =
+    action === 'create'
+      ? createInDeltaCollection(collection, result)
+      : action === 'update'
+        ? updateDeltaCollection(collection, inherited, result)
+        : deleteFromDeltaCollection(collection, inherited, result);
+  if (changed && !existing) {
+    ensureDelta()[field] = collection;
   }
-  return applyToCollection(delta[field] as Array<Record<string, unknown>>, action, result);
+  return changed;
 }
 
 /**
  * Applies a validated broadcast to the cached world state, in place.
  *
  * @returns true if the cache changed; false when the broadcast targets something
- *   not cached (an unmodelled document type, an unknown parent, a synthetic
- *   token actor), in which case the cache is left untouched.
+ *   not cached (an unmodelled document type, an unknown parent, a token that is
+ *   not in the cache), in which case the cache is left untouched.
  */
 export function applyDocumentBroadcast(
   worldData: WorldData,

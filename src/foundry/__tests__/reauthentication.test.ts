@@ -724,6 +724,79 @@ describe('FoundryClient first world load', () => {
     await client.disconnect();
   });
 
+  /** A snapshot with a base actor and one unlinked token made from it, still without a delta. */
+  const worldWithUnlinkedToken = () => ({
+    ...worldData(),
+    actors: [
+      {
+        _id: 'baseActor0000001',
+        name: 'Base',
+        type: 'npc',
+        system: { attributes: { hp: { value: 20, max: 20 } } },
+        items: [{ _id: 'baseItem00000001', name: 'Rope', system: { quantity: 1 } }],
+      },
+    ],
+    scenes: [
+      {
+        _id: 'sceneUnlinked001',
+        name: 'Road',
+        tokens: [{ _id: 'tokenUnlinked001', actorId: 'baseActor0000001', actorLink: false }],
+      },
+    ],
+  });
+
+  it("replays a token's ActorDelta broadcasts that arrive during the load onto the snapshot", async () => {
+    const { client, fake, connecting } = await loading();
+
+    fake.fire('modifyDocument', {
+      type: 'ActorDelta',
+      action: 'update',
+      result: [{ _id: 'tokenUnlinked001', 'system.attributes.hp.value': 7 }],
+      operation: { parentUuid: 'Scene.sceneUnlinked001.Token.tokenUnlinked001' },
+    });
+    fake.fire('modifyDocument', {
+      type: 'Item',
+      action: 'update',
+      result: [{ _id: 'baseItem00000001', 'system.quantity': 2 }],
+      operation: {
+        parentUuid: 'Scene.sceneUnlinked001.Token.tokenUnlinked001.ActorDelta.tokenUnlinked001',
+      },
+    });
+    fake.answerReload(worldWithUnlinkedToken());
+    await connecting;
+
+    expect(client.getTokenActorSystem('tokenUnlinked001', 'sceneUnlinked001')).toEqual({
+      attributes: { hp: { value: 7, max: 20 } },
+    });
+    const token = client.findToken('tokenUnlinked001', 'sceneUnlinked001')?.token;
+    expect((token?.delta as { items?: unknown[] } | undefined)?.items).toEqual([
+      { _id: 'baseItem00000001', name: 'Rope', system: { quantity: 2 } },
+    ]);
+    expect(client.getRawActor('baseActor0000001')?.items).toEqual([
+      { _id: 'baseItem00000001', name: 'Rope', system: { quantity: 1 } },
+    ]);
+    expect(client.isWorldDataStale()).toBe(false);
+    await client.disconnect();
+  });
+
+  it('drops, without marking the cache stale, a broadcast for a token the new snapshot no longer has', async () => {
+    const { client, fake, connecting } = await loading();
+
+    fake.fire('modifyDocument', {
+      type: 'ActorDelta',
+      action: 'update',
+      result: [{ _id: 'goneToken0000001', 'system.attributes.hp.value': 3 }],
+      operation: { parentUuid: 'Scene.sceneUnlinked001.Token.goneToken0000001' },
+    });
+    fake.answerReload(worldWithUnlinkedToken());
+    await connecting;
+
+    expect(client.findToken('goneToken0000001', 'sceneUnlinked001')).toBeFalsy();
+    expect(client.findToken('tokenUnlinked001', 'sceneUnlinked001')?.token.delta).toBeUndefined();
+    expect(client.isWorldDataStale()).toBe(false);
+    await client.disconnect();
+  });
+
   const earlyActor = (fire: (event: string, ...args: unknown[]) => void) =>
     fire('modifyDocument', {
       type: 'Actor',

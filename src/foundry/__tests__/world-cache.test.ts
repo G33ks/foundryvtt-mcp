@@ -414,6 +414,264 @@ describe('applyDocumentBroadcast — unlinked token deltas', () => {
   });
 });
 
+describe('applyDocumentBroadcast — what an unlinked token inherits from its base actor', () => {
+  const BASE_EFFECT_ID = 'baseEffect000001';
+  const ITEM_EFFECT_ID = 'itemEffect000001';
+  const OWN_ITEM_ID = 'ownItem000000001';
+  const deltaUuid = `Scene.${SCENE_ID}.Token.${TOKEN_ID}.ActorDelta.${TOKEN_ID}`;
+
+  /** The base actor has an item (with an effect of its own) and an effect; the token none yet. */
+  const buildInheritingWorld = (delta?: Record<string, unknown>): WorldData => {
+    const world = buildWorldData();
+    const actor = world.actors[0] as unknown as Record<string, unknown>;
+    actor.items = [
+      {
+        _id: ITEM_ID,
+        name: 'Longsword',
+        type: 'weapon',
+        system: { quantity: 1 },
+        effects: [{ _id: ITEM_EFFECT_ID, name: 'Keen', disabled: false }],
+      },
+    ];
+    actor.effects = [{ _id: BASE_EFFECT_ID, name: 'Blessed', disabled: false }];
+    world.scenes[0].tokens = [
+      {
+        _id: TOKEN_ID,
+        actorId: ACTOR_ID,
+        actorLink: false,
+        ...(delta ? { delta } : {}),
+      },
+    ] as never;
+    return world;
+  };
+  const token = (world: WorldData) => world.scenes[0].tokens?.[0] as Record<string, unknown>;
+  const delta = (world: WorldData) =>
+    token(world).delta as
+      | { items?: Array<Record<string, unknown>>; effects?: Array<Record<string, unknown>> }
+      | undefined;
+  const baseActor = (world: WorldData) => world.actors[0] as unknown as Record<string, unknown>;
+
+  it('adopts an inherited item on its first update, then merges the change', () => {
+    const world = buildInheritingWorld();
+    const applied = applyDocumentBroadcast(world, {
+      type: 'Item',
+      action: 'update',
+      result: [{ _id: ITEM_ID, 'system.quantity': 3 }],
+      parentUuid: deltaUuid,
+    });
+    expect(applied).toBe(true);
+    expect(delta(world)?.items).toEqual([
+      {
+        _id: ITEM_ID,
+        name: 'Longsword',
+        type: 'weapon',
+        system: { quantity: 3 },
+        effects: [{ _id: ITEM_EFFECT_ID, name: 'Keen', disabled: false }],
+      },
+    ]);
+    // A copy: the base actor, shared by every other token, is untouched.
+    expect((baseActor(world).items as Array<{ system: unknown }>)[0]?.system).toEqual({
+      quantity: 1,
+    });
+  });
+
+  it('adopts an inherited effect on its first update', () => {
+    const world = buildInheritingWorld();
+    applyDocumentBroadcast(world, {
+      type: 'ActiveEffect',
+      action: 'update',
+      result: [{ _id: BASE_EFFECT_ID, disabled: true }],
+      parentUuid: deltaUuid,
+    });
+    expect(delta(world)?.effects).toEqual([
+      { _id: BASE_EFFECT_ID, name: 'Blessed', disabled: true },
+    ]);
+    expect((baseActor(world).effects as Array<{ disabled: boolean }>)[0]?.disabled).toBe(false);
+  });
+
+  it('lands on the same state when the same update arrives twice', () => {
+    const world = buildInheritingWorld();
+    const update: DocumentBroadcast = {
+      type: 'Item',
+      action: 'update',
+      result: [{ _id: ITEM_ID, 'system.quantity': 3 }],
+      parentUuid: deltaUuid,
+    };
+    applyDocumentBroadcast(world, update);
+    const once = structuredClone(token(world));
+    applyDocumentBroadcast(world, update);
+    expect(token(world)).toEqual(once);
+  });
+
+  it('ignores an update of an id neither the delta nor the base actor has, without creating a delta', () => {
+    const world = buildInheritingWorld();
+    expect(
+      applyDocumentBroadcast(world, {
+        type: 'Item',
+        action: 'update',
+        result: [{ _id: 'unknownItem00001', name: 'x' }],
+        parentUuid: deltaUuid,
+      }),
+    ).toBe(false);
+    expect(token(world).delta).toBeUndefined();
+  });
+
+  it('leaves a tombstone when an inherited item is deleted, the same after a second delete', () => {
+    const world = buildInheritingWorld();
+    const remove: DocumentBroadcast = {
+      type: 'Item',
+      action: 'delete',
+      result: [ITEM_ID],
+      parentUuid: deltaUuid,
+    };
+    expect(applyDocumentBroadcast(world, remove)).toBe(true);
+    expect(delta(world)?.items).toEqual([{ _id: ITEM_ID, _tombstone: true }]);
+    applyDocumentBroadcast(world, remove);
+    expect(delta(world)?.items).toEqual([{ _id: ITEM_ID, _tombstone: true }]);
+    expect(baseActor(world).items).toHaveLength(1);
+  });
+
+  it('replaces an adopted copy with a tombstone when that item is deleted', () => {
+    const world = buildInheritingWorld({
+      _id: TOKEN_ID,
+      items: [{ _id: ITEM_ID, name: 'Longsword', system: { quantity: 3 } }],
+    });
+    applyDocumentBroadcast(world, {
+      type: 'Item',
+      action: 'delete',
+      result: [ITEM_ID],
+      parentUuid: deltaUuid,
+    });
+    expect(delta(world)?.items).toEqual([{ _id: ITEM_ID, _tombstone: true }]);
+  });
+
+  it('puts a document created again in place of its tombstone, the same after a second create', () => {
+    const world = buildInheritingWorld({
+      _id: TOKEN_ID,
+      items: [{ _id: ITEM_ID, _tombstone: true }],
+    });
+    const recreate: DocumentBroadcast = {
+      type: 'Item',
+      action: 'create',
+      result: [{ _id: ITEM_ID, name: 'Longsword', type: 'weapon', system: { quantity: 2 } }],
+      parentUuid: deltaUuid,
+    };
+    expect(applyDocumentBroadcast(world, recreate)).toBe(true);
+    const expected = [{ _id: ITEM_ID, name: 'Longsword', type: 'weapon', system: { quantity: 2 } }];
+    expect(delta(world)?.items).toEqual(expected);
+    applyDocumentBroadcast(world, recreate);
+    expect(delta(world)?.items).toEqual(expected);
+  });
+
+  it("removes an item of the token's own when it is deleted", () => {
+    const world = buildInheritingWorld({
+      _id: TOKEN_ID,
+      items: [{ _id: OWN_ITEM_ID, name: 'Torch' }],
+    });
+    expect(
+      applyDocumentBroadcast(world, {
+        type: 'Item',
+        action: 'delete',
+        result: [OWN_ITEM_ID],
+        parentUuid: deltaUuid,
+      }),
+    ).toBe(true);
+    expect(delta(world)?.items).toEqual([]);
+  });
+
+  it("applies an effect on an item of the token's own to that item", () => {
+    const world = buildInheritingWorld({
+      _id: TOKEN_ID,
+      items: [{ _id: OWN_ITEM_ID, name: 'Torch' }],
+    });
+    applyDocumentBroadcast(world, {
+      type: 'ActiveEffect',
+      action: 'create',
+      result: [{ _id: 'torchEffect00001', name: 'Lit' }],
+      parentUuid: `${deltaUuid}.Item.${OWN_ITEM_ID}`,
+    });
+    expect(delta(world)?.items?.[0]?.effects).toEqual([{ _id: 'torchEffect00001', name: 'Lit' }]);
+  });
+
+  it("adopts an inherited item to apply a change to one of the item's effects", () => {
+    const world = buildInheritingWorld();
+    const update: DocumentBroadcast = {
+      type: 'ActiveEffect',
+      action: 'update',
+      result: [{ _id: ITEM_EFFECT_ID, disabled: true }],
+      parentUuid: `${deltaUuid}.Item.${ITEM_ID}`,
+    };
+    expect(applyDocumentBroadcast(world, update)).toBe(true);
+    const adopted = delta(world)?.items?.[0];
+    expect(adopted).toMatchObject({ _id: ITEM_ID, name: 'Longsword' });
+    expect(adopted?.effects).toEqual([{ _id: ITEM_EFFECT_ID, name: 'Keen', disabled: true }]);
+    applyDocumentBroadcast(world, update);
+    expect(delta(world)?.items).toHaveLength(1);
+    const baseItem = (
+      baseActor(world).items as Array<{ effects: Array<{ disabled: boolean }> }>
+    )[0];
+    expect(baseItem?.effects[0]?.disabled).toBe(false);
+  });
+
+  it('ignores an effect on an item found nowhere, without creating a delta', () => {
+    const world = buildInheritingWorld();
+    expect(
+      applyDocumentBroadcast(world, {
+        type: 'ActiveEffect',
+        action: 'create',
+        result: [{ _id: 'strayEffect00001', name: 'x' }],
+        parentUuid: `${deltaUuid}.Item.unknownItem00001`,
+      }),
+    ).toBe(false);
+    expect(token(world).delta).toBeUndefined();
+  });
+
+  it('ignores a type that is not an ActorDelta update on the token itself, without creating a delta', () => {
+    const world = buildInheritingWorld();
+    expect(
+      applyDocumentBroadcast(world, {
+        type: 'Item',
+        action: 'update',
+        result: [{ _id: ITEM_ID }],
+        parentUuid: `Scene.${SCENE_ID}.Token.${TOKEN_ID}`,
+      }),
+    ).toBe(false);
+    expect(token(world).delta).toBeUndefined();
+  });
+
+  it('creates the delta, with the id from the parent UUID, when the first change lands', () => {
+    const world = buildInheritingWorld();
+    applyDocumentBroadcast(world, {
+      type: 'ActiveEffect',
+      action: 'create',
+      result: [{ _id: 'newEffect0000001', name: 'Hasted' }],
+      parentUuid: `Scene.${SCENE_ID}.Token.${TOKEN_ID}.ActorDelta.deltaId000000001`,
+    });
+    expect(token(world).delta).toEqual({
+      _id: 'deltaId000000001',
+      effects: [{ _id: 'newEffect0000001', name: 'Hasted' }],
+    });
+  });
+
+  it('lands on the same state when the same ActorDelta update arrives twice', () => {
+    const world = buildInheritingWorld();
+    const update: DocumentBroadcast = {
+      type: 'ActorDelta',
+      action: 'update',
+      result: [{ _id: TOKEN_ID, 'system.attributes.hp.value': 12 }],
+      parentUuid: `Scene.${SCENE_ID}.Token.${TOKEN_ID}`,
+    };
+    applyDocumentBroadcast(world, update);
+    const once = structuredClone(token(world));
+    applyDocumentBroadcast(world, update);
+    expect(token(world)).toEqual(once);
+    expect(token(world).delta).toEqual({
+      _id: TOKEN_ID,
+      system: { attributes: { hp: { value: 12 } } },
+    });
+  });
+});
+
 /**
  * Issue laurigates/foundryvtt-mcp#218 — `activeUsers` is a top-level `WorldData` field, not a document
  * collection, so `modifyDocument` never touches it. FoundryVTT signals presence

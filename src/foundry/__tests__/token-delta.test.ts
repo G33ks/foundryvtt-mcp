@@ -118,6 +118,20 @@ describe('FoundryClient.updateTokenActorAttribute', () => {
     });
   });
 
+  it('reads its own ActorDelta update back at once, without a refresh', async () => {
+    const { client } = buildClient();
+    const result = await client.updateTokenActorAttribute(SCENE_ID, TOKEN_ID, {
+      'attributes.hp.value': 9,
+    });
+    expect(result.updatedAttributes).toEqual({ 'attributes.hp.value': 9 });
+    expect(client.getTokenActorSystem(TOKEN_ID, SCENE_ID)).toMatchObject({
+      attributes: { hp: { value: 9, max: 22 } },
+    });
+    expect(client.getRawActor(ACTOR_ID)?.system).toMatchObject({
+      attributes: { hp: { value: 22 } },
+    });
+  });
+
   it("falls back to the token's id when the delta has no id", async () => {
     const { client, emit } = buildClient({ delta: {} });
     await client.updateTokenActorAttribute(SCENE_ID, TOKEN_ID, { 'attributes.hp.value': 9 });
