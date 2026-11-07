@@ -262,6 +262,12 @@ function mapEffectChanges(
  */
 const SORT_INTEGER_DENSITY = 100000;
 
+/** One token on a scene, whose actor an actor write addresses instead of the world actor. */
+export interface ActorTokenRef {
+  sceneId: string;
+  tokenId: string;
+}
+
 /**
  * Accepts the two parent-UUID forms a token's actor can take:
  *  - `Actor.<id>` — a world-linked actor (`actorLink: true`)
@@ -2856,13 +2862,38 @@ export class FoundryClient {
   // ==========================================================================
 
   /**
+   * The parent of an item write: `Actor.<actorId>`, or, for one token, that
+   * token's actor - its ActorDelta when unlinked (see {@link toDeltaParentUuid}).
+   *
+   * @throws when the token isn't in the cache or carries another actor
+   */
+  private itemParentUuid(actorId: string, token?: ActorTokenRef): string {
+    if (!token) {
+      return `Actor.${actorId}`;
+    }
+    if (!FOUNDRY_ID_PATTERN.test(token.sceneId)) {
+      throw new Error(`Invalid sceneId format: ${token.sceneId}`);
+    }
+    if (!FOUNDRY_ID_PATTERN.test(token.tokenId)) {
+      throw new Error(`Invalid tokenId format: ${token.tokenId}`);
+    }
+    return this.toDeltaParentUuid(`Scene.${token.sceneId}.Token.${token.tokenId}.Actor.${actorId}`);
+  }
+
+  /**
    * Creates a new item on an actor via the `modifyDocument` socket protocol.
    *
    * @param actorId - 16-char alphanumeric actor document id
    * @param source - inline item document or compendium source
+   * @param token - one token whose actor gets the item instead (only that
+   *   token, for an unlinked one)
    * @returns the newly created item document
    */
-  async createActorItem(actorId: string, source: ActorItemCreateSource): Promise<FoundryItem> {
+  async createActorItem(
+    actorId: string,
+    source: ActorItemCreateSource,
+    token?: ActorTokenRef,
+  ): Promise<FoundryItem> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(actorId)) {
       throw new Error(`Invalid actorId format: ${actorId}`);
@@ -2870,7 +2901,7 @@ export class FoundryClient {
     const itemData = source.type === 'inline' ? source.item : {};
     const result = await this.modifyDocument('Item', 'create', {
       data: [itemData],
-      parentUuid: `Actor.${actorId}`,
+      parentUuid: this.itemParentUuid(actorId, token),
     });
     return result[0] as FoundryItem;
   }
@@ -2885,12 +2916,18 @@ export class FoundryClient {
    * @param actorId - 16-char alphanumeric actor document id
    * @param itemId - 16-char alphanumeric item document id
    * @param patch - shallow/nested JSON merge patch applied to `item.system`
-   * @returns the updated item document
+   * @param token - one token whose actor's item to change instead; for an
+   *   unlinked token, an item it inherits is copied into its delta by the
+   *   server, so the base actor and its other tokens keep theirs
+   * @returns the server's answer (only the changed fields) with the item's
+   *   `name` and `type` read back from the cache, which the answer has already
+   *   updated
    */
   async updateActorItem(
     actorId: string,
     itemId: string,
     patch: Record<string, unknown>,
+    token?: ActorTokenRef,
   ): Promise<FoundryItem> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(actorId)) {
@@ -2901,11 +2938,19 @@ export class FoundryClient {
     }
     const result = await this.modifyDocument('Item', 'update', {
       updates: [{ _id: itemId, system: patch }],
-      parentUuid: `Actor.${actorId}`,
+      parentUuid: this.itemParentUuid(actorId, token),
       diff: true,
       recursive: true,
     });
-    return result[0] as FoundryItem;
+    const cached = (
+      token
+        ? this.getTokenActorItems(token.tokenId, token.sceneId)
+        : this.getRawActor(actorId)?.items
+    )?.find((item) => item._id === itemId);
+    return {
+      ...(result[0] as FoundryItem),
+      ...(cached ? { name: cached.name, type: cached.type } : {}),
+    };
   }
 
   /**
@@ -2913,8 +2958,10 @@ export class FoundryClient {
    *
    * @param actorId - 16-char alphanumeric actor document id
    * @param itemId - 16-char alphanumeric item document id
+   * @param token - one token whose actor loses the item instead; for an
+   *   unlinked token, the server tombstones an inherited item in its delta
    */
-  async deleteActorItem(actorId: string, itemId: string): Promise<void> {
+  async deleteActorItem(actorId: string, itemId: string, token?: ActorTokenRef): Promise<void> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(actorId)) {
       throw new Error(`Invalid actorId format: ${actorId}`);
@@ -2924,7 +2971,7 @@ export class FoundryClient {
     }
     await this.modifyDocument('Item', 'delete', {
       ids: [itemId],
-      parentUuid: `Actor.${actorId}`,
+      parentUuid: this.itemParentUuid(actorId, token),
     });
   }
 

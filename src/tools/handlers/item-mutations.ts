@@ -12,24 +12,35 @@ import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import type { ModuleBridge } from '../../foundry/module-bridge.js';
 import type { ActorItemCreateSource } from '../../foundry/types.js';
+import {
+  type ActorTarget,
+  type ActorTargetArgs,
+  isUnlinkedToken,
+  resolveActorTarget,
+  tokenHeaderLine,
+} from './actor-target.js';
 import { withToolError } from './utils.js';
+
+/** The token to pass to the client: only an unlinked one has an actor of its own. */
+function tokenOf(target: ActorTarget) {
+  return isUnlinkedToken(target) ? { sceneId: target.sceneId, tokenId: target.tokenId } : undefined;
+}
+
 /**
  * Handles creating an item on an actor from a compendium reference or an inline
- * item document.
+ * item document. `actorId`, or `sceneId` + `tokenId`, names the actor (see
+ * actor-target.ts); an unlinked token gets the item on its own actor only.
  */
 export async function handleCreateActorItem(
-  args: {
-    actorId: string;
+  args: ActorTargetArgs & {
     source: ActorItemCreateSource;
   },
   foundryClient: FoundryClient,
   moduleBridge: ModuleBridge | null = null,
 ) {
-  const { actorId, source } = args;
+  const { source } = args;
+  const target = resolveActorTarget(args, foundryClient);
 
-  if (!actorId || typeof actorId !== 'string') {
-    throw new McpError(ErrorCode.InvalidParams, 'actorId is required and must be a string');
-  }
   if (!source || typeof source !== 'object') {
     throw new McpError(ErrorCode.InvalidParams, 'source is required and must be an object');
   }
@@ -68,7 +79,11 @@ export async function handleCreateActorItem(
       effectiveSource = { type: 'inline', item: cleanDoc };
     }
 
-    const newItem = await foundryClient.createActorItem(actorId, effectiveSource);
+    const newItem = await foundryClient.createActorItem(
+      target.actorId,
+      effectiveSource,
+      tokenOf(target),
+    );
 
     const origin =
       source.type === 'compendium'
@@ -80,7 +95,7 @@ export async function handleCreateActorItem(
         {
           type: 'text',
           text: `⚔️ **Item Created**
-**Actor:** ${actorId}
+${tokenHeaderLine(target)}**Actor:** ${target.actorId}
 **Item:** ${newItem.name} (${newItem.type})
 **Item ID:** ${newItem._id}
 **Source:** ${origin}
@@ -94,21 +109,19 @@ _Canonical target: D&D 5e v4+ activity schema._`,
 
 /**
  * Handles applying a JSON merge patch to an item's `system` data. Supports
- * nested paths (e.g. `activities.{id}.consumption.targets`).
+ * nested paths (e.g. `activities.{id}.consumption.targets`). An unlinked
+ * token's item changes on that token only.
  */
 export async function handleUpdateActorItem(
-  args: {
-    actorId: string;
+  args: ActorTargetArgs & {
     itemId: string;
     patch: Record<string, unknown>;
   },
   foundryClient: FoundryClient,
 ) {
-  const { actorId, itemId, patch } = args;
+  const { itemId, patch } = args;
+  const target = resolveActorTarget(args, foundryClient);
 
-  if (!actorId || typeof actorId !== 'string') {
-    throw new McpError(ErrorCode.InvalidParams, 'actorId is required and must be a string');
-  }
   if (!itemId || typeof itemId !== 'string') {
     throw new McpError(ErrorCode.InvalidParams, 'itemId is required and must be a string');
   }
@@ -117,14 +130,19 @@ export async function handleUpdateActorItem(
   }
 
   return withToolError('update item', async () => {
-    const updatedItem = await foundryClient.updateActorItem(actorId, itemId, patch);
+    const updatedItem = await foundryClient.updateActorItem(
+      target.actorId,
+      itemId,
+      patch,
+      tokenOf(target),
+    );
 
     return {
       content: [
         {
           type: 'text',
           text: `⚔️ **Item Updated**
-**Actor:** ${actorId}
+${tokenHeaderLine(target)}**Actor:** ${target.actorId}
 **Item:** ${updatedItem.name} (${updatedItem.type})
 **Item ID:** ${updatedItem._id}
 **Patched keys:** ${Object.keys(patch).join(', ') || '(none)'}
@@ -137,33 +155,31 @@ _JSON merge patch applied to item.system. Canonical target: D&D 5e v4+ activity 
 }
 
 /**
- * Handles deleting an item owned by an actor.
+ * Handles deleting an item owned by an actor. An unlinked token loses the
+ * item on its own actor only.
  */
 export async function handleDeleteActorItem(
-  args: {
-    actorId: string;
+  args: ActorTargetArgs & {
     itemId: string;
   },
   foundryClient: FoundryClient,
 ) {
-  const { actorId, itemId } = args;
+  const { itemId } = args;
+  const target = resolveActorTarget(args, foundryClient);
 
-  if (!actorId || typeof actorId !== 'string') {
-    throw new McpError(ErrorCode.InvalidParams, 'actorId is required and must be a string');
-  }
   if (!itemId || typeof itemId !== 'string') {
     throw new McpError(ErrorCode.InvalidParams, 'itemId is required and must be a string');
   }
 
   return withToolError('delete item', async () => {
-    await foundryClient.deleteActorItem(actorId, itemId);
+    await foundryClient.deleteActorItem(target.actorId, itemId, tokenOf(target));
 
     return {
       content: [
         {
           type: 'text',
           text: `🗑️ **Item Deleted**
-**Actor:** ${actorId}
+${tokenHeaderLine(target)}**Actor:** ${target.actorId}
 **Item ID:** ${itemId}
 
 _Canonical target: D&D 5e v4+ activity schema._`,

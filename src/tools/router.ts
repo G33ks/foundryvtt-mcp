@@ -289,22 +289,22 @@ export async function routeToolRequest(
 
     // Item mutation tools (WRITE) — Socket.IO modifyDocument protocol
     // (foundryClient); require FOUNDRY_WRITE_ENABLED=true + a GM user.
+    // actorId, or sceneId + tokenId: the handlers check which (actor-target.ts)
     case 'create_actor_item':
-      if (!('actorId' in args) || typeof args.actorId !== 'string') {
-        throw new Error('Missing required parameter: actorId');
-      }
       if (!('source' in args) || typeof args.source !== 'object' || args.source === null) {
         throw new Error('Missing required parameter: source');
       }
       return handleCreateActorItem(
-        args as { actorId: string; source: ActorItemCreateSource },
+        args as {
+          actorId?: string;
+          sceneId?: string;
+          tokenId?: string;
+          source: ActorItemCreateSource;
+        },
         foundryClient,
         moduleBridge,
       );
     case 'update_actor_item':
-      if (!('actorId' in args) || typeof args.actorId !== 'string') {
-        throw new Error('Missing required parameter: actorId');
-      }
       if (!('itemId' in args) || typeof args.itemId !== 'string') {
         throw new Error('Missing required parameter: itemId');
       }
@@ -312,17 +312,23 @@ export async function routeToolRequest(
         throw new Error('Missing required parameter: patch');
       }
       return handleUpdateActorItem(
-        args as { actorId: string; itemId: string; patch: Record<string, unknown> },
+        args as {
+          actorId?: string;
+          sceneId?: string;
+          tokenId?: string;
+          itemId: string;
+          patch: Record<string, unknown>;
+        },
         foundryClient,
       );
     case 'delete_actor_item':
-      if (!('actorId' in args) || typeof args.actorId !== 'string') {
-        throw new Error('Missing required parameter: actorId');
-      }
       if (!('itemId' in args) || typeof args.itemId !== 'string') {
         throw new Error('Missing required parameter: itemId');
       }
-      return handleDeleteActorItem(args as { actorId: string; itemId: string }, foundryClient);
+      return handleDeleteActorItem(
+        args as { actorId?: string; sceneId?: string; tokenId?: string; itemId: string },
+        foundryClient,
+      );
 
     // Scene tools
     case 'get_scene_info':

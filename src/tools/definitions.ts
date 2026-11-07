@@ -394,7 +394,17 @@ export const itemMutationTools = [
       properties: {
         actorId: {
           type: 'string',
-          description: 'The ID of the actor to add the item to',
+          description:
+            'The ID of the actor to add the item to (omit when giving sceneId + tokenId)',
+        },
+        sceneId: {
+          type: 'string',
+          description: 'Scene id of the token, required together with tokenId',
+        },
+        tokenId: {
+          type: 'string',
+          description:
+            "Token id: adds the item to that token's own actor instead of actorId (only that token, for an unlinked token)",
         },
         source: {
           type: 'object',
@@ -423,7 +433,7 @@ export const itemMutationTools = [
           required: ['type'],
         },
       },
-      required: ['actorId', 'source'],
+      required: ['source'],
     },
   },
   {
@@ -436,7 +446,17 @@ export const itemMutationTools = [
       properties: {
         actorId: {
           type: 'string',
-          description: 'The ID of the actor that owns the item',
+          description:
+            'The ID of the actor that owns the item (omit when giving sceneId + tokenId)',
+        },
+        sceneId: {
+          type: 'string',
+          description: 'Scene id of the token, required together with tokenId',
+        },
+        tokenId: {
+          type: 'string',
+          description:
+            "Token id: changes the item on that token's own actor instead of actorId (only that token, for an unlinked token)",
         },
         itemId: {
           type: 'string',
@@ -448,7 +468,7 @@ export const itemMutationTools = [
             'JSON merge patch applied to item.system; nested paths supported (e.g. activities.{id}.consumption.targets)',
         },
       },
-      required: ['actorId', 'itemId', 'patch'],
+      required: ['itemId', 'patch'],
     },
   },
   {
@@ -463,14 +483,24 @@ export const itemMutationTools = [
       properties: {
         actorId: {
           type: 'string',
-          description: 'The ID of the actor that owns the item',
+          description:
+            'The ID of the actor that owns the item (omit when giving sceneId + tokenId)',
+        },
+        sceneId: {
+          type: 'string',
+          description: 'Scene id of the token, required together with tokenId',
+        },
+        tokenId: {
+          type: 'string',
+          description:
+            "Token id: deletes the item from that token's own actor instead of actorId (only that token, for an unlinked token)",
         },
         itemId: {
           type: 'string',
           description: 'The ID of the item to delete',
         },
       },
-      required: ['actorId', 'itemId'],
+      required: ['itemId'],
     },
   },
 ];

@@ -26,10 +26,11 @@ const buildClient = (opts: { delta?: Record<string, unknown> } = {}) => {
         operation?: {
           updates?: Array<Record<string, unknown>>;
           data?: Array<Record<string, unknown>>;
+          ids?: string[];
         };
       }
     ).operation;
-    const result = op?.updates ?? op?.data ?? [];
+    const result = op?.updates ?? op?.data ?? op?.ids ?? [];
     cb({ result: [result[0] ?? {}] });
   }) as SocketEmitMock);
   const internals = client as unknown as {
@@ -297,5 +298,84 @@ describe('FoundryClient.getTokenActor', () => {
     expect(client.getTokenActor(LINKED_TOKEN_ID, SCENE_ID)).toMatchObject({
       hp: { value: 22, max: 22 },
     });
+  });
+});
+
+describe('FoundryClient item writes for one token', () => {
+  const INHERITED_ITEM_ID = 'baseItem00000001';
+  const unlinked = { sceneId: SCENE_ID, tokenId: TOKEN_ID };
+  const withItem = (opts: { delta?: Record<string, unknown> } = {}) => {
+    const built = buildClient(opts);
+    const actor = built.client.getRawActor(ACTOR_ID) as unknown as Record<string, unknown>;
+    actor.items = [{ _id: INHERITED_ITEM_ID, name: 'Rope', type: 'loot', system: { quantity: 1 } }];
+    return built;
+  };
+
+  it("sends an unlinked token's item writes under its ActorDelta", async () => {
+    const { client, emit } = withItem({ delta: { _id: DELTA_ID } });
+    const deltaUuid = `Scene.${SCENE_ID}.Token.${TOKEN_ID}.ActorDelta.${DELTA_ID}`;
+    await client.createActorItem(
+      ACTOR_ID,
+      { type: 'inline', item: { name: 'Key', type: 'loot' } },
+      unlinked,
+    );
+    await client.updateActorItem(ACTOR_ID, INHERITED_ITEM_ID, { quantity: 3 }, unlinked);
+    await client.deleteActorItem(ACTOR_ID, INHERITED_ITEM_ID, unlinked);
+    const parents = emit.mock.calls.map(
+      (call) => (call[1] as { operation: { parentUuid: string } }).operation.parentUuid,
+    );
+    expect(parents).toEqual([deltaUuid, deltaUuid, deltaUuid]);
+  });
+
+  it("sends a linked token's item writes to its world actor", async () => {
+    const { client, emit } = withItem();
+    await client.deleteActorItem(ACTOR_ID, INHERITED_ITEM_ID, {
+      sceneId: SCENE_ID,
+      tokenId: LINKED_TOKEN_ID,
+    });
+    expect(firstBody(emit)).toMatchObject({ operation: { parentUuid: `Actor.${ACTOR_ID}` } });
+  });
+
+  it('refuses a token that carries another actor, sending nothing', async () => {
+    const { client, emit } = withItem();
+    await expect(
+      client.updateActorItem('otherActor000001', INHERITED_ITEM_ID, { quantity: 3 }, unlinked),
+    ).rejects.toThrow(/carries actor/);
+    expect(emit).not.toHaveBeenCalled();
+  });
+
+  it('shows its own update of an inherited item at once, on that token only', async () => {
+    const { client } = withItem();
+    await client.updateActorItem(ACTOR_ID, INHERITED_ITEM_ID, { quantity: 3 }, unlinked);
+    expect(client.getTokenActorItems(TOKEN_ID, SCENE_ID)).toEqual([
+      { _id: INHERITED_ITEM_ID, name: 'Rope', type: 'loot', system: { quantity: 3 } },
+    ]);
+    expect(client.getRawActor(ACTOR_ID)?.items?.[0]?.system).toEqual({ quantity: 1 });
+    expect(client.getTokenActorItems(LINKED_TOKEN_ID, SCENE_ID)?.[0]?.system).toEqual({
+      quantity: 1,
+    });
+  });
+
+  it('hides an inherited item it deleted at once, on that token only', async () => {
+    const { client } = withItem();
+    await client.deleteActorItem(ACTOR_ID, INHERITED_ITEM_ID, unlinked);
+    expect(client.getTokenActorItems(TOKEN_ID, SCENE_ID)).toEqual([]);
+    expect(client.getRawActor(ACTOR_ID)?.items).toHaveLength(1);
+  });
+
+  it("returns the updated item's name and type from the cache, which the server's answer lacks", async () => {
+    const { client } = withItem();
+    // The answer echoes only the update: {_id, system}.
+    await expect(
+      client.updateActorItem(ACTOR_ID, INHERITED_ITEM_ID, { quantity: 3 }, unlinked),
+    ).resolves.toEqual({
+      _id: INHERITED_ITEM_ID,
+      system: { quantity: 3 },
+      name: 'Rope',
+      type: 'loot',
+    });
+    await expect(
+      client.updateActorItem(ACTOR_ID, INHERITED_ITEM_ID, { quantity: 4 }),
+    ).resolves.toMatchObject({ name: 'Rope', type: 'loot' });
   });
 });

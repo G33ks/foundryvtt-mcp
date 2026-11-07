@@ -23,8 +23,29 @@ const featWithActivity: FoundryItem = {
   type: 'feat',
 };
 
+const SCENE_ID = 'sceneAAAAAAAAAAA';
+const TOKEN_ID = 'tokenAAAAAAAAAAA';
+const LINKED_TOKEN_ID = 'tokenLinkedAAAAA';
+
+/** TOKEN_ID is unlinked, LINKED_TOKEN_ID linked; both carry VALID_ACTOR_ID. */
+function resolveTokenActor(tokenId: string, sceneId?: string, actorId?: string) {
+  if (sceneId !== SCENE_ID || (tokenId !== TOKEN_ID && tokenId !== LINKED_TOKEN_ID)) {
+    throw new Error(`Token not found: ${tokenId} in scene ${sceneId}`);
+  }
+  if (actorId !== undefined && actorId !== VALID_ACTOR_ID) {
+    throw new Error(`Token ${tokenId} carries actor ${VALID_ACTOR_ID}, not ${actorId}`);
+  }
+  return {
+    scene: { _id: SCENE_ID },
+    token: { _id: tokenId, name: 'Scout' },
+    actorId: VALID_ACTOR_ID,
+    linked: tokenId === LINKED_TOKEN_ID,
+  };
+}
+
 const createMockClient = (overrides: Partial<FoundryClient> = {}): FoundryClient => {
   return {
+    resolveTokenActor: vi.fn(resolveTokenActor),
     createActorItem: vi.fn(async () => sampleItem),
     updateActorItem: vi.fn(async () => sampleItem),
     deleteActorItem: vi.fn(async () => undefined),
@@ -48,10 +69,11 @@ describe('item mutation handlers', () => {
       expect(result.content[0].text).toContain('Item Created');
       expect(result.content[0].text).toContain('Longsword');
       expect(result.content[0].text).toContain('D&D 5e v4+ activity schema');
-      expect(mockClient.createActorItem).toHaveBeenCalledWith(VALID_ACTOR_ID, {
-        type: 'inline',
-        item: { type: 'weapon', name: 'Longsword' },
-      });
+      expect(mockClient.createActorItem).toHaveBeenCalledWith(
+        VALID_ACTOR_ID,
+        { type: 'inline', item: { type: 'weapon', name: 'Longsword' } },
+        undefined,
+      );
     });
 
     it('creates an item from a compendium source via moduleBridge', async () => {
@@ -80,10 +102,11 @@ describe('item mutation handlers', () => {
         documentId: VALID_ITEM_ID,
       });
       expect(result.content[0].text).toContain('compendium dnd5e.items');
-      expect(mockClient.createActorItem).toHaveBeenCalledWith(VALID_ACTOR_ID, {
-        type: 'inline',
-        item: { name: 'Flametongue', type: 'weapon', system: {} },
-      });
+      expect(mockClient.createActorItem).toHaveBeenCalledWith(
+        VALID_ACTOR_ID,
+        { type: 'inline', item: { name: 'Flametongue', type: 'weapon', system: {} } },
+        undefined,
+      );
     });
 
     it('rejects compendium source when module bridge is not available', async () => {
@@ -183,9 +206,12 @@ describe('item mutation handlers', () => {
 
       expect(result.content[0].text).toContain('Item Updated');
       expect(result.content[0].text).toContain('equipped');
-      expect(mockClient.updateActorItem).toHaveBeenCalledWith(VALID_ACTOR_ID, VALID_ITEM_ID, {
-        equipped: true,
-      });
+      expect(mockClient.updateActorItem).toHaveBeenCalledWith(
+        VALID_ACTOR_ID,
+        VALID_ITEM_ID,
+        { equipped: true },
+        undefined,
+      );
     });
 
     it('round-trips adding an activity to an existing feat (nested merge patch)', async () => {
@@ -206,7 +232,12 @@ describe('item mutation handlers', () => {
 
       expect(result.content[0].text).toContain('Action Surge');
       expect(result.content[0].text).toContain('activities');
-      expect(mockClient.updateActorItem).toHaveBeenCalledWith(VALID_ACTOR_ID, VALID_ITEM_ID, patch);
+      expect(mockClient.updateActorItem).toHaveBeenCalledWith(
+        VALID_ACTOR_ID,
+        VALID_ITEM_ID,
+        patch,
+        undefined,
+      );
     });
 
     it('rejects an empty itemId with InvalidParams', async () => {
@@ -274,7 +305,11 @@ describe('item mutation handlers', () => {
 
       expect(result.content[0].text).toContain('Item Deleted');
       expect(result.content[0].text).toContain(VALID_ITEM_ID);
-      expect(mockClient.deleteActorItem).toHaveBeenCalledWith(VALID_ACTOR_ID, VALID_ITEM_ID);
+      expect(mockClient.deleteActorItem).toHaveBeenCalledWith(
+        VALID_ACTOR_ID,
+        VALID_ITEM_ID,
+        undefined,
+      );
     });
 
     it('rejects an empty actorId with InvalidParams', async () => {
@@ -321,6 +356,89 @@ describe('item mutation handlers', () => {
 // Client-level: exercises the real createActorItem/updateActorItem/
 // deleteActorItem over a mocked Socket.IO socket (modifyDocument protocol).
 // ----------------------------------------------------------------------------
+describe('item mutation handlers - one token', () => {
+  const unlinked = { sceneId: SCENE_ID, tokenId: TOKEN_ID };
+
+  it("creates an item on an unlinked token's own actor and says which token", async () => {
+    const mockClient = createMockClient();
+    const result = await handleCreateActorItem(
+      { ...unlinked, source: { type: 'inline', item: { type: 'weapon', name: 'Longsword' } } },
+      mockClient,
+    );
+    expect(mockClient.createActorItem).toHaveBeenCalledWith(
+      VALID_ACTOR_ID,
+      { type: 'inline', item: { type: 'weapon', name: 'Longsword' } },
+      unlinked,
+    );
+    expect(result.content[0].text).toContain(`**Token:** Scout (${TOKEN_ID})`);
+  });
+
+  it("creates a compendium item on an unlinked token's own actor", async () => {
+    const mockClient = createMockClient();
+    const mockBridge = {
+      send: vi.fn(async () => ({ _id: 'rawId1234567890', name: 'Rope', type: 'loot', system: {} })),
+    } as unknown as import('../../../foundry/module-bridge.js').ModuleBridge;
+    await handleCreateActorItem(
+      {
+        ...unlinked,
+        source: { type: 'compendium', compendiumId: 'world.gear', itemId: VALID_ITEM_ID },
+      },
+      mockClient,
+      mockBridge,
+    );
+    expect(mockClient.createActorItem).toHaveBeenCalledWith(
+      VALID_ACTOR_ID,
+      { type: 'inline', item: { name: 'Rope', type: 'loot', system: {} } },
+      unlinked,
+    );
+  });
+
+  it("updates and deletes an item on an unlinked token's own actor", async () => {
+    const mockClient = createMockClient();
+    await handleUpdateActorItem(
+      { ...unlinked, itemId: VALID_ITEM_ID, patch: { quantity: 2 } },
+      mockClient,
+    );
+    await handleDeleteActorItem({ ...unlinked, itemId: VALID_ITEM_ID }, mockClient);
+    expect(mockClient.updateActorItem).toHaveBeenCalledWith(
+      VALID_ACTOR_ID,
+      VALID_ITEM_ID,
+      { quantity: 2 },
+      unlinked,
+    );
+    expect(mockClient.deleteActorItem).toHaveBeenCalledWith(
+      VALID_ACTOR_ID,
+      VALID_ITEM_ID,
+      unlinked,
+    );
+  });
+
+  it('writes the world actor for a linked token', async () => {
+    const mockClient = createMockClient();
+    const result = await handleDeleteActorItem(
+      { sceneId: SCENE_ID, tokenId: LINKED_TOKEN_ID, itemId: VALID_ITEM_ID },
+      mockClient,
+    );
+    expect(mockClient.deleteActorItem).toHaveBeenCalledWith(
+      VALID_ACTOR_ID,
+      VALID_ITEM_ID,
+      undefined,
+    );
+    expect(result.content[0].text).not.toContain('**Token:**');
+  });
+
+  it('refuses a token carrying another actor, writing nothing', async () => {
+    const mockClient = createMockClient();
+    await expect(
+      handleUpdateActorItem(
+        { actorId: 'otherActor000001', ...unlinked, itemId: VALID_ITEM_ID, patch: {} },
+        mockClient,
+      ),
+    ).rejects.toThrow(McpError);
+    expect(mockClient.updateActorItem).not.toHaveBeenCalled();
+  });
+});
+
 describe('FoundryClient item mutations (modifyDocument)', () => {
   type SocketEmitMock = (event: string, payload: unknown, cb: (response: unknown) => void) => void;
 
