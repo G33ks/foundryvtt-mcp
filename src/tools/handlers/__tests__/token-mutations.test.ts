@@ -33,6 +33,8 @@ describe('Token mutation handlers', () => {
   const createMockClient = (opts: {
     located?: { scene: WorldScene; token: Record<string, unknown> } | null;
     actor?: WorldActor | undefined;
+    /** An unlinked token's effects, base actor and delta merged. */
+    tokenEffects?: WorldEffect[];
     moveToken?: (sceneId: string, tokenId: string, x: number, y: number) => unknown;
     createEffect?: (uuid: string, statusId: string) => WorldEffect;
     deleteEffect?: (uuid: string, effectId: string) => unknown;
@@ -40,6 +42,11 @@ describe('Token mutation handlers', () => {
     ({
       findToken: vi.fn(() => opts.located ?? null),
       getRawActor: vi.fn(() => opts.actor),
+      getTokenActorEffects: vi.fn(() =>
+        opts.located?.token.actorLink === true
+          ? (opts.actor?.effects ?? [])
+          : (opts.tokenEffects ?? []),
+      ),
       moveToken: vi.fn(opts.moveToken ?? (() => ({}))),
       createActorStatusEffect: vi.fn(
         opts.createEffect ?? (() => ({ _id: EFFECT_ID, name: 'Prone', statuses: ['prone'] })),
@@ -114,6 +121,42 @@ describe('Token mutation handlers', () => {
       expect(client.createActorStatusEffect).toHaveBeenCalledWith(
         `Scene.${SCENE_ID}.Token.${TOKEN_ID}.Actor.${ACTOR_ID}`,
         'stunned',
+      );
+    });
+
+    it("finds a status an unlinked token inherits from its base actor, and doesn't apply it again", async () => {
+      const token = { _id: TOKEN_ID, name: 'Goblin', actorId: ACTOR_ID, actorLink: false };
+      const client = createMockClient({
+        located: { scene: makeScene(token), token },
+        tokenEffects: [{ _id: EFFECT_ID, name: 'Prone', statuses: ['prone'] } as WorldEffect],
+      });
+
+      const result = await handleApplyStatusEffect(
+        { tokenId: TOKEN_ID, statusId: 'prone' },
+        client,
+      );
+
+      expect(result.content[0].text).toContain('already active');
+      expect(client.getTokenActorEffects).toHaveBeenCalledWith(TOKEN_ID, SCENE_ID);
+      expect(client.createActorStatusEffect).not.toHaveBeenCalled();
+    });
+
+    it("removes an inherited status through the token's own actor", async () => {
+      const token = { _id: TOKEN_ID, name: 'Goblin', actorId: ACTOR_ID, actorLink: false };
+      const client = createMockClient({
+        located: { scene: makeScene(token), token },
+        tokenEffects: [{ _id: EFFECT_ID, name: 'Prone', statuses: ['prone'] } as WorldEffect],
+      });
+
+      await handleApplyStatusEffect(
+        { tokenId: TOKEN_ID, statusId: 'prone', active: false },
+        client,
+      );
+
+      // The client sends this under the token's ActorDelta; FoundryVTT tombstones it there.
+      expect(client.deleteActorEffect).toHaveBeenCalledWith(
+        `Scene.${SCENE_ID}.Token.${TOKEN_ID}.Actor.${ACTOR_ID}`,
+        EFFECT_ID,
       );
     });
 
@@ -431,6 +474,10 @@ describe('FoundryClient token mutations', () => {
 
   it('createActorStatusEffect accepts the unlinked synthetic-actor UUID form', async () => {
     const { client, emit } = buildClient({});
+    (client as unknown as { worldData: unknown }).worldData = {
+      actors: [],
+      scenes: [{ _id: SCENE_ID, tokens: [{ _id: TOKEN_ID, actorId: ACTOR_ID, actorLink: false }] }],
+    };
     const uuid = `Scene.${SCENE_ID}.Token.${TOKEN_ID}.Actor.${ACTOR_ID}`;
     await client.createActorStatusEffect(uuid, 'stunned', { name: 'Stunned', img: 'x.png' });
     const [, body] = emit.mock.calls[0] as unknown[] as [string, Record<string, unknown>];

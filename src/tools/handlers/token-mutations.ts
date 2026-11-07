@@ -19,7 +19,6 @@ interface TokenActorRef {
   actorId?: string;
   actorLink?: boolean;
   name?: string;
-  delta?: { effects?: WorldEffect[] };
 }
 
 /**
@@ -80,7 +79,9 @@ export async function handleMoveToken(
  * the effect is matched by its `statuses` array, so re-applying an already
  * present condition (or removing an absent one) is a no-op. Linked actors
  * resolve to `Actor.<id>`; unlinked tokens target their synthetic actor at
- * `Scene.<sid>.Token.<tid>.Actor.<aid>`.
+ * `Scene.<sid>.Token.<tid>.Actor.<aid>`, whose effects are the base actor's
+ * merged with the token's delta: removing an inherited status is a delete
+ * under the token's ActorDelta, for which FoundryVTT records a tombstone.
  */
 export async function handleApplyStatusEffect(
   args: { tokenId: string; statusId: string; active?: boolean; sceneId?: string },
@@ -121,9 +122,8 @@ export async function handleApplyStatusEffect(
     : `Scene.${located.scene._id}.Token.${tokenId}.Actor.${actorId}`;
 
   // Find an existing effect carrying this status (matches toggleStatusEffect).
-  const effects: WorldEffect[] = linked
-    ? (foundryClient.getRawActor(actorId)?.effects ?? [])
-    : (token.delta?.effects ?? []);
+  const effects: WorldEffect[] =
+    foundryClient.getTokenActorEffects(tokenId, located.scene._id) ?? [];
   const existing = effects.find((e) => e.statuses?.includes(statusId));
 
   return withToolError('apply status effect', async () => {

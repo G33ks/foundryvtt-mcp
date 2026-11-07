@@ -39,7 +39,16 @@ function baseWorldData() {
     system: { id: 'cyberpunk-red-core', version: '0.92.4' },
     release: { version: '12.331' },
     actors: [{ _id: ACTOR_ID, name: 'Vex', type: 'character', system: {}, effects: [] }],
-    scenes: [],
+    scenes: [
+      {
+        _id: 'sceneAAAAAAAAAAA',
+        name: 'Road',
+        tokens: [
+          { _id: 'tokenAAAAAAAAAAA', actorId: ACTOR_ID, actorLink: false },
+          { _id: 'tokenLinkedAAAAA', actorId: ACTOR_ID, actorLink: true },
+        ],
+      },
+    ],
     items: [],
     journal: [],
     messages: [],
@@ -199,6 +208,41 @@ describe('FoundryClient — generalized ActiveEffects', () => {
     expect(req.operation.parentUuid).toBe(
       'Scene.sceneAAAAAAAAAAA.Token.tokenAAAAAAAAAAA.ActorDelta.tokenAAAAAAAAAAA',
     );
+  });
+
+  it("sends a linked token's effect to its world actor", async () => {
+    const { client, socket } = await connectClient();
+    await client.createActorEffect(
+      `Scene.sceneAAAAAAAAAAA.Token.tokenLinkedAAAAA.Actor.${ACTOR_ID}`,
+      { name: 'Blessed' },
+    );
+    const modifyCall = socket.emit.mock.calls.find(([event]) => event === 'modifyDocument');
+    const req = modifyCall?.[1] as { operation: { parentUuid: string } };
+    expect(req.operation.parentUuid).toBe(`Actor.${ACTOR_ID}`);
+  });
+
+  it('refuses a token that carries another actor, sending nothing', async () => {
+    const { client, socket } = await connectClient();
+    await expect(
+      client.createActorEffect(
+        'Scene.sceneAAAAAAAAAAA.Token.tokenAAAAAAAAAAA.Actor.otherActor000001',
+        {
+          name: 'Blessed',
+        },
+      ),
+    ).rejects.toThrow(`Token tokenAAAAAAAAAAA carries actor ${ACTOR_ID}, not otherActor000001`);
+    expect(socket.emit.mock.calls.some(([event]) => event === 'modifyDocument')).toBe(false);
+  });
+
+  it('refuses a token that is not in the cache, sending nothing', async () => {
+    const { client, socket } = await connectClient();
+    await expect(
+      client.deleteActorEffect(
+        `Scene.sceneAAAAAAAAAAA.Token.missingToken0001.Actor.${ACTOR_ID}`,
+        'effect0000000001',
+      ),
+    ).rejects.toThrow('Token not found: missingToken0001 in scene sceneAAAAAAAAAAA');
+    expect(socket.emit.mock.calls.some(([event]) => event === 'modifyDocument')).toBe(false);
   });
 
   it('rejects a malformed actor UUID', async () => {

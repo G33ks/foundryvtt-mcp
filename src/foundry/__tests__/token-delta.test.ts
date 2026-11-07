@@ -188,3 +188,91 @@ describe('FoundryClient.createActorStatusEffect', () => {
     });
   });
 });
+
+describe('FoundryClient.getTokenActorEffects / getTokenActorItems', () => {
+  const base = {
+    effects: [
+      { _id: 'baseEffect000001', name: 'Blessed' },
+      { _id: 'baseEffect000002', name: 'Shielded' },
+    ],
+    items: [
+      { _id: 'baseItem00000001', name: 'Rope', type: 'loot', system: { quantity: 1 } },
+      { _id: 'baseItem00000002', name: 'Torch', type: 'loot', system: { quantity: 2 } },
+    ],
+  };
+  const delta = {
+    _id: DELTA_ID,
+    effects: [
+      { _id: 'baseEffect000001', name: 'Blessed', disabled: true },
+      { _id: 'baseEffect000002', _tombstone: true },
+      { _id: 'ownEffect0000001', name: 'Hasted' },
+    ],
+    items: [
+      { _id: 'baseItem00000002', _tombstone: true },
+      { _id: 'ownItem000000001', name: 'Key', type: 'loot', system: {} },
+    ],
+  };
+  const withBase = (opts: { delta?: Record<string, unknown> } = {}) => {
+    const built = buildClient(opts);
+    const actor = built.client.getRawActor(ACTOR_ID) as unknown as Record<string, unknown>;
+    Object.assign(actor, structuredClone(base));
+    return built;
+  };
+
+  it("puts the delta's entries in place of the base's, adds its own and leaves tombstones out", () => {
+    const { client } = withBase({ delta: structuredClone(delta) });
+    expect(client.getTokenActorEffects(TOKEN_ID, SCENE_ID)).toEqual([
+      { _id: 'baseEffect000001', name: 'Blessed', disabled: true },
+      { _id: 'ownEffect0000001', name: 'Hasted' },
+    ]);
+    expect(client.getTokenActorItems(TOKEN_ID, SCENE_ID)?.map((item) => item._id)).toEqual([
+      'baseItem00000001',
+      'ownItem000000001',
+    ]);
+  });
+
+  it('leaves the cached base actor and delta as they were', () => {
+    const { client } = withBase({ delta: structuredClone(delta) });
+    client.getTokenActorEffects(TOKEN_ID, SCENE_ID);
+    client.getTokenActorItems(TOKEN_ID, SCENE_ID);
+    expect(client.getRawActor(ACTOR_ID)?.effects).toEqual(base.effects);
+    expect(client.getRawActor(ACTOR_ID)?.items).toEqual(base.items);
+    expect(client.findToken(TOKEN_ID, SCENE_ID)?.token.delta).toEqual(delta);
+  });
+
+  it("returns the base actor's entries for an unlinked token without a delta of its own", () => {
+    const { client } = withBase({ delta: {} });
+    expect(client.getTokenActorEffects(TOKEN_ID, SCENE_ID)).toEqual(base.effects);
+  });
+
+  it("returns the world actor's entries for a linked token", () => {
+    const { client } = withBase();
+    expect(client.getTokenActorItems(LINKED_TOKEN_ID, SCENE_ID)).toEqual(base.items);
+  });
+
+  it('returns undefined for a token that is not in the cache', () => {
+    const { client } = withBase();
+    expect(client.getTokenActorEffects('xxxxxxxxxxxxxxxx', SCENE_ID)).toBeUndefined();
+  });
+});
+
+describe('FoundryClient.resolveTokenActor', () => {
+  it('says whether the token shares its world actor', () => {
+    const { client } = buildClient();
+    expect(client.resolveTokenActor(TOKEN_ID, SCENE_ID, ACTOR_ID)).toMatchObject({
+      actorId: ACTOR_ID,
+      linked: false,
+    });
+    expect(client.resolveTokenActor(LINKED_TOKEN_ID, SCENE_ID)).toMatchObject({ linked: true });
+  });
+
+  it('refuses another actor, or a token that is not in the cache', () => {
+    const { client } = buildClient();
+    expect(() => client.resolveTokenActor(TOKEN_ID, SCENE_ID, 'otherActor000001')).toThrow(
+      `Token ${TOKEN_ID} carries actor ${ACTOR_ID}, not otherActor000001`,
+    );
+    expect(() => client.resolveTokenActor('xxxxxxxxxxxxxxxx', SCENE_ID)).toThrow(
+      `Token not found: xxxxxxxxxxxxxxxx in scene ${SCENE_ID}`,
+    );
+  });
+});

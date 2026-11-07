@@ -10,37 +10,22 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import type { ActorEffectInput } from '../../foundry/types.js';
+import { type ActorTargetArgs, actorParentUuid, resolveActorTarget } from './actor-target.js';
 import { withToolError } from './utils.js';
 
-interface ActorRef {
-  actorId: string;
-  sceneId?: string;
-  tokenId?: string;
-}
+type ActorRef = ActorTargetArgs & { actorId: string };
 
 /**
  * Resolves the `ActiveEffect` parent UUID from an actor reference.
  *
  * `actorId` is always required. `sceneId` and `tokenId` are an optional
- * pair — supplying only one of the two is rejected — that, when present,
- * select the unlinked-token-actor UUID form instead of the plain
- * `Actor.<actorId>` form.
+ * pair — supplying only one of the two is rejected — naming the token whose
+ * actor to change: its world actor when the token is linked, its own
+ * (synthetic) actor when it is not. The token must be cached and carry
+ * `actorId`.
  */
-function resolveActorUuid(ref: ActorRef): string {
-  if (!ref.actorId || typeof ref.actorId !== 'string') {
-    throw new McpError(ErrorCode.InvalidParams, 'actorId is required and must be a string');
-  }
-  const hasScene = ref.sceneId !== undefined;
-  const hasToken = ref.tokenId !== undefined;
-  if (hasScene !== hasToken) {
-    throw new McpError(
-      ErrorCode.InvalidParams,
-      'sceneId and tokenId must be supplied together (for an unlinked token actor) or not at all',
-    );
-  }
-  return hasScene
-    ? `Scene.${ref.sceneId}.Token.${ref.tokenId}.Actor.${ref.actorId}`
-    : `Actor.${ref.actorId}`;
+function resolveActorUuid(ref: ActorRef, foundryClient: FoundryClient): string {
+  return actorParentUuid(resolveActorTarget(ref, foundryClient, { actorRequired: true }));
 }
 
 function formatEffect(effect: {
@@ -67,7 +52,7 @@ export async function handleCreateActorEffect(
   args: ActorRef & ActorEffectInput,
   foundryClient: FoundryClient,
 ) {
-  const parentActorUuid = resolveActorUuid(args);
+  const parentActorUuid = resolveActorUuid(args, foundryClient);
   if (!args.name || typeof args.name !== 'string') {
     throw new McpError(ErrorCode.InvalidParams, 'name is required and must be a string');
   }
@@ -84,7 +69,7 @@ export async function handleUpdateActorEffect(
   args: ActorRef & { effectId: string } & ActorEffectInput,
   foundryClient: FoundryClient,
 ) {
-  const parentActorUuid = resolveActorUuid(args);
+  const parentActorUuid = resolveActorUuid(args, foundryClient);
   if (!args.effectId || typeof args.effectId !== 'string') {
     throw new McpError(ErrorCode.InvalidParams, 'effectId is required and must be a string');
   }
@@ -101,7 +86,7 @@ export async function handleDeleteActorEffect(
   args: ActorRef & { effectId: string },
   foundryClient: FoundryClient,
 ) {
-  const parentActorUuid = resolveActorUuid(args);
+  const parentActorUuid = resolveActorUuid(args, foundryClient);
   if (!args.effectId || typeof args.effectId !== 'string') {
     throw new McpError(ErrorCode.InvalidParams, 'effectId is required and must be a string');
   }

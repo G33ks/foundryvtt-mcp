@@ -2299,6 +2299,74 @@ export class FoundryClient {
   }
 
   /**
+   * A token and the actor it carries, checked.
+   *
+   * @param actorId - when given, must be the token's actor
+   * @throws when the token isn't in the cache, has no actor, or carries another actor
+   */
+  resolveTokenActor(
+    tokenId: string,
+    sceneId?: string,
+    actorId?: string,
+  ): { scene: WorldScene; token: Record<string, unknown>; actorId: string; linked: boolean } {
+    const found = this.findToken(tokenId, sceneId);
+    if (!found) {
+      throw new Error(`Token not found: ${tokenId}${sceneId ? ` in scene ${sceneId}` : ''}`);
+    }
+    const tokenActorId =
+      typeof found.token.actorId === 'string' && found.token.actorId
+        ? found.token.actorId
+        : undefined;
+    if (!tokenActorId) {
+      throw new Error(`Token ${tokenId} has no actor`);
+    }
+    if (actorId !== undefined && actorId !== tokenActorId) {
+      throw new Error(`Token ${tokenId} carries actor ${tokenActorId}, not ${actorId}`);
+    }
+    return { ...found, actorId: tokenActorId, linked: found.token.actorLink === true };
+  }
+
+  /**
+   * A token's actor's effects, as FoundryVTT shows them (see {@link mergeDeltaEntries}).
+   *
+   * @returns undefined when the token isn't in the cache
+   */
+  getTokenActorEffects(tokenId: string, sceneId?: string): WorldEffect[] | undefined {
+    const found = this.findToken(tokenId, sceneId);
+    if (!found) {
+      return undefined;
+    }
+    const base = this.tokenBaseActor(found.token)?.effects ?? [];
+    return found.token.actorLink === true
+      ? [...base]
+      : mergeDeltaEntries(
+          base,
+          isRecord(found.token.delta) ? found.token.delta.effects : undefined,
+        );
+  }
+
+  /**
+   * A token's actor's items, as FoundryVTT shows them (see {@link mergeDeltaEntries}).
+   *
+   * @returns undefined when the token isn't in the cache
+   */
+  getTokenActorItems(tokenId: string, sceneId?: string): WorldItem[] | undefined {
+    const found = this.findToken(tokenId, sceneId);
+    if (!found) {
+      return undefined;
+    }
+    const base = this.tokenBaseActor(found.token)?.items ?? [];
+    return found.token.actorLink === true
+      ? [...base]
+      : mergeDeltaEntries(base, isRecord(found.token.delta) ? found.token.delta.items : undefined);
+  }
+
+  /** The world actor a token was made from, when it is cached. */
+  private tokenBaseActor(token: Record<string, unknown>): WorldActor | undefined {
+    return typeof token.actorId === 'string' ? this.getRawActor(token.actorId) : undefined;
+  }
+
+  /**
    * Patches attributes on one token's actor. WRITE — Socket.IO.
    *
    * A linked token shares its world actor, so this is {@link updateActorAttribute}.
@@ -3134,18 +3202,25 @@ export class FoundryClient {
    * `parentUuid: "Scene.<sid>.Token.<tid>.ActorDelta.<did>"`
    * (ClientDatabaseBackend#adjustActorDeltaRequest). v14 rejects the
    * `...Token.<tid>.Actor.<aid>` form outright. The delta's id defaults to the
-   * token's id. Any other UUID is returned unchanged.
+   * token's id. A linked token shares its world actor, so it gets
+   * `Actor.<aid>`. Any other UUID is returned unchanged.
+   *
+   * @throws when the token isn't in the cache or carries another actor
    */
   private toDeltaParentUuid(parentActorUuid: string): string {
     const match =
-      /^Scene\.([a-zA-Z0-9]{16})\.Token\.([a-zA-Z0-9]{16})\.Actor\.[a-zA-Z0-9]{16}$/.exec(
+      /^Scene\.([a-zA-Z0-9]{16})\.Token\.([a-zA-Z0-9]{16})\.Actor\.([a-zA-Z0-9]{16})$/.exec(
         parentActorUuid,
       );
     if (!match) {
       return parentActorUuid;
     }
-    const [, sceneId, tokenId] = match;
-    const delta = this.findToken(tokenId as string, sceneId)?.token.delta;
+    const [, sceneId = '', tokenId = '', actorId = ''] = match;
+    const { token, linked } = this.resolveTokenActor(tokenId, sceneId, actorId);
+    if (linked) {
+      return `Actor.${actorId}`;
+    }
+    const delta = token.delta;
     const deltaId = isRecord(delta) && typeof delta._id === 'string' ? delta._id : tokenId;
     return `Scene.${sceneId}.Token.${tokenId}.ActorDelta.${deltaId}`;
   }
@@ -3153,11 +3228,15 @@ export class FoundryClient {
   /**
    * Creates a status-effect `ActiveEffect` on a token's actor (FR-019).
    *
-   * `ActiveEffect` is an embedded document of `Actor`, so the create is sent with
-   * the actor's parent UUID:
-   *  - `Actor.<id>` for a world-linked actor (`actorLink: true`)
-   *  - `Scene.<sid>.Token.<tid>.Actor.<aid>` for an unlinked token's synthetic
-   *    actor (the per-token delta).
+   * `parentActorUuid` takes one of two forms:
+   *  - `Actor.<id>` for a world actor
+   *  - `Scene.<sid>.Token.<tid>.Actor.<aid>` for a token's actor.
+   *
+   * The create is sent with the parent {@link toDeltaParentUuid} makes of it:
+   * `Actor.<aid>` for a world actor or a linked token, and
+   * `Scene.<sid>.Token.<tid>.ActorDelta.<did>` for an unlinked token (its
+   * per-token delta). A token that isn't cached or carries another actor is
+   * refused before anything is sent.
    *
    * The effect carries a `statuses` array, matching how FoundryVTT v11+ models
    * conditions (`Actor#toggleStatusEffect` toggles by this field).
@@ -7328,6 +7407,23 @@ function worldSceneToFoundry(s: WorldScene): FoundryScene {
     scene.description = desc;
   }
   return scene;
+}
+
+/**
+ * An unlinked token's effects or items: the base actor's, each replaced by the
+ * delta's entry with the same id, then the delta's own, without the entries
+ * the delta tombstoned. Builds a new array and leaves the cache as it is.
+ */
+function mergeDeltaEntries<T extends { _id: string }>(base: T[], delta: unknown): T[] {
+  const deltaEntries = Array.isArray(delta)
+    ? delta.filter((entry): entry is T => isRecord(entry) && typeof entry._id === 'string')
+    : [];
+  const byId = new Map(deltaEntries.map((entry) => [entry._id, entry]));
+  const baseIds = new Set(base.map((entry) => entry._id));
+  return [
+    ...base.map((entry) => byId.get(entry._id) ?? entry),
+    ...deltaEntries.filter((entry) => !baseIds.has(entry._id)),
+  ].filter((entry) => (entry as { _tombstone?: unknown })._tombstone !== true);
 }
 
 /**
