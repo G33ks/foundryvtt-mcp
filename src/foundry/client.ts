@@ -2361,6 +2361,30 @@ export class FoundryClient {
       : mergeDeltaEntries(base, isRecord(found.token.delta) ? found.token.delta.items : undefined);
   }
 
+  /**
+   * A token's actor, mapped like {@link getActor}: for an unlinked token, its
+   * base actor with the system data of {@link getTokenActorSystem} (and the
+   * delta's name, when it has one). Read from the cache.
+   *
+   * @throws when the token or its base actor isn't in the cache
+   */
+  getTokenActor(tokenId: string, sceneId?: string): FoundryActor {
+    const { token, actorId, linked } = this.resolveTokenActor(tokenId, sceneId);
+    const base = this.getRawActor(actorId);
+    if (!base) {
+      throw new Error(`Actor not found: ${actorId}`);
+    }
+    if (linked) {
+      return worldActorToFoundry(base);
+    }
+    const deltaName = isRecord(token.delta) ? token.delta.name : undefined;
+    return worldActorToFoundry({
+      ...base,
+      ...(typeof deltaName === 'string' && deltaName ? { name: deltaName } : {}),
+      system: this.getTokenActorSystem(tokenId, sceneId) ?? {},
+    });
+  }
+
   /** The world actor a token was made from, when it is cached. */
   private tokenBaseActor(token: Record<string, unknown>): WorldActor | undefined {
     return typeof token.actorId === 'string' ? this.getRawActor(token.actorId) : undefined;

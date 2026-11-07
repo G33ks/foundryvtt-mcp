@@ -91,31 +91,50 @@ export const actorTools = [
   {
     name: 'get_actor_details',
     description:
-      'Get details for one actor by id: type, level, current/max HP, AC and ability scores; no biography or description text is returned (the description line always reads "No description available."). Use when: you have an actorId and need its current HP or ability scores - notably as the read-before-write step for update_actor_attributes. Do not use when: you only have a name - run search_actors first; or you need the ids of items the actor owns, which this tool does not return (no tool in this server lists owned-item ids - ask the user for the itemId).',
+      'Get details for one actor by id: type, level, current/max HP, AC and ability scores; no biography or description text is returned (the description line always reads "No description available."). Use when: you have an actorId and need its current HP or ability scores - notably as the read-before-write step for update_actor_attributes. For one token on a map, give sceneId + tokenId instead of actorId: an unlinked token (a copy of a monster with its own HP) reports its own values, a linked token the values of its world actor. Do not use when: you only have a name - run search_actors first; or you need the ids of items the actor owns, which this tool does not return (no tool in this server lists owned-item ids - ask the user for the itemId).',
     inputSchema: {
       type: 'object',
       properties: {
         actorId: {
           type: 'string',
-          description: 'The ID of the actor to retrieve',
+          description: 'The ID of the actor to retrieve (omit when giving sceneId + tokenId)',
+        },
+        sceneId: {
+          type: 'string',
+          description: 'Scene id of the token, required together with tokenId',
+        },
+        tokenId: {
+          type: 'string',
+          description:
+            "Token id: reads that token's own actor (base actor and the token's changes merged, for an unlinked token) instead of actorId",
         },
       },
-      required: ['actorId'],
+      required: [],
     },
   },
   {
     name: 'get_actor_inventory',
     description:
-      "List an actor's owned items (equipment, spells, features) with full system data per item, unlike get_actor_details which only reports the actor's own top-level stats. Use when: checking what a character or NPC carries or knows before an attack, spell, or trade. Do not use when: you only need the actor's HP/AC/abilities - use get_actor_details.",
+      "List an actor's owned items (equipment, spells, features) with full system data per item, unlike get_actor_details which only reports the actor's own top-level stats. Use when: checking what a character or NPC carries or knows before an attack, spell, or trade. For one token on a map, give sceneId + tokenId instead of actorId: an unlinked token lists its own items (those it inherits from its base actor and its own, without the ones removed from it), a linked token its world actor's. Do not use when: you only need the actor's HP/AC/abilities - use get_actor_details.",
     inputSchema: {
       type: 'object',
       properties: {
         actorId: {
           type: 'string',
-          description: 'The ID of the actor whose inventory to list',
+          description:
+            'The ID of the actor whose inventory to list (omit when giving sceneId + tokenId)',
+        },
+        sceneId: {
+          type: 'string',
+          description: 'Scene id of the token, required together with tokenId',
+        },
+        tokenId: {
+          type: 'string',
+          description:
+            "Token id: lists the items of that token's own actor (base actor and the token's changes merged, for an unlinked token) instead of actorId",
         },
       },
-      required: ['actorId'],
+      required: [],
     },
   },
 ];
@@ -3066,13 +3085,25 @@ export const effectTools = [
   {
     name: 'list_actor_effects',
     description:
-      "List the ActiveEffects on a world-linked actor, read from the cached world snapshot (no socket round trip). Only reaches a top-level Actor document - an unlinked token's synthetic per-token actor is not independently listable this way. Use when: checking what buffs/debuffs are currently active on an actor before applying another.",
+      "List the ActiveEffects on an actor, read from the cached world snapshot (no socket round trip). Give actorId for a world actor, or sceneId + tokenId for one token: an unlinked token lists its own effects (those it inherits from its base actor and its own, without the ones removed from it), a linked token its world actor's. Use when: checking what buffs/debuffs are currently active on an actor before applying another.",
     inputSchema: {
       type: 'object',
       properties: {
-        actorId: { type: 'string', description: "The actor's own document id" },
+        actorId: {
+          type: 'string',
+          description: "The actor's own document id (omit when giving sceneId + tokenId)",
+        },
+        sceneId: {
+          type: 'string',
+          description: 'Scene id of the token, required together with tokenId',
+        },
+        tokenId: {
+          type: 'string',
+          description:
+            "Token id: lists the effects of that token's own actor (base actor and the token's changes merged, for an unlinked token) instead of actorId",
+        },
       },
-      required: ['actorId'],
+      required: [],
     },
   },
 ];

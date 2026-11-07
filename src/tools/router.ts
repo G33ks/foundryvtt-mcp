@@ -24,6 +24,7 @@ import {
   handleDeleteWorldActor,
   handleUpdateActorAttribute,
 } from './handlers/actor-mutations.js';
+import type { ActorTargetArgs } from './handlers/actor-target.js';
 import {
   handleGetActorDetails,
   handleGetActorInventory,
@@ -211,16 +212,11 @@ export async function routeToolRequest(
     // Actor tools
     case 'search_actors':
       return handleSearchActors(args, foundryClient);
+    // actorId, or sceneId + tokenId: the handlers check which (actor-target.ts)
     case 'get_actor_details':
-      if (!('actorId' in args) || typeof args.actorId !== 'string') {
-        throw new Error('Missing required parameter: actorId');
-      }
-      return handleGetActorDetails(args as { actorId: string }, foundryClient);
+      return handleGetActorDetails(args as ActorTargetArgs, foundryClient);
     case 'get_actor_inventory':
-      if (!('actorId' in args) || typeof args.actorId !== 'string') {
-        throw new Error('Missing required parameter: actorId');
-      }
-      return handleGetActorInventory(args as { actorId: string }, foundryClient);
+      return handleGetActorInventory(args as ActorTargetArgs, foundryClient);
 
     // Actor mutation tools (laurigates/foundryvtt-mcp#143) — WRITE via the Socket.IO modifyDocument
     // protocol (foundryClient); require FOUNDRY_WRITE_ENABLED=true + a GM user.
@@ -1297,10 +1293,7 @@ export async function routeToolRequest(
         foundryClient,
       );
     case 'list_actor_effects':
-      if (!('actorId' in args) || typeof args.actorId !== 'string') {
-        throw new Error('Missing required parameter: actorId');
-      }
-      return handleListActorEffects(args as { actorId: string }, foundryClient);
+      return handleListActorEffects(args as ActorTargetArgs, foundryClient);
 
     default:
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);

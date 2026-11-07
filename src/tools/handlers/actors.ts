@@ -6,6 +6,12 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
+import {
+  type ActorTargetArgs,
+  isUnlinkedToken,
+  resolveActorTarget,
+  tokenHeaderLine,
+} from './actor-target.js';
 import { withToolError } from './utils.js';
 
 /**
@@ -60,22 +66,20 @@ ${actorList || 'No actors found matching the criteria.'}
 }
 
 /**
- * Handles detailed actor information requests
+ * Handles detailed actor information requests: a world actor by `actorId`,
+ * or one token's actor by `sceneId` + `tokenId` (an unlinked token's own
+ * HP and stats, base actor and delta merged).
  */
-export async function handleGetActorDetails(
-  args: {
-    actorId: string;
-  },
-  foundryClient: FoundryClient,
-) {
-  const { actorId } = args;
-
-  if (!actorId || typeof actorId !== 'string') {
+export async function handleGetActorDetails(args: ActorTargetArgs, foundryClient: FoundryClient) {
+  if (args.actorId !== undefined && (typeof args.actorId !== 'string' || !args.actorId)) {
     throw new McpError(ErrorCode.InvalidParams, 'Actor ID is required and must be a string');
   }
+  const target = resolveActorTarget(args, foundryClient);
 
   return withToolError('get actor details', async () => {
-    const actor = await foundryClient.getActor(actorId);
+    const actor = isUnlinkedToken(target)
+      ? foundryClient.getTokenActor(target.tokenId, target.sceneId)
+      : await foundryClient.getActor(target.actorId);
 
     const abilities = actor.abilities
       ? Object.entries(actor.abilities)
@@ -91,7 +95,7 @@ export async function handleGetActorDetails(
         {
           type: 'text',
           text: `🎭 **Actor Details: ${actor.name}**
-**Type:** ${actor.type}
+${tokenHeaderLine(target)}**Type:** ${actor.type}
 **Level:** ${actor.level || 'Unknown'}
 **Hit Points:** ${actor.hp?.value || 'Unknown'}/${actor.hp?.max || 'Unknown'}
 **Armor Class:** ${actor.ac?.value || 'Unknown'}
@@ -111,23 +115,27 @@ ${abilities}
  *
  * Reads full `system` data from the cached worldData, unlike
  * `get_actor_details`, which only reports the actor's own top-level stats.
+ * For an unlinked token, the items are its base actor's and its delta's
+ * merged (see `FoundryClient.getTokenActorItems`).
  */
-export async function handleGetActorInventory(
-  args: { actorId: string },
-  foundryClient: FoundryClient,
-) {
-  const { actorId } = args;
-
-  if (!actorId || typeof actorId !== 'string') {
-    throw new McpError(ErrorCode.InvalidParams, 'actorId is required and must be a string');
-  }
+export async function handleGetActorInventory(args: ActorTargetArgs, foundryClient: FoundryClient) {
+  const target = resolveActorTarget(args, foundryClient);
 
   return withToolError('get actor inventory', async () => {
-    const items = foundryClient.getActorItems(actorId);
+    const items = isUnlinkedToken(target)
+      ? (foundryClient.getTokenActorItems(target.tokenId, target.sceneId) ?? [])
+      : foundryClient.getActorItems(target.actorId);
 
     if (items.length === 0) {
       return {
-        content: [{ type: 'text', text: `Actor ${actorId} owns no items.` }],
+        content: [
+          {
+            type: 'text',
+            text: isUnlinkedToken(target)
+              ? `${tokenHeaderLine(target)}Token ${target.tokenId}'s actor owns no items.`
+              : `Actor ${target.actorId} owns no items.`,
+          },
+        ],
       };
     }
 
@@ -143,7 +151,7 @@ export async function handleGetActorInventory(
       content: [
         {
           type: 'text',
-          text: `🎒 **Actor Inventory** (${items.length} item${items.length !== 1 ? 's' : ''})\n\n${formatted}`,
+          text: `🎒 **Actor Inventory** (${items.length} item${items.length !== 1 ? 's' : ''})\n${tokenHeaderLine(target)}\n${formatted}`,
         },
       ],
     };

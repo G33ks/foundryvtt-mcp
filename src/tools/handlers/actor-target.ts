@@ -91,16 +91,26 @@ export function resolveActorTarget(
  * client sends to the token's ActorDelta).
  */
 export function actorParentUuid(target: ActorTarget): string {
-  return target.kind === 'token' && !target.linked
+  return isUnlinkedToken(target)
     ? `Scene.${target.sceneId}.Token.${target.tokenId}.Actor.${target.actorId}`
     : `Actor.${target.actorId}`;
 }
 
-/** "token <name> (<id>) on scene <id>" or "actor <id>", for tool output. */
-export function describeActorTarget(target: ActorTarget): string {
-  if (target.kind === 'actor') {
-    return `actor ${target.actorId}`;
+/** Whether a target is an unlinked token, whose actor is its own rather than a world actor. */
+export function isUnlinkedToken(
+  target: ActorTarget,
+): target is Extract<ActorTarget, { kind: 'token' }> {
+  return target.kind === 'token' && !target.linked;
+}
+
+/**
+ * A header line naming the token, for an unlinked token's actor; empty
+ * otherwise, so a world actor's output reads as it always has.
+ */
+export function tokenHeaderLine(target: ActorTarget): string {
+  if (!isUnlinkedToken(target)) {
+    return '';
   }
   const name = target.tokenName ? `${target.tokenName} (${target.tokenId})` : target.tokenId;
-  return `token ${name} on scene ${target.sceneId}${target.linked ? ', linked' : ''}`;
+  return `**Token:** ${name} on scene ${target.sceneId} - unlinked: its own copy of actor ${target.actorId}\n`;
 }

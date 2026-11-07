@@ -10,7 +10,13 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import type { ActorEffectInput } from '../../foundry/types.js';
-import { type ActorTargetArgs, actorParentUuid, resolveActorTarget } from './actor-target.js';
+import {
+  type ActorTargetArgs,
+  actorParentUuid,
+  isUnlinkedToken,
+  resolveActorTarget,
+  tokenHeaderLine,
+} from './actor-target.js';
 import { withToolError } from './utils.js';
 
 type ActorRef = ActorTargetArgs & { actorId: string };
@@ -99,19 +105,23 @@ export async function handleDeleteActorEffect(
   });
 }
 
-export async function handleListActorEffects(
-  args: { actorId: string },
-  foundryClient: FoundryClient,
-) {
-  if (!args.actorId || typeof args.actorId !== 'string') {
-    throw new McpError(ErrorCode.InvalidParams, 'actorId is required and must be a string');
-  }
+/**
+ * Lists a world actor's effects, or one token's: for an unlinked token, its
+ * base actor's and its delta's merged (see `FoundryClient.getTokenActorEffects`).
+ */
+export async function handleListActorEffects(args: ActorTargetArgs, foundryClient: FoundryClient) {
+  const target = resolveActorTarget(args, foundryClient);
 
   return withToolError('list actor effects', async () => {
-    const effects = foundryClient.listActorEffects(args.actorId);
+    const effects = isUnlinkedToken(target)
+      ? (foundryClient.getTokenActorEffects(target.tokenId, target.sceneId) ?? [])
+      : foundryClient.listActorEffects(target.actorId);
+    const header = tokenHeaderLine(target);
     if (effects.length === 0) {
       return {
-        content: [{ type: 'text' as const, text: '✨ **No active effects on this actor.**' }],
+        content: [
+          { type: 'text' as const, text: `${header}✨ **No active effects on this actor.**` },
+        ],
       };
     }
     const lines = effects.map((effect) => `- ${formatEffect(effect)}`.replace(/\n/g, ' | '));
@@ -119,7 +129,7 @@ export async function handleListActorEffects(
       content: [
         {
           type: 'text' as const,
-          text: `✨ **Active Effects** (${effects.length})\n${lines.join('\n')}`,
+          text: `${header}✨ **Active Effects** (${effects.length})\n${lines.join('\n')}`,
         },
       ],
     };

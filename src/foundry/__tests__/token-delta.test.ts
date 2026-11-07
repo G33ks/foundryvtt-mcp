@@ -276,3 +276,26 @@ describe('FoundryClient.resolveTokenActor', () => {
     );
   });
 });
+
+describe('FoundryClient.getTokenActor', () => {
+  it("maps an unlinked token's own actor: its HP, the base actor's id", () => {
+    const { client } = buildClient();
+    expect(client.getTokenActor(TOKEN_ID, SCENE_ID)).toMatchObject({
+      _id: ACTOR_ID,
+      name: 'Ambush Drake',
+      hp: { value: 13, max: 22 },
+    });
+  });
+
+  it('takes the name from the delta when it has one', () => {
+    const { client } = buildClient({ delta: { _id: TOKEN_ID, name: 'Drake leader' } });
+    expect(client.getTokenActor(TOKEN_ID, SCENE_ID).name).toBe('Drake leader');
+  });
+
+  it('maps the world actor for a linked token', () => {
+    const { client } = buildClient();
+    expect(client.getTokenActor(LINKED_TOKEN_ID, SCENE_ID)).toMatchObject({
+      hp: { value: 22, max: 22 },
+    });
+  });
+});
