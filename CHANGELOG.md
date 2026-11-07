@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **One token's actor**: `update_actor_attributes`, `get_actor_details`, `get_actor_inventory`, `list_actor_effects`, `create_actor_item`, `update_actor_item` and `delete_actor_item` take `sceneId` + `tokenId` instead of `actorId` (an `actorId` given as well must be the token's actor). A linked token reads and writes its world actor. An unlinked token reads its own actor — the base actor with the token's changes, its items and effects with those it inherits — and its writes change that token only, not the base actor or its other tokens. From duckpuppy's fork (Patrick Aikens) for the attributes.
+
+### Changed
+
+- `start_combat` begins the encounter at round 1, turn 0, as Foundry's Begin Combat does. From duckpuppy's fork (Patrick Aikens).
+- `get_combat_state`, `next_turn` and `set_initiative` show a combatant's token or actor name when the combatant has none of its own (FoundryVTT v14 leaves it empty), `get_combat_state` the token id and each token's own HP and AC; the AC is left out when the actor has none. From duckpuppy's fork (Patrick Aikens).
+- A status effect from `apply_status_effect` always shows its icon on the token (since v14, a status alone no longer makes an effect temporary, so the icon stayed hidden). From duckpuppy's fork (Patrick Aikens).
+- The effect tools refuse a token that is not in the cache, or that carries another actor than `actorId`, before sending anything; on a linked token they write the world actor.
+
+### Fixed
+
+- `create_actor_effect`, `update_actor_effect` and `delete_actor_effect` given `sceneId` + `tokenId` failed under FoundryVTT v14 for every token, linked or not: they sent a `Scene.<s>.Token.<t>.Actor.<a>` parent, which v14 rejects. `apply_status_effect` failed the same way on unlinked tokens. A linked token now writes its world actor, an unlinked token its ActorDelta. From duckpuppy's fork (Patrick Aikens), completed.
+- The world cache follows unlinked tokens: changes to a token's own data, items and effects, including the first change to an item or effect it inherits (copied from the base actor, as the server does), the removal of one (kept as removed for that token only) and its creation again with the same id (shown again). `refresh_world_data` is no longer needed for them. From duckpuppy's fork (Patrick Aikens), completed.
+- `apply_status_effect` finds a status an unlinked token inherits from its base actor: it is no longer applied a second time, and it can be removed from that token.
+- An effect from `create_actor_effect` with `statuses` shows its icon on the token, as one from `apply_status_effect` does: under v14 the icon stayed hidden. Effects without statuses are unchanged.
+- `update_actor_item` reports the item's name and type: FoundryVTT answers with the changed fields only, so they read `undefined`.
+- The descriptions of `delete_actor_item` and `get_actor_details` no longer say that no tool lists the ids of an actor's items: `get_actor_inventory` does.
+
 ## 2.1.0 — 2026-11-07
 
 ### Added
