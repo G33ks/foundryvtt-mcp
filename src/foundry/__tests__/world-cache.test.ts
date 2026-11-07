@@ -364,6 +364,56 @@ describe('applyDocumentBroadcast — embedded documents', () => {
   });
 });
 
+describe('applyDocumentBroadcast — unlinked token deltas', () => {
+  const tokenUuid = `Scene.${SCENE_ID}.Token.${TOKEN_ID}`;
+  const token = (world: WorldData) => world.scenes[0].tokens?.[0] as Record<string, unknown>;
+
+  it("merges an ActorDelta update into the token's delta, not the base actor", () => {
+    const world = buildWorldData();
+    const applied = applyDocumentBroadcast(world, {
+      type: 'ActorDelta',
+      action: 'update',
+      result: [{ _id: TOKEN_ID, 'system.attributes.hp.value': 13 }],
+      parentUuid: tokenUuid,
+    });
+    expect(applied).toBe(true);
+    expect(token(world).delta).toMatchObject({ system: { attributes: { hp: { value: 13 } } } });
+    expect(world.actors[0].system).toMatchObject({ attributes: { hp: { value: 30 } } });
+  });
+
+  it("adds and removes an effect on the token's delta", () => {
+    const world = buildWorldData();
+    const parentUuid = `${tokenUuid}.ActorDelta.${TOKEN_ID}`;
+    applyDocumentBroadcast(world, {
+      type: 'ActiveEffect',
+      action: 'create',
+      result: [{ _id: 'effect0000000001', name: 'Prone', statuses: ['prone'] }],
+      parentUuid,
+    });
+    expect((token(world).delta as { effects: unknown[] }).effects).toHaveLength(1);
+    applyDocumentBroadcast(world, {
+      type: 'ActiveEffect',
+      action: 'delete',
+      result: ['effect0000000001'],
+      parentUuid,
+    });
+    expect((token(world).delta as { effects: unknown[] }).effects).toHaveLength(0);
+    expect(world.actors[0].effects).toBeUndefined();
+  });
+
+  it('returns false for a token that is not in the cache', () => {
+    const world = buildWorldData();
+    expect(
+      applyDocumentBroadcast(world, {
+        type: 'ActorDelta',
+        action: 'update',
+        result: [{ _id: 'xxxxxxxxxxxxxxxx' }],
+        parentUuid: `Scene.${SCENE_ID}.Token.xxxxxxxxxxxxxxxx`,
+      }),
+    ).toBe(false);
+  });
+});
+
 /**
  * Issue laurigates/foundryvtt-mcp#218 — `activeUsers` is a top-level `WorldData` field, not a document
  * collection, so `modifyDocument` never touches it. FoundryVTT signals presence

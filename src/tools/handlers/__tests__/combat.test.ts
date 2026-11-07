@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { FoundryClient } from '../../../foundry/client.js';
 import type { WorldActor, WorldCombat } from '../../../foundry/types.js';
-import { handleGetCombatState } from '../combat.js';
+import { combatantName, handleGetCombatState } from '../combat.js';
 
 function getText(result: { content: Array<{ type: string; text: string }> }): string {
   return result.content[0]?.text ?? '';
@@ -234,5 +234,37 @@ describe('handleGetCombatState — turn order (laurigates/foundryvtt-mcp#214)', 
     expect(text).toContain('1. [3] **Rex**');
     expect(text).toContain('2. [?] **Ann**');
     expect(text).toContain('3. [?] **Zed**');
+  });
+});
+
+describe('combatantName', () => {
+  const combat = buildCombat({ scene: 'scene00000000000' } as Partial<WorldCombat>);
+  const client = (token?: Record<string, unknown>, actor?: Partial<WorldActor>) =>
+    ({
+      findToken: vi.fn().mockReturnValue(token ? { scene: {}, token } : null),
+      getRawActor: vi.fn().mockReturnValue(actor),
+    }) as unknown as FoundryClient;
+
+  it("prefers the combatant's own name", () => {
+    expect(combatantName(buildCombatant({ name: 'Trepsin' }), combat, client())).toBe('Trepsin');
+  });
+
+  it("falls back to the token's name, which v14 combatants usually leave unset", () => {
+    const c = buildCombatant({
+      name: undefined,
+      tokenId: 'token00000000000',
+    } as Partial<Combatant>);
+    const foundry = client({ name: 'Ambush Drake' });
+    expect(combatantName(c, combat, foundry)).toBe('Ambush Drake');
+    expect(foundry.findToken).toHaveBeenCalledWith('token00000000000', 'scene00000000000');
+  });
+
+  it("falls back to the actor's name, then a placeholder", () => {
+    const c = buildCombatant({
+      name: undefined,
+      actorId: 'actor00000000000',
+    } as Partial<Combatant>);
+    expect(combatantName(c, combat, client(undefined, { name: 'Cultist' }))).toBe('Cultist');
+    expect(combatantName(c, combat, client())).toBe('Unknown combatant');
   });
 });
