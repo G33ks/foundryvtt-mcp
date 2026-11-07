@@ -91,7 +91,7 @@ export const actorTools = [
   {
     name: 'get_actor_details',
     description:
-      'Get details for one actor by id: type, level, current/max HP, AC and ability scores; no biography or description text is returned (the description line always reads "No description available."). Use when: you have an actorId and need its current HP or ability scores - notably as the read-before-write step for update_actor_attributes. For one token on a map, give sceneId + tokenId instead of actorId: an unlinked token (a copy of a monster with its own HP) reports its own values, a linked token the values of its world actor. Do not use when: you only have a name - run search_actors first; or you need the ids of items the actor owns, which this tool does not return (no tool in this server lists owned-item ids - ask the user for the itemId).',
+      'Get details for one actor by id: type, level, current/max HP, AC and ability scores; no biography or description text is returned (the description line always reads "No description available."). Use when: you have an actorId and need its current HP or ability scores - notably as the read-before-write step for update_actor_attributes. For one token on a map, give sceneId + tokenId instead of actorId: an unlinked token (a copy of a monster with its own HP) reports its own values, a linked token the values of its world actor. Do not use when: you only have a name - run search_actors first; or you need the ids of items the actor owns, which this tool does not return - get_actor_inventory lists them.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -149,7 +149,7 @@ export const actorMutationTools = [
   {
     name: 'update_actor_attributes',
     description:
-      'Update fields on an actor\'s system data. Patch keys are dot-paths into actor.system (e.g. "attributes.hp.value", "attributes.hp.temp", "currency.gp", "resources.primary.value", "spells.spell1.value", "attributes.exhaustion") and values are absolute target values, never relative deltas. Validates HP <= max + temp, spell slots <= max, and exhaustion within 0-10 (2024) or 0-6 (2014), and returns the post-update value for every patched path. Use when: applying damage or healing, spending a spell slot or resource, or adjusting currency on a known actorId. For one token on a map - an unlinked copy of a monster, which has its own HP - give sceneId + tokenId instead of actorId: only that token changes, not the base actor or its other copies. Do not use when: changing an item the actor owns (use update_actor_item) or only reading current values (use get_actor_details). ' +
+      'Update fields on an actor\'s system data. Patch keys are dot-paths into actor.system (e.g. "attributes.hp.value", "attributes.hp.temp", "currency.gp", "resources.primary.value", "spells.spell1.value", "attributes.exhaustion") and values are absolute target values, never relative deltas. Validates HP <= max + temp, spell slots <= max, and exhaustion within 0-10 (2024) or 0-6 (2014), and returns the post-update value for every patched path. Use when: applying damage or healing, spending a spell slot or resource, or adjusting currency on a known actorId. For one token on a map - an unlinked copy of a monster, which has its own HP - give sceneId + tokenId instead of actorId: only that token changes, not the base actor or its other copies. Write only stored fields: a field the game system computes from others is accepted and saved by the server, but has no effect in play. Do not use when: changing an item the actor owns (use update_actor_item) or only reading current values (use get_actor_details). ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -387,7 +387,7 @@ export const itemMutationTools = [
   {
     name: 'create_actor_item',
     description:
-      'Create an item on an actor from an inline item document (type, name, system) or by referencing a compendium pack entry (compendium sources require the companion Foundry module). Use when: adding a new weapon, spell, feature, or piece of equipment to a known actorId. Do not use when: editing an item the actor already owns - use update_actor_item. Replacing an item is not atomic: create the replacement first and delete the old one second. Canonical target: D&D 5e v4+ activity schema. ' +
+      'Create an item on an actor from an inline item document (type, name, system) or by referencing a compendium pack entry (compendium sources require the companion Foundry module). Use when: adding a new weapon, spell, feature, or piece of equipment to a known actorId. For one token on a map, give sceneId + tokenId (an actorId given as well must be the actor of the token): an unlinked token gets the item on that token only, a linked token on its world actor. Do not use when: editing an item the actor already owns - use update_actor_item. Replacing an item is not atomic: create the replacement first and delete the old one second. Canonical target: D&D 5e v4+ activity schema. ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -439,7 +439,7 @@ export const itemMutationTools = [
   {
     name: 'update_actor_item',
     description:
-      "Apply a JSON merge patch to an item's system data on an actor: nested paths such as activities.{id}.consumption.targets are supported, values are absolute (arrays replace, null deletes). Use when: changing fields on an item the actor already owns, given actorId + itemId. Do not use when: adding a new item (create_actor_item) or removing one (delete_actor_item). Canonical target: D&D 5e v4+ activity schema. " +
+      "Apply a JSON merge patch to an item's system data on an actor: nested paths such as activities.{id}.consumption.targets are supported, values are absolute (arrays replace, null deletes). Use when: changing fields on an item the actor already owns, given actorId + itemId. For one token on a map, give sceneId + tokenId: on an unlinked token only that token changes, even for an item it inherits from its base actor. Do not use when: adding a new item (create_actor_item) or removing one (delete_actor_item). Canonical target: D&D 5e v4+ activity schema. " +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -474,7 +474,7 @@ export const itemMutationTools = [
   {
     name: 'delete_actor_item',
     description:
-      "Permanently remove an item owned by an actor. Use when: the user explicitly asks to delete or discard a specific owned item, and has given you the itemId - no tool in this server lists owned-item ids, so never guess one. Do not use when: only the item's data needs to change - use update_actor_item. In a replacement or migration flow, run create_actor_item first and this second: the two calls are not atomic, and failing after the delete loses the item. Echo the actorId and itemId back to the user and get their confirmation before calling. " +
+      "Permanently remove an item owned by an actor. Use when: the user explicitly asks to delete or discard a specific owned item, and you have its itemId from the user or from get_actor_inventory (which lists the ids of the items an actor owns) - never guess one. For one token on a map, give sceneId + tokenId: an unlinked token loses the item on that token only, even one it inherits from its base actor. Do not use when: only the item's data needs to change - use update_actor_item. In a replacement or migration flow, run create_actor_item first and this second: the two calls are not atomic, and failing after the delete loses the item. Echo the actorId and itemId back to the user and get their confirmation before calling. " +
       CONFIRM_FIRST +
       ' ' +
       WRITE_GATE,
@@ -1686,7 +1686,7 @@ export const combatMutationTools = [
   {
     name: 'start_combat',
     description:
-      'Start a new combat encounter, seeding combatants from tokens: pass explicit tokenIds, or omit them to seed every token on the scene. Defaults to the active scene when sceneId is omitted. Use when: a fight begins and no combat is running. Do not use when: a combat is already active - check get_combat_state first, since this always creates an additional encounter. ' +
+      'Start a new combat encounter, seeding combatants from tokens: pass explicit tokenIds, or omit them to seed every token on the scene. Defaults to the active scene when sceneId is omitted. The encounter begins at round 1, turn 0, as when the GM clicks Begin Combat in Foundry. Use when: a fight begins and no combat is running. Do not use when: a combat is already active - check get_combat_state first, since this always creates an additional encounter. ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -1766,7 +1766,7 @@ export const tokenMutationTools = [
   {
     name: 'apply_status_effect',
     description:
-      'Apply or remove a status condition (e.g. "prone", "stunned") on a token\'s actor. Set active=false to remove. Matches by status id, so re-applying or clearing-when-absent is a no-op. Use when: a condition is gained or lost. Do not use when: changing numeric state such as HP or exhaustion - use update_actor_attributes. ' +
+      'Apply or remove a status condition (e.g. "prone", "stunned") on a token\'s actor. Set active=false to remove. Matches by status id, so re-applying or clearing-when-absent is a no-op. The status icon is always shown on the token. A game system that defines its own statuses with fixed effect ids may not recognise an effect created here as its own condition. On an unlinked token only that token changes: a status it inherits from its base actor is found and can be removed from that token alone. Use when: a condition is gained or lost. Do not use when: changing numeric state such as HP or exhaustion - use update_actor_attributes. ' +
       WRITE_GATE +
       ' Exception: the no-op cases (applying an already-present status, or clearing an absent one) report success without attempting a write, so they also return normally while writes are disabled.',
     inputSchema: {
@@ -2337,7 +2337,7 @@ export const worldTools = [
   {
     name: 'refresh_world_data',
     description:
-      'Force a re-fetch of the cached world data from the FoundryVTT server. Reads are normally served from a cache that follows live document changes for as long as the connection holds, so this is rarely needed. When the connection drops and comes back with the same session, the world is reloaded on its own in the background. Use when: get_health_status still flags the cache as stale (that reload failed, or changes arrived too fast to replay); or a read still looks stale after an out-of-band change - notably edits to unlinked (synthetic) token actors, which the live update feed does not cover. Refreshes the cache only; it does not modify the world.',
+      'Force a re-fetch of the cached world data from the FoundryVTT server. Reads are normally served from a cache that follows live document changes for as long as the connection holds, so this is rarely needed. When the connection drops and comes back with the same session, the world is reloaded on its own in the background. Use when: get_health_status still flags the cache as stale (that reload failed, or changes arrived too fast to replay); or a read still looks stale after an out-of-band change. Refreshes the cache only; it does not modify the world.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -2963,7 +2963,7 @@ export const effectTools = [
   {
     name: 'create_actor_effect',
     description:
-      "Create a general-purpose ActiveEffect on an actor with mechanical changes (attribute modifiers) and/or a duration - not just a status toggle (use apply_status_effect for that). Give actorId alone for a world-linked actor, or actorId plus the sceneId+tokenId pair together for an unlinked token's synthetic actor. changes[].mode is a named FoundryVTT ACTIVE_EFFECT_MODES combine rule (add/multiply/override/upgrade/downgrade/custom), not a raw number. Use when: applying a spell buff, a debuff, or an equipment bonus with a real mechanical effect. Do not use when: toggling a simple named condition (prone, stunned) - use apply_status_effect. " +
+      'Create a general-purpose ActiveEffect on an actor with mechanical changes (attribute modifiers) and/or a duration - not just a status toggle (use apply_status_effect for that). Give actorId alone for a world actor, or actorId plus the sceneId+tokenId pair for one token: a linked token writes its world actor, an unlinked token only that token (its own copy of the actor), never the base actor or its other tokens. The token must carry actorId. changes[].mode is a named FoundryVTT ACTIVE_EFFECT_MODES combine rule (add/multiply/override/upgrade/downgrade/custom), not a raw number. Use when: applying a spell buff, a debuff, or an equipment bonus with a real mechanical effect. Do not use when: toggling a simple named condition (prone, stunned) - use apply_status_effect. ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -3032,7 +3032,7 @@ export const effectTools = [
   {
     name: 'update_actor_effect',
     description:
-      "Update fields on an existing ActiveEffect - every field replaces the corresponding one on the existing document, omitted fields are left as they are. Same actorId/sceneId+tokenId resolution as create_actor_effect. Use when: a buff's remaining duration changes, or its magnitude scales. Do not use when: the effect should end - use delete_actor_effect. " +
+      "Update fields on an existing ActiveEffect - every field replaces the corresponding one on the existing document, omitted fields are left as they are. Same actorId/sceneId+tokenId resolution as create_actor_effect: on an unlinked token only that token changes, even for an effect it inherits from its base actor. Use when: a buff's remaining duration changes, or its magnitude scales. Do not use when: the effect should end - use delete_actor_effect. " +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -3091,7 +3091,7 @@ export const effectTools = [
   {
     name: 'delete_actor_effect',
     description:
-      'Delete an ActiveEffect from an actor. Same actorId/sceneId+tokenId resolution as create_actor_effect. ' +
+      'Delete an ActiveEffect from an actor. Same actorId/sceneId+tokenId resolution as create_actor_effect: on an unlinked token only that token loses the effect, even one it inherits from its base actor. ' +
       CONFIRM_FIRST +
       ' ' +
       WRITE_GATE,

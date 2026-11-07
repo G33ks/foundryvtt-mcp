@@ -52,7 +52,7 @@ Your AI assistant starts a small relay program for this server. Every relay, fro
 - 🧙 **Token & Actor Control**:
   - **A\* Pathfinding Movement**: tokens navigate around walls and automatically open closed doors along their path (`move_token_pathfind`).
   - **Token Vision & Lighting**: configure sight ranges, vision modes, dim/bright emitted light, and vision detection angles (`update_token_vision`).
-  - **Generalized ActiveEffects**: create, update, delete, and inspect mechanical buffs/debuffs with attribute changes (`key`, `mode`, `value`, `priority`) and durations (`rounds`, `seconds`, `turns`) on top-level or synthetic unlinked token actors (`create_actor_effect`, `update_actor_effect`, `delete_actor_effect`, `list_actor_effects`).
+  - **Generalized ActiveEffects**: create, update, delete, and inspect mechanical buffs/debuffs with attribute changes (`key`, `mode`, `value`, `priority`) and durations (`rounds`, `seconds`, `turns`) on world actors or on one token (an unlinked token changes alone, not its base actor) (`create_actor_effect`, `update_actor_effect`, `delete_actor_effect`, `list_actor_effects`).
   - **Status Conditions**: apply/remove system-agnostic status conditions (`apply_status_effect`).
   - **Compendium Actor & Item Import**: import entire NPC/monster documents from compendium packs with automatic per-item error recovery (`import_compendium_actor`), or import specific items into actor inventories (`create_actor_item`).
   - **System Attribute Mutations**: patch actor system data (HP, temporary HP, currency, resources, spell slots) using JSON merge patches (`update_actor_attributes`).
@@ -354,23 +354,24 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
 - `move_tokens` — batch move multiple tokens simultaneously.
 - `set_target` / `get_targets` — set and inspect token targeting reticles across connected users.
 - `update_token_vision` — configure vision ranges, vision modes, dim/bright emitted lights, and angles.
-- `apply_status_effect` — toggle simple status conditions (`prone`, `stunned`, `blinded`, `invisible`, etc.).
+- `apply_status_effect` — toggle simple status conditions (`prone`, `stunned`, `blinded`, `invisible`, etc.); the token icon is always shown. A game system that defines its own statuses with fixed effect ids may not recognise these as its own conditions.
 
 ### 4. Actors & Inventory
 - `create_world_actor` / `create_full_actor` / `delete_world_actor` — create and delete actor documents.
 - `import_compendium_actor` — import entire NPCs/monsters from compendium packs with embedded items and automatic error recovery.
 - `search_actors` — query actors by name and type with cursor pagination support.
-- `get_actor_details` — retrieve actor system data, statistics, attributes, and health.
-- `update_actor_attributes` — patch nested system data using dot paths (`attributes.hp.value`, `currency.gp`).
-- `get_actor_inventory` — list owned items with full system properties.
+- `get_actor_details` — retrieve actor system data, statistics, attributes, and health; with `sceneId` + `tokenId`, those of one token (an unlinked token has its own).
+- `update_actor_attributes` — patch nested system data using dot paths (`attributes.hp.value`, `currency.gp`), on a world actor or one token. Write stored fields only: a field the game system computes is saved but has no effect in play.
+- `get_actor_inventory` — list owned items with full system properties, of a world actor or one token.
 - `search_items` — search world item documents by name, optionally filtered by type (world items, not owned items).
 - `create_actor_item` — create inline items OR import directly from compendium packs (`source: { type: 'compendium', compendiumId, itemId }`).
 - `update_actor_item` — apply JSON merge patches to owned items.
 - `delete_actor_item` — delete specific items from actor inventories.
-- `create_actor_effect` / `update_actor_effect` / `delete_actor_effect` / `list_actor_effects` — general-purpose ActiveEffects with mechanical changes (`key`, `mode`, `value`, `priority`) and durations on top-level or synthetic unlinked token actors.
+- The three item tools also take `sceneId` + `tokenId`: on an unlinked token, only that token changes.
+- `create_actor_effect` / `update_actor_effect` / `delete_actor_effect` / `list_actor_effects` — general-purpose ActiveEffects with mechanical changes (`key`, `mode`, `value`, `priority`) and durations, on a world actor or one token (on an unlinked token, only that token changes).
 
 ### 5. Combat Encounters
-- `start_combat` — create encounters and seed combatants from scene tokens.
+- `start_combat` — create encounters and seed combatants from scene tokens; the encounter begins at round 1.
 - `get_combat_state` — retrieve combatant turn order, HP, AC, and round number.
 - `set_initiative` — set combatant initiative values and re-order turns.
 - `next_turn` — advance the turn tracker (handles round increments and skips defeated combatants).
