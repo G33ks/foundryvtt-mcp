@@ -3328,6 +3328,12 @@ export class FoundryClient {
     }
     if (effect.statuses) {
       effectData.statuses = effect.statuses;
+      if (effect.statuses.length > 0) {
+        // ACTIVE_EFFECT_SHOW_ICON.ALWAYS, as createActorStatusEffect sets: since
+        // v14 a status alone no longer makes the effect temporary, so the
+        // default (CONDITIONAL) would hide its token icon.
+        effectData.showIcon = 2;
+      }
     }
     if (effect.duration) {
       effectData.duration = effect.duration;

@@ -190,6 +190,27 @@ describe('FoundryClient — generalized ActiveEffects', () => {
     ).rejects.toThrow(/Invalid effect change mode/);
   });
 
+  it('always shows the token icon of an effect that carries statuses', async () => {
+    const { client, socket } = await connectClient();
+    await client.createActorEffect(`Actor.${ACTOR_ID}`, { name: 'Poisoned', statuses: ['poison'] });
+    const modifyCall = socket.emit.mock.calls.find(([event]) => event === 'modifyDocument');
+    const req = modifyCall?.[1] as { operation: { data: Array<Record<string, unknown>> } };
+    expect(req.operation.data[0]).toMatchObject({ statuses: ['poison'], showIcon: 2 });
+  });
+
+  it('leaves showIcon to FoundryVTT for an effect without statuses', async () => {
+    const { client, socket } = await connectClient();
+    await client.createActorEffect(`Actor.${ACTOR_ID}`, { name: 'Blessed' });
+    await client.createActorEffect(`Actor.${ACTOR_ID}`, { name: 'Blessed', statuses: [] });
+    const sent = socket.emit.mock.calls
+      .filter(([event]) => event === 'modifyDocument')
+      .map(([, req]) => (req as { operation: { data: Array<Record<string, unknown>> } }).operation);
+    expect(sent).toHaveLength(2);
+    for (const operation of sent) {
+      expect(operation.data[0]).not.toHaveProperty('showIcon');
+    }
+  });
+
   it('sends the correct parentUuid for a world-linked actor', async () => {
     const { client, socket } = await connectClient();
     await client.createActorEffect(`Actor.${ACTOR_ID}`, { name: 'Blessed' });
