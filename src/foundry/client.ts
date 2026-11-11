@@ -2318,7 +2318,8 @@ export class FoundryClient {
    * A token and the actor it carries, checked.
    *
    * @param actorId - when given, must be the token's actor
-   * @throws when the token isn't in the cache, has no actor, or carries another actor
+   * @throws when the scene or the token isn't in the cache, the token has no
+   *   actor, or carries another actor
    */
   resolveTokenActor(
     tokenId: string,
@@ -2327,6 +2328,9 @@ export class FoundryClient {
   ): { scene: WorldScene; token: Record<string, unknown>; actorId: string; linked: boolean } {
     const found = this.findToken(tokenId, sceneId);
     if (!found) {
+      if (sceneId && this.worldData && !this.worldData.scenes.some((s) => s._id === sceneId)) {
+        throw new Error(`Scene not found: ${sceneId}`);
+      }
       throw new Error(`Token not found: ${tokenId}${sceneId ? ` in scene ${sceneId}` : ''}`);
     }
     const tokenActorId =
