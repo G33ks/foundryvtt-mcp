@@ -6,6 +6,7 @@ import { getCompendiumDocument } from './commands/get-compendium-document.js';
 import { rollAndPost } from './commands/roll-and-post.js';
 import { setTarget } from './commands/set-target.js';
 import { getTargets } from './commands/get-targets.js';
+import { getActorStats } from './commands/get-actor-stats.js';
 import { pingCanvas } from './commands/ping-canvas.js';
 import { setPause } from './commands/set-pause.js';
 import { uploadAsset } from './commands/upload-asset.js';
@@ -21,6 +22,7 @@ const COMMANDS = {
   roll_and_post: (params) => rollAndPost(params),
   set_target: (params) => setTarget(params),
   get_targets: () => getTargets(),
+  get_actor_stats: (params) => getActorStats(params),
   ping_canvas: (params) => pingCanvas(params),
   set_pause: (params) => setPause(params),
   upload_asset: (params) => uploadAsset(params),
