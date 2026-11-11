@@ -39,7 +39,10 @@ node dist/index.js stop         # Stop the shared process (next call starts a fr
    companion module waits for it while it connects (`src/tools/tool-dependencies.ts`)
    → `src/tools/router.ts`
 3. Router dispatches to handler → `src/tools/handlers/`
-4. Handler queries cached worldData → `src/foundry/client.ts`
+4. Handler queries cached worldData → `src/foundry/client.ts`, or sends a command to the
+   companion module (`src/foundry/module-bridge.ts`), which refuses before sending a
+   command the connected module did not announce when it authenticated (a module before
+   0.6.0 announces none and is sent only `LEGACY_COMMANDS`)
 5. Response returned as MCP result
 
 `src/index.ts` only dispatches on the first argument (`daemon`, `status`, `stop`,
