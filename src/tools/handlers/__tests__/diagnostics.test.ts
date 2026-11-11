@@ -13,7 +13,7 @@ import { SystemHealthSchema } from '../../../diagnostics/types.js';
 import type { FoundryClient } from '../../../foundry/client.js';
 import type { HeadlessGmSession } from '../../../foundry/headless-gm-session.js';
 import type { JournalConflict } from '../../../foundry/journal-integrity.js';
-import type { ModuleBridge } from '../../../foundry/module-bridge.js';
+import { ModuleBridge } from '../../../foundry/module-bridge.js';
 import {
   handleDiagnoseErrors,
   handleGetHealthStatus,
@@ -539,15 +539,34 @@ describe('handleGetHealthStatus', () => {
     expect(text).not.toContain('Module Bridge');
   });
 
-  it('reports the bridge connected when a module is dialed in', async () => {
-    const bridge = { isConnected: () => true } as unknown as ModuleBridge;
+  it('reports the bridge connected, with the version the module announced', async () => {
+    const bridge = {
+      isConnected: () => true,
+      describeModuleVersion: () => '0.6.0',
+    } as unknown as ModuleBridge;
 
     const text = getText(
       await handleGetHealthStatus({}, worldClient(true), healthClient(makeHealth()), bridge),
     );
 
     expect(text).toContain('**Module Bridge:**');
-    expect(text).toContain('✅ Connected — authenticated module (protocol v1)');
+    expect(text).toContain('✅ Connected — authenticated module 0.6.0 (protocol v1)');
+  });
+
+  it('reports the installed version of a module that announces none', async () => {
+    const bridge = new ModuleBridge(0, {
+      expectedOrigin: 'http://localhost:30000',
+      installedModuleVersion: () => '0.5.2',
+    });
+    vi.spyOn(bridge, 'isConnected').mockReturnValue(true);
+
+    const text = getText(
+      await handleGetHealthStatus({}, worldClient(true), healthClient(makeHealth()), bridge),
+    );
+
+    expect(text).toContain(
+      '✅ Connected — authenticated module 0.5.2 (not announced) (protocol v1)',
+    );
   });
 
   it('surfaces the headless GM session status when the bridge has no module connected', async () => {

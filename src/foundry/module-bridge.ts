@@ -34,6 +34,12 @@
  * headless session exposes to its page through a Playwright binding. Until
  * step 3 checks out, a connection cannot replace the current module, receives
  * no command, and nothing it sends is processed.
+ *
+ * Since module 0.6.0, `auth_response` also carries `module: {version,
+ * commands}`: the module's version and the commands it serves. The proofs do
+ * not cover it; it only decides which commands the server tries to send (see
+ * {@link ModuleBridge.send}). An older module omits it, and is then sent only
+ * {@link LEGACY_COMMANDS}.
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -41,6 +47,7 @@ import type { IncomingMessage } from 'node:http';
 import { type RawData, WebSocket, WebSocketServer } from 'ws';
 import { isRecord } from '../utils/guards.js';
 import { logger } from '../utils/logger.js';
+import { RefusedError } from '../utils/refusal.js';
 
 /** Version of the authentication handshake spoken by this server. */
 export const BRIDGE_PROTOCOL_VERSION = 1;
@@ -61,6 +68,36 @@ const NONCE_BASE64_LENGTH = 44;
 const AUTH_TIMEOUT_MS = 5000;
 const MAX_PREAUTH_MESSAGE_BYTES = 4096;
 const PROOF_LABEL = 'foundryvtt-mcp-bridge/v1';
+
+/** The commands every module before 0.6.0 serves: all a module that announces none is sent. */
+export const LEGACY_COMMANDS: readonly string[] = [
+  'capture_scene',
+  'get_document_schema',
+  'search_compendium_content',
+  'get_compendium_document',
+  'roll_and_post',
+  'set_target',
+  'get_targets',
+  'ping_canvas',
+  'set_pause',
+  'upload_asset',
+];
+
+/** The module version that first serves each command newer than {@link LEGACY_COMMANDS}. */
+export const COMMAND_SINCE: Readonly<Record<string, string>> = {
+  get_actor_stats: '0.6.0',
+  toggle_status_effect: '0.6.0',
+};
+
+/**
+ * Bounds of the `module` announcement in `auth_response`: at worst (100
+ * names of 32 characters, a 64-character version) the message stays under
+ * {@link MAX_PREAUTH_MESSAGE_BYTES}, so a full announcement cannot fail the handshake.
+ */
+const MAX_ANNOUNCED_VERSION_LENGTH = 64;
+const MAX_ANNOUNCED_COMMANDS = 100;
+const MAX_COMMAND_NAME_LENGTH = 32;
+const COMMAND_NAME_PATTERN = /^[a-z_]+$/;
 
 /** Refusal warnings logged per window; the rest are counted and summarised. */
 const REFUSAL_LOG_LIMIT = 10;
@@ -105,6 +142,62 @@ export interface ModuleBridgeOptions {
   requestTimeoutMs?: number;
   /** How long a connection may stay unauthenticated. */
   authTimeoutMs?: number;
+  /** The module version installed in the world, for messages only; `null` when unknown. */
+  installedModuleVersion?: () => string | null;
+}
+
+/** What the connected module announced in `auth_response`; `null` for what it did not. */
+export interface ModuleAnnouncement {
+  version: string | null;
+  commands: string[] | null;
+}
+
+const NO_ANNOUNCEMENT: ModuleAnnouncement = { version: null, commands: null };
+
+/**
+ * Reads the optional `module` field of an authenticated `auth_response`.
+ * A part that is absent or malformed is left `null`; a malformed one is
+ * logged, and never fails the authentication.
+ */
+export function parseModuleAnnouncement(value: unknown): ModuleAnnouncement {
+  if (value === undefined) {
+    return NO_ANNOUNCEMENT;
+  }
+  if (!isRecord(value)) {
+    logger.warn('Module bridge: ignoring a malformed module announcement');
+    return NO_ANNOUNCEMENT;
+  }
+  let version: string | null = null;
+  if (value.version !== undefined) {
+    if (
+      typeof value.version === 'string' &&
+      value.version.length > 0 &&
+      value.version.length <= MAX_ANNOUNCED_VERSION_LENGTH
+    ) {
+      version = value.version;
+    } else {
+      logger.warn('Module bridge: ignoring a malformed module version');
+    }
+  }
+  let commands: string[] | null = null;
+  if (value.commands !== undefined) {
+    const list: unknown = value.commands;
+    if (
+      Array.isArray(list) &&
+      list.length <= MAX_ANNOUNCED_COMMANDS &&
+      list.every(
+        (name) =>
+          typeof name === 'string' &&
+          name.length <= MAX_COMMAND_NAME_LENGTH &&
+          COMMAND_NAME_PATTERN.test(name),
+      )
+    ) {
+      commands = list.map(String);
+    } else {
+      logger.warn('Module bridge: ignoring a malformed module command list');
+    }
+  }
+  return { version, commands };
 }
 
 function isBridgeMessage(value: unknown): value is BridgeMessage {
@@ -171,6 +264,8 @@ export class ModuleBridge {
   /** The authenticated module connection; unauthenticated ones are never stored here. */
   private socket: WebSocket | null = null;
   private connectedSince: Date | null = null;
+  /** What the current module announced; reset when it disconnects. */
+  private announcement: ModuleAnnouncement = NO_ANNOUNCEMENT;
   private pending = new Map<string, PendingRequest>();
   /** Callers of {@link waitUntilConnected}, woken by the next authentication. */
   private readonly connectionWaiters = new Set<(connected: boolean) => void>();
@@ -179,6 +274,7 @@ export class ModuleBridge {
   private readonly expectedOrigin: string;
   private readonly requestTimeoutMs: number;
   private readonly authTimeoutMs: number;
+  private readonly installedModuleVersion: () => string | null;
   /** HMAC key of the handshake. In memory only: never logged, persisted or returned. */
   private readonly secret = randomBytes(32);
   private readonly refusals = new RefusalLog();
@@ -194,6 +290,7 @@ export class ModuleBridge {
     this.expectedOrigin = options.expectedOrigin;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 15000;
     this.authTimeoutMs = options.authTimeoutMs ?? AUTH_TIMEOUT_MS;
+    this.installedModuleVersion = options.installedModuleVersion ?? (() => null);
   }
 
   /**
@@ -306,7 +403,7 @@ export class ModuleBridge {
       authenticated = true;
       clearTimeout(authTimer);
       ws.send(JSON.stringify({ type: 'auth_ok', proof: verdict.serverProof }));
-      this.adopt(ws, remoteAddress);
+      this.adopt(ws, remoteAddress, parseModuleAnnouncement(verdict.module));
     });
     ws.on('close', () => {
       clearTimeout(authTimer);
@@ -314,6 +411,7 @@ export class ModuleBridge {
         logger.warn('Foundry module disconnected from bridge');
         this.socket = null;
         this.connectedSince = null;
+        this.announcement = NO_ANNOUNCEMENT;
       }
     });
     ws.on('error', (err) => {
@@ -330,10 +428,15 @@ export class ModuleBridge {
   }
 
   /** Makes an authenticated connection the module connection. */
-  private adopt(ws: WebSocket, remoteAddress: string | undefined): void {
+  private adopt(
+    ws: WebSocket,
+    remoteAddress: string | undefined,
+    announcement: ModuleAnnouncement,
+  ): void {
     const previous = this.socket;
     this.socket = ws;
     this.connectedSince = new Date();
+    this.announcement = announcement;
     if (previous) {
       // e.g. the headless page reloaded before its old socket closed.
       previous.terminate();
@@ -343,7 +446,7 @@ export class ModuleBridge {
     } else {
       logger.info(
         `Foundry module connected and authenticated (protocol v${BRIDGE_PROTOCOL_VERSION})`,
-        { remoteAddress },
+        { remoteAddress, moduleVersion: announcement.version ?? '(not announced)' },
       );
     }
     this.wakeConnectionWaiters(true);
@@ -378,7 +481,7 @@ export class ModuleBridge {
   private checkAuthResponse(
     raw: string,
     serverNonce: string,
-  ): { ok: true; serverProof: string } | { ok: false; reason: string } {
+  ): { ok: true; serverProof: string; module: unknown } | { ok: false; reason: string } {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
@@ -405,6 +508,7 @@ export class ModuleBridge {
     return {
       ok: true,
       serverProof: this.hmac('server', serverNonce, parsed.nonce).toString('base64'),
+      module: parsed.module,
     };
   }
 
@@ -448,6 +552,7 @@ export class ModuleBridge {
     this.socket?.close();
     this.socket = null;
     this.connectedSince = null;
+    this.announcement = NO_ANNOUNCEMENT;
     const servers = this.servers;
     this.servers = [];
     await Promise.all(
@@ -479,18 +584,63 @@ export class ModuleBridge {
     return this.isConnected() ? this.connectedSince : null;
   }
 
+  /** What the connected module announced; all `null` while none is connected. */
+  moduleAnnouncement(): ModuleAnnouncement {
+    return this.isConnected() ? this.announcement : NO_ANNOUNCEMENT;
+  }
+
+  /** The module version installed in the world, as the connector's cache has it. */
+  moduleInstalledVersion(): string | null {
+    return this.installedModuleVersion();
+  }
+
+  /**
+   * The connected module's version for display: the announced one, otherwise
+   * `<installed or unknown> (not announced)`.
+   */
+  describeModuleVersion(): string {
+    return (
+      this.moduleAnnouncement().version ??
+      `${this.installedModuleVersion() ?? 'unknown'} (not announced)`
+    );
+  }
+
+  /**
+   * Whether the connected module serves `type`: one of the commands it
+   * announced, or of {@link LEGACY_COMMANDS} when it announced none.
+   */
+  supports(type: string): boolean {
+    return (this.moduleAnnouncement().commands ?? LEGACY_COMMANDS).includes(type);
+  }
+
+  /**
+   * Why the connected module cannot be sent `type`: the refusal of
+   * {@link send}, also quoted by a tool that needs a command it lacks.
+   */
+  missingCommandMessage(type: string): string {
+    const since = COMMAND_SINCE[type];
+    return (
+      `the connected companion module ${this.describeModuleVersion()} does not provide '${type}'` +
+      (since ? `, which needs ${since} or later` : '')
+    );
+  }
+
   /**
    * Sends a command to the connected module and awaits its response.
    *
-   * @throws if no module is connected, or the module reports an error, or
-   *   the request times out (the module hung, or the command type is unknown
-   *   to it).
+   * @throws if no module is connected or the module does not serve `type`
+   *   (see {@link supports}; a {@link RefusedError}) — both before anything
+   *   is sent — or if the module reports an error, or the request times out
+   *   (the module hung).
    */
   send(type: string, params: Record<string, unknown> = {}): Promise<unknown> {
     if (!this.isConnected() || !this.socket) {
       throw new Error(
         'No authenticated Foundry module connected to the bridge. Install and enable the companion module (0.5.0 or later), confirm FOUNDRY_MODULE_BRIDGE_ENABLED=true, and check that the headless GM session is logged in.',
       );
+    }
+    if (!this.supports(type)) {
+      throw new RefusedError(this.missingCommandMessage(type));
     }
     const id = String(this.nextId++);
     const socket = this.socket;

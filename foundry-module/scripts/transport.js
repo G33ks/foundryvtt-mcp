@@ -11,6 +11,10 @@
  * and the server's `auth_ok` must carry the proof `prove()` predicted. Until
  * then no command is executed and no event is sent; any deviation closes the
  * socket and falls back to the usual reconnect cycle.
+ *
+ * Since 0.6.0, `auth_response` also announces `module: {version, commands}`,
+ * so the server only sends commands this module serves. Servers before 2.2.0
+ * ignore the field.
  */
 
 const WS_OPEN = 1;
@@ -26,16 +30,24 @@ const CLOSE_UNAUTHORIZED = 4401;
  * @property {(serverNonce: string) => Promise<{nonce: string, clientProof: string, serverProof: string}>} prove
  */
 
+/**
+ * @typedef {object} ModuleAnnouncement
+ * @property {string} version  this module's version
+ * @property {string[]} commands  the commands it serves
+ */
+
 export class BridgeTransport {
   /**
    * @param {string} url
    * @param {(type: string, params: Record<string, unknown>) => Promise<unknown>} onCommand
    * @param {BridgeCredentials} credentials
+   * @param {ModuleAnnouncement | null} [announcement]  sent in `auth_response` when given
    */
-  constructor(url, onCommand, credentials) {
+  constructor(url, onCommand, credentials, announcement = null) {
     this.url = url;
     this.onCommand = onCommand;
     this.credentials = credentials;
+    this.announcement = announcement;
     /** @type {WebSocket | null} */
     this.socket = null;
     /** @type {'challenge' | 'proving' | 'confirming' | 'authenticated'} */
@@ -144,6 +156,7 @@ export class BridgeTransport {
           protocol: PROTOCOL_VERSION,
           nonce: proof.nonce,
           proof: proof.clientProof,
+          ...(this.announcement ? { module: this.announcement } : {}),
         }),
       );
       return;

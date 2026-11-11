@@ -29,6 +29,7 @@ const { FoundryCore } = await import('../core.js');
 const { logger } = await import('../utils/logger.js');
 const { RefusedError, refusalError } = await import('../utils/refusal.js');
 const { withToolError } = await import('../tools/handlers/utils.js');
+const { ModuleBridge } = await import('../foundry/module-bridge.js');
 
 describe('FoundryCore tool logging', () => {
   let info: ReturnType<typeof vi.spyOn>;
@@ -104,6 +105,49 @@ describe('FoundryCore tool logging', () => {
     await expect(core.callTool('update_journal_page', {})).rejects.toThrow(McpError);
     expect(error).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it("logs a command the module lacks as a refusal, with the bridge's message", async () => {
+    const bridge = new ModuleBridge(0, {
+      expectedOrigin: 'http://localhost:30000',
+      installedModuleVersion: () => '0.5.2',
+    });
+    const socketSend = vi.fn();
+    Reflect.set(bridge, 'socket', { readyState: 1, send: socketSend });
+    const core = new FoundryCore();
+    Reflect.set(core, 'moduleBridge', bridge);
+    const sending = (type: string) =>
+      route.mockImplementation(() =>
+        withToolError('capture scene', async () => bridge.send(type, {})),
+      );
+
+    // A module that announces nothing: its installed version, marked so.
+    sending('get_actor_stats');
+    const legacy =
+      "the connected companion module 0.5.2 (not announced) does not provide 'get_actor_stats', which needs 0.6.0 or later";
+    const call = core.callTool('capture_scene', {});
+    await expect(call).rejects.toMatchObject({ code: ErrorCode.InvalidRequest });
+    await expect(call).rejects.toThrow(`MCP error -32600: ${legacy}`);
+    expect(warn).toHaveBeenCalledWith('Tool call refused', {
+      name: 'capture_scene',
+      reason: legacy,
+    });
+
+    // A module that announces itself: its version alone.
+    Reflect.set(bridge, 'announcement', { version: '0.6.0', commands: ['get_targets'] });
+    sending('capture_scene');
+    const announced = "the connected companion module 0.6.0 does not provide 'capture_scene'";
+    await expect(core.callTool('capture_scene', {})).rejects.toThrow(
+      refusalError(ErrorCode.InvalidRequest, announced),
+    );
+    expect(warn).toHaveBeenCalledWith('Tool call refused', {
+      name: 'capture_scene',
+      reason: announced,
+    });
+
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(error).not.toHaveBeenCalled();
+    expect(socketSend).not.toHaveBeenCalled();
   });
 
   it('still logs real failures as errors', async () => {
