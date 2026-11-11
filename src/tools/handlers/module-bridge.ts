@@ -74,7 +74,49 @@ export async function handleCaptureScene(
 interface DocumentSchemaResult {
   documentType: string;
   type: string;
+  /** Absent from modules before 0.6.0, which only read DataModel schemas. */
+  source?: 'datamodel' | 'template';
   fields: Record<string, unknown>;
+}
+
+/** What a template-declared schema is, ahead of its JSON. */
+const TEMPLATE_SCHEMA_NOTE =
+  '_Declared by template.json: no schema, only default values; each type is inferred from its value (`inferred: true`)._\n';
+
+/** The "Schema source:" line: a module before 0.6.0 sends no source and only reads DataModels. */
+function schemaSourceLine(source: DocumentSchemaResult['source']): string {
+  return `Schema source: ${source === 'template' ? 'template.json (types inferred)' : 'DataModel'}\n`;
+}
+
+/**
+ * A field description without a `min` or `max` that is not a finite number:
+ * an unbounded side arrives as `null` (JSON has no Infinity) and bounds
+ * nothing. Sub-fields (`fields`) and array elements (`element`) are cleaned
+ * alike; anything else is kept as sent.
+ */
+function withFiniteBounds(node: unknown): unknown {
+  if (!isRecord(node)) {
+    return node;
+  }
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(node)) {
+    if (
+      (key === 'min' || key === 'max') &&
+      !(typeof value === 'number' && Number.isFinite(value))
+    ) {
+      continue;
+    }
+    if (key === 'fields' && isRecord(value)) {
+      out.fields = Object.fromEntries(
+        Object.entries(value).map(([name, field]) => [name, withFiniteBounds(field)]),
+      );
+    } else if (key === 'element') {
+      out.element = withFiniteBounds(value);
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
 }
 
 function isDocumentSchemaResult(value: unknown): value is DocumentSchemaResult {
@@ -83,7 +125,7 @@ function isDocumentSchemaResult(value: unknown): value is DocumentSchemaResult {
     value !== null &&
     typeof (value as DocumentSchemaResult).documentType === 'string' &&
     typeof (value as DocumentSchemaResult).type === 'string' &&
-    typeof (value as DocumentSchemaResult).fields === 'object'
+    isRecord((value as DocumentSchemaResult).fields)
   );
 }
 
@@ -121,11 +163,14 @@ export async function handleGetDocumentSchema(
       );
     }
 
+    const fields = Object.fromEntries(
+      Object.entries(result.fields).map(([name, field]) => [name, withFiniteBounds(field)]),
+    );
     return {
       content: [
         {
           type: 'text',
-          text: `🧬 **${result.documentType} Schema: ${result.type}**\n\`\`\`json\n${JSON.stringify(result.fields, null, 2)}\n\`\`\``,
+          text: `🧬 **${result.documentType} Schema: ${result.type}**\n${schemaSourceLine(result.source)}${result.source === 'template' ? TEMPLATE_SCHEMA_NOTE : ''}\`\`\`json\n${JSON.stringify(fields, null, 2)}\n\`\`\``,
         },
       ],
     };

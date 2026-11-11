@@ -39,6 +39,74 @@ describe('handleGetDocumentSchema', () => {
     });
   });
 
+  it('says when a schema comes from template.json defaults', async () => {
+    const bridge = buildBridge(() => ({
+      documentType: 'Actor',
+      type: 'legacy',
+      source: 'template',
+      fields: { level: { type: 'Number', inferred: true, initial: 1 } },
+    }));
+
+    const result = await handleGetDocumentSchema({ documentType: 'Actor', type: 'legacy' }, bridge);
+
+    const text = result.content[0].text;
+    expect(text).toContain('Declared by template.json');
+    expect(text).toContain('"inferred": true');
+  });
+
+  it('names the schema source: DataModel, or template.json with inferred types', async () => {
+    const answer = (source?: string) =>
+      buildBridge(() => ({ documentType: 'Actor', type: 'hero', source, fields: {} }));
+    const header = async (source?: string) =>
+      (await handleGetDocumentSchema({ documentType: 'Actor', type: 'hero' }, answer(source)))
+        .content[0].text;
+
+    expect(await header('datamodel')).toContain(
+      '🧬 **Actor Schema: hero**\nSchema source: DataModel\n```json',
+    );
+    // A module before 0.6.0 sends no source: it only reads DataModels.
+    expect(await header(undefined)).toContain('\nSchema source: DataModel\n');
+    expect(await header('template')).toContain(
+      '🧬 **Actor Schema: hero**\nSchema source: template.json (types inferred)\n_Declared by template.json',
+    );
+  });
+
+  it('leaves out a min or max that is not a finite number, at any depth', async () => {
+    const bridge = buildBridge(() => ({
+      documentType: 'Actor',
+      type: 'hero',
+      source: 'datamodel',
+      fields: {
+        level: { type: 'Number', min: 1, max: null, integer: true },
+        pool: {
+          type: 'Schema',
+          fields: {
+            value: { type: 'Number', min: null, max: 10 },
+            min: { type: 'Number', min: 0, max: 'Infinity' },
+          },
+        },
+        marks: { type: 'Array', element: { type: 'Number', min: -1, max: {} } },
+      },
+    }));
+
+    const text = (await handleGetDocumentSchema({ documentType: 'Actor', type: 'hero' }, bridge))
+      .content[0].text;
+    const json = JSON.parse(text.slice(text.indexOf('```json\n') + 8, text.lastIndexOf('\n```')));
+
+    expect(json).toEqual({
+      level: { type: 'Number', min: 1, integer: true },
+      pool: {
+        type: 'Schema',
+        fields: {
+          value: { type: 'Number', max: 10 },
+          // A sub-field named "min" is a field, not a bound.
+          min: { type: 'Number', min: 0 },
+        },
+      },
+      marks: { type: 'Array', element: { type: 'Number', min: -1 } },
+    });
+  });
+
   it('rejects a documentType other than Actor or Item', async () => {
     const bridge = buildBridge(() => ({}));
     await expect(
