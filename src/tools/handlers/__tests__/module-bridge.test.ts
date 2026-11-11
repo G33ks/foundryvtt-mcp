@@ -38,6 +38,21 @@ describe('handleGetDocumentSchema', () => {
     });
   });
 
+  it('says when a schema comes from template.json defaults', async () => {
+    const bridge = buildBridge(() => ({
+      documentType: 'Actor',
+      type: 'legacy',
+      source: 'template',
+      fields: { level: { type: 'Number', inferred: true, initial: 1 } },
+    }));
+
+    const result = await handleGetDocumentSchema({ documentType: 'Actor', type: 'legacy' }, bridge);
+
+    const text = result.content[0].text;
+    expect(text).toContain('Declared by template.json');
+    expect(text).toContain('"inferred": true');
+  });
+
   it('rejects a documentType other than Actor or Item', async () => {
     const bridge = buildBridge(() => ({}));
     await expect(
