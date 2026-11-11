@@ -2879,6 +2879,40 @@ export const moduleBridgeTools = [
     },
   },
   {
+    name: 'get_actor_stats',
+    description:
+      "Read the actor's prepared system data, including values the system computes and does not store, as compact JSON. The cached world behind get_actor_details only holds stored data. Give actorId for a world actor, or sceneId + tokenId for one token on a map: a linked token reads its world actor, an unlinked token its own copy (base actor plus the token's changes). paths narrows the answer to some fields; an answer over maxBytes is refused with the size of each top-level key, so you can choose paths. Requires the companion Foundry module 0.6.0 or later. Use when: you need a value the game system derives (a maximum, a total, a modifier) or the current state of one token. Do not use when: you need items, effects or the stored source only - use get_actor_inventory, list_actor_effects or get_actor_details.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        actorId: {
+          type: 'string',
+          description:
+            "The world actor's id. With sceneId + tokenId, optional: it must be the token's actor",
+        },
+        sceneId: {
+          type: 'string',
+          description: 'Scene of the token to read, together with tokenId',
+        },
+        tokenId: {
+          type: 'string',
+          description: 'Token to read (an unlinked token has its own data), together with sceneId',
+        },
+        paths: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Optional dot paths into system (a "system." prefix is accepted), at most 50. The answer then holds "values" keyed by path and the "missing" paths instead of the whole "system"',
+        },
+        maxBytes: {
+          type: 'number',
+          description:
+            'Largest answer accepted, in bytes of compact JSON (default 32768, at most 65536)',
+        },
+      },
+    },
+  },
+  {
     name: 'get_targets',
     description:
       'List the current target selections of all connected users on the active canvas. Returns each user with the tokens they currently have targeted. Requires the companion Foundry module. Use when: checking who players are aiming at or focusing on.',
