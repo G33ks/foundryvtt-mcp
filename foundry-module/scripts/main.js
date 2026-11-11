@@ -74,6 +74,11 @@ Hooks.once('ready', async () => {
       return handler(params);
     },
     credentials,
+    // Tells the server which commands this version serves (see transport.js).
+    {
+      version: game.modules.get(MODULE_ID)?.version ?? 'unknown',
+      commands: Object.keys(COMMANDS),
+    },
   );
   transport.connect();
 
