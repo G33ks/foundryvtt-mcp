@@ -740,6 +740,7 @@ export async function routeToolRequest(
       return handleApplyStatusEffect(
         args as { tokenId: string; statusId: string; active?: boolean; sceneId?: string },
         foundryClient,
+        moduleBridge,
       );
     case 'spawn_token':
       if (!('actorId' in args) || typeof args.actorId !== 'string') {

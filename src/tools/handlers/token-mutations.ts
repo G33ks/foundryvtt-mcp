@@ -11,8 +11,17 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
+import type { ModuleBridge } from '../../foundry/module-bridge.js';
 import type { WorldEffect } from '../../foundry/types.js';
+import { isRecord } from '../../utils/guards.js';
 import { withToolError } from './utils.js';
+
+/** How apply_status_effect wrote, as its answer says. */
+const STATUS_PATH = {
+  module: 'game system (Actor#toggleStatusEffect through the companion module)',
+  socket: 'socket (an ActiveEffect carrying the status)',
+  none: 'none (no change needed)',
+} as const;
 
 /** Raw token fields we read to resolve its actor and link state. */
 interface TokenActorRef {
@@ -86,6 +95,7 @@ export async function handleMoveToken(
 export async function handleApplyStatusEffect(
   args: { tokenId: string; statusId: string; active?: boolean; sceneId?: string },
   foundryClient: FoundryClient,
+  moduleBridge: ModuleBridge | null = null,
 ) {
   const { tokenId, statusId, sceneId } = args;
   const active = args.active ?? true;
@@ -127,44 +137,113 @@ export async function handleApplyStatusEffect(
   const existing = effects.find((e) => e.statuses?.includes(statusId));
 
   return withToolError('apply status effect', async () => {
-    if (active) {
-      if (existing) {
-        return statusResult(
-          `Status effect '${statusId}' is already active on ${token.name ?? tokenId}.`,
-          tokenId,
-          located.scene,
-          statusId,
-          true,
-        );
-      }
-      const effect = await foundryClient.createActorStatusEffect(parentActorUuid, statusId);
+    // The module's path when a module announcing it is connected (FoundryCore
+    // waited for one on its way): the module decides itself whether the call
+    // changes anything. While writes are disabled, the cache decides, below.
+    if (foundryClient.isWriteEnabled() && moduleBridge?.supports('toggle_status_effect')) {
+      const outcome = await moduleBridge.send('toggle_status_effect', {
+        target: { sceneId: located.scene._id, tokenId, actorId },
+        statusId,
+        active,
+      });
       return statusResult(
-        `Applied status effect '${statusId}' (effect ${effect._id}).`,
+        moduleStatusSummary(outcome, statusId, active, token.name ?? tokenId),
+        tokenId,
+        located.scene,
+        statusId,
+        active,
+        STATUS_PATH.module,
+      );
+    }
+
+    // The no-op cases are decided from the cache.
+    if (active && existing) {
+      return statusResult(
+        `Status effect '${statusId}' is already active on ${token.name ?? tokenId}.`,
         tokenId,
         located.scene,
         statusId,
         true,
+        STATUS_PATH.none,
       );
     }
-
-    if (!existing) {
+    if (!active && !existing) {
       return statusResult(
         `Status effect '${statusId}' is not active on ${token.name ?? tokenId}; nothing to remove.`,
         tokenId,
         located.scene,
         statusId,
         false,
+        STATUS_PATH.none,
       );
     }
-    await foundryClient.deleteActorEffect(parentActorUuid, existing._id);
+
+    if (!active && existing) {
+      await foundryClient.deleteActorEffect(parentActorUuid, existing._id);
+      return statusResult(
+        `Removed status effect '${statusId}' (effect ${existing._id}).`,
+        tokenId,
+        located.scene,
+        statusId,
+        false,
+        STATUS_PATH.socket,
+      );
+    }
+    const effect = await foundryClient.createActorStatusEffect(parentActorUuid, statusId);
     return statusResult(
-      `Removed status effect '${statusId}' (effect ${existing._id}).`,
+      `Applied status effect '${statusId}' (effect ${effect._id}).`,
       tokenId,
       located.scene,
       statusId,
-      false,
+      true,
+      STATUS_PATH.socket,
     );
   });
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
+
+/**
+ * What the module's toggle_status_effect did, as one or two lines: applied or
+ * already there (with the earlier-version effects that also carry the
+ * status), removed (with their ids), or nothing to remove.
+ */
+function moduleStatusSummary(
+  outcome: unknown,
+  statusId: string,
+  active: boolean,
+  name: string,
+): string {
+  const unexpected = () =>
+    new McpError(
+      ErrorCode.InternalError,
+      'Module returned an unexpected toggle_status_effect shape',
+    );
+  if (!isRecord(outcome) || outcome.active !== active || typeof outcome.changed !== 'boolean') {
+    throw unexpected();
+  }
+  if (!active) {
+    if (!isStringArray(outcome.removed)) {
+      throw unexpected();
+    }
+    return outcome.removed.length > 0
+      ? `Removed status effect '${statusId}' (effect${outcome.removed.length > 1 ? 's' : ''} ${outcome.removed.join(', ')}).`
+      : `Status effect '${statusId}' is not active on ${name}; nothing to remove.`;
+  }
+  const { effectId, legacy } = outcome;
+  if ((effectId !== null && typeof effectId !== 'string') || !isStringArray(legacy)) {
+    throw unexpected();
+  }
+  const summary = outcome.changed
+    ? `Applied status effect '${statusId}' (effect ${effectId}).`
+    : effectId
+      ? `Status effect '${statusId}' is already active on ${name} (effect ${effectId}).`
+      : `The game system did not create status effect '${statusId}' on ${name}.`;
+  return legacy.length > 0
+    ? `${summary}\nEffect(s) ${legacy.join(', ')} from an earlier version also carry this status; active=false removes them.`
+    : summary;
 }
 
 /** Builds the MCP text result for a status-effect mutation. */
@@ -174,6 +253,7 @@ function statusResult(
   scene: { _id: string; name: string },
   statusId: string,
   active: boolean,
+  path: string,
 ) {
   return {
     content: [
@@ -183,6 +263,7 @@ function statusResult(
 **Token:** ${tokenId}
 **Scene:** ${scene.name} (${scene._id})
 **Status:** ${statusId}
+**Path:** ${path}
 ${summary}`,
       },
     ],

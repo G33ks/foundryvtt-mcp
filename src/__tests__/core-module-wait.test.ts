@@ -124,6 +124,62 @@ describe('FoundryCore: calls that need the companion module', () => {
     expect(route).toHaveBeenCalledWith('get_actor_stats');
   });
 
+  it('lets apply_status_effect wait for a module on its way, then run', async () => {
+    const core = new FoundryCore();
+    const bridge = internals(core).moduleBridge;
+    if (!bridge) {
+      throw new Error('no bridge');
+    }
+    const wait = vi.spyOn(bridge, 'waitUntilConnected').mockResolvedValue(true);
+    vi.spyOn(core.foundryClient, 'isReconnecting').mockReturnValue(false);
+    vi.spyOn(core.foundryClient, 'isWriteEnabled').mockReturnValue(true);
+
+    await core.callTool('apply_status_effect', { tokenId: 't', statusId: 's' });
+
+    expect(wait).toHaveBeenCalledWith(BRIDGE_CONNECT_WAIT_MS);
+    expect(route).toHaveBeenCalledWith('apply_status_effect');
+  });
+
+  it('runs apply_status_effect anyway when the module does not come in time', async () => {
+    const core = new FoundryCore();
+    const bridge = internals(core).moduleBridge;
+    if (!bridge) {
+      throw new Error('no bridge');
+    }
+    const wait = vi.spyOn(bridge, 'waitUntilConnected').mockResolvedValue(false);
+    vi.spyOn(core.foundryClient, 'isReconnecting').mockReturnValue(false);
+    vi.spyOn(core.foundryClient, 'isWriteEnabled').mockReturnValue(true);
+
+    await core.callTool('apply_status_effect', { tokenId: 't', statusId: 's' });
+
+    expect(wait).toHaveBeenCalledTimes(1);
+    expect(route).toHaveBeenCalledWith('apply_status_effect');
+  });
+
+  it('runs apply_status_effect at once when the module cannot come or writes are off', async () => {
+    const disabled = (() => {
+      testConfig.moduleBridge = { enabled: false, port: 31415 };
+      return new FoundryCore();
+    })();
+    vi.spyOn(disabled.foundryClient, 'isReconnecting').mockReturnValue(false);
+    vi.spyOn(disabled.foundryClient, 'isWriteEnabled').mockReturnValue(true);
+    await disabled.callTool('apply_status_effect', { tokenId: 't', statusId: 's' });
+    expect(route).toHaveBeenCalledTimes(1);
+
+    testConfig.moduleBridge = { enabled: true, port: 31415 };
+    const readOnly = new FoundryCore();
+    const bridge = internals(readOnly).moduleBridge;
+    if (!bridge) {
+      throw new Error('no bridge');
+    }
+    const wait = vi.spyOn(bridge, 'waitUntilConnected').mockResolvedValue(true);
+    vi.spyOn(readOnly.foundryClient, 'isReconnecting').mockReturnValue(false);
+    vi.spyOn(readOnly.foundryClient, 'isWriteEnabled').mockReturnValue(false);
+    await readOnly.callTool('apply_status_effect', { tokenId: 't', statusId: 's' });
+    expect(wait).not.toHaveBeenCalled();
+    expect(route).toHaveBeenCalledTimes(2);
+  });
+
   it('does not wait for the module on an inline item, but does on a compendium one', async () => {
     const core = new FoundryCore();
     const bridge = internals(core).moduleBridge;
