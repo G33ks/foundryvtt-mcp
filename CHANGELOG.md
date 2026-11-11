@@ -5,9 +5,13 @@
 ### Added
 
 - **One token's actor**: `update_actor_attributes`, `get_actor_details`, `get_actor_inventory`, `list_actor_effects`, `create_actor_item`, `update_actor_item` and `delete_actor_item` take `sceneId` + `tokenId` instead of `actorId` (an `actorId` given as well must be the token's actor). A linked token reads and writes its world actor. An unlinked token reads its own actor — the base actor with the token's changes, its items and effects with those it inherits — and its writes change that token only, not the base actor or its other tokens. From duckpuppy's fork (Patrick Aikens) for the attributes.
+- **`get_actor_stats`**: an actor's prepared system data as compact JSON, including the values the game system computes and does not store, which the cached world cannot show. A world actor by `actorId`, or one token by `sceneId` + `tokenId` (an unlinked token's own actor). `paths` narrows the answer to some fields; `maxBytes` (default 32768, at most 65536) bounds it, and a larger answer is refused with the size of each top-level key. Needs the companion module 0.6.0. From duckpuppy's fork (Patrick Aikens), made generic.
+- `create_world_actor` takes optional `flags`, keyed by module id, written to the new actor. From duckpuppy's fork (Patrick Aikens).
+- **Companion module 0.6.0 announces its version and commands** when it connects. The server sends it no command it does not announce, and sends a module that announces nothing only the commands every 0.5 module serves; a newer command then fails at once with a clear message. `status` and `get_health_status` show the module's version: the announced one, otherwise the version installed in the world, marked `(not announced)`. Module 0.6.0 also works with earlier servers, which ignore the announcement.
 
 ### Changed
 
+- `apply_status_effect` goes through the game system's own status toggle when the companion module 0.6.0 is connected, so the system recognises the effect as its condition; otherwise it keeps writing an effect carrying the status over the socket. With the bridge enabled it first waits up to 10 s for a module still connecting, as the module's tools do, but never fails for want of it. Through the module, effects carrying the status that an earlier version wrote over the socket are reported when applying and removed with `active=false`. While writes are disabled, the no-op cases are decided from the cache as before. The answer names the path used.
 - `start_combat` begins the encounter at round 1, turn 0, as Foundry's Begin Combat does. From duckpuppy's fork (Patrick Aikens).
 - `get_combat_state`, `next_turn` and `set_initiative` show a combatant's token or actor name when the combatant has none of its own (FoundryVTT v14 leaves it empty), `get_combat_state` the token id and each token's own HP and AC; the AC is left out when the actor has none. From duckpuppy's fork (Patrick Aikens).
 - A status effect from `apply_status_effect` always shows its icon on the token (since v14, a status alone no longer makes an effect temporary, so the icon stayed hidden). From duckpuppy's fork (Patrick Aikens).
@@ -20,7 +24,12 @@
 - `apply_status_effect` finds a status an unlinked token inherits from its base actor: it is no longer applied a second time, and it can be removed from that token.
 - An effect from `create_actor_effect` with `statuses` shows its icon on the token, as one from `apply_status_effect` does: under v14 the icon stayed hidden. Effects without statuses are unchanged.
 - `update_actor_item` reports the item's name and type: FoundryVTT answers with the changed fields only, so they read `undefined`.
+- `get_document_schema` failed on a type declared only by template.json, which has no schema. With the companion module 0.6.0 it lists that type's default values, with types inferred from them and marked as such; for a DataModel type it also reports computed fields (`persisted: false`) and number bounds (`min`, `max`, `integer`, `positive`).
 - The descriptions of `delete_actor_item` and `get_actor_details` no longer say that no tool lists the ids of an actor's items: `get_actor_inventory` does.
+
+### Known limitations
+
+- Without the companion module 0.6.0, `apply_status_effect` still writes an effect that a game system defining its own statuses with fixed effect ids may not recognise as its condition (it is removed later through the module with `active=false`). Through the module, an effect carrying several statuses, this one among them, is never removed by this tool.
 
 ## 2.1.0 — 2026-11-07
 

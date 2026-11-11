@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22%2B-green.svg)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-6-blue.svg)](https://www.typescriptlang.org/)
-[![Tools](https://img.shields.io/badge/MCP%20Tools-114-purple.svg)](https://modelcontextprotocol.io/)
+[![Tools](https://img.shields.io/badge/MCP%20Tools-115-purple.svg)](https://modelcontextprotocol.io/)
 
 A comprehensive, production-grade [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server for **Foundry Virtual Tabletop (FoundryVTT)**.
 
@@ -28,13 +28,13 @@ Your AI assistant starts a small relay program for this server. Every relay, fro
 - **Live world cache**: on connect, the server loads the world over Socket.IO and keeps it in memory; every `modifyDocument` broadcast — from the AI's own writes or from any user in Foundry — updates it, so reads are instant and stay current. `refresh_world_data` forces a full reload.
 - **Socket.IO connection**: authenticates as `FOUNDRY_USERNAME` (Assistant GM role recommended) and performs every write over Foundry's core `modifyDocument` protocol — only when `FOUNDRY_WRITE_ENABLED=true`. It is the only side that logs in: when Foundry forgets its session (server restart, world shut down) it logs in again by itself, retrying every 5 s at first and at most every 2 min, and tool calls made meanwhile wait up to 15 s before being refused with the reason.
 - **Invisible GM session**: started when `FOUNDRY_MODULE_BRIDGE_ENABLED=true`. The shared process drives a background browser through `playwright-core`: the first one found among Chrome, Edge, Brave, Vivaldi, a system Chromium and Playwright's own Chromium (`npx playwright install chromium`), or the Chromium-based browser set in `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH`. The page shares the Socket.IO connection's session — one account, one login — and never fills the `/join` form: Foundry keeps several connections per session, so neither ejects the other. The page stays on `/game` (a navigation elsewhere, such as **Log Out**, is blocked and the page reloads `/game`, because leaving would log the shared session out). A watchdog reloads the page if the module stays disconnected for about a minute. Advanced: `FOUNDRY_HEADLESS_GM_USERNAME` / `FOUNDRY_HEADLESS_GM_PASSWORD` naming another account give the page its own login instead. A human can meanwhile play as a normal **Player** in their own browser.
-- **Companion module** (`foundryvtt-mcp-bridge`, 0.5.0 or later): runs only in that GM session and serves the bridge tools — `capture_scene` (canvas screenshot with a grid overlay), `roll_and_post` (native `Roll` chat cards), `get_document_schema`, `search_compendium_content` and compendium imports, `upload_asset` (FilePicker), `set_pause`, `ping_canvas`, `set_target` / `get_targets`. Without it these tools report unavailable; everything else keeps working. The bridge listens on loopback only and authenticates the module — see [Module Bridge Security](#module-bridge-security).
+- **Companion module** (`foundryvtt-mcp-bridge`, 0.5.0 or later): runs only in that GM session and serves the bridge tools — `capture_scene` (canvas screenshot with a grid overlay), `roll_and_post` (native `Roll` chat cards), `get_document_schema`, `search_compendium_content` and compendium imports, `upload_asset` (FilePicker), `set_pause`, `ping_canvas`, `set_target` / `get_targets`, and since 0.6.0 `get_actor_stats` (an actor's prepared data) and the game system's own path for `apply_status_effect`. Without it these tools report unavailable (`apply_status_effect` keeps its socket path); everything else keeps working. From 0.6.0 the module announces its version and commands when it connects, and the server sends it no command it does not announce; an older module is sent only the commands every 0.5 module serves. The bridge listens on loopback only and authenticates the module — see [Module Bridge Security](#module-bridge-security).
 - **Optional REST API module**: with `FOUNDRY_API_KEY` set, the server also connects to the Foundry Local REST API module over HTTP. It backs the diagnostics tools (`get_health_status`, `get_system_health`, `get_recent_logs`, `search_logs`, `diagnose_errors`) and `search_compendium`, and some reads use it instead of the cache (actor and item search, actor details, scene and world info, `roll_dice`). Socket.IO stays the main connection and carries every write.
 - **Shared process** (default): MCP clients may start several server instances — Claude Desktop starts several at launch — so each instance is only a lightweight relay, and the FoundryVTT connection, the bridge and the GM session live once, in a background process every relay shares. See [Shared Process Mode](#shared-process-mode); `FOUNDRY_MCP_SHARED=false` runs everything in one process instead.
 
 ---
 
-## 🌟 Key Highlights & Capabilities (114 Tools)
+## 🌟 Key Highlights & Capabilities (115 Tools)
 
 - 👁️ **Real-Time Event Stream & Activity Log (`watch_events`)**: Zero-polling event awareness via Socket.IO `modifyDocument` and companion bridge pushes. An AI DM agent can long-poll on a cursor-addressed stream (`cursor`, `waitMs`, `excludeSelf`, `types`, `sceneId`) to react instantly when players chat, move tokens, advance combat, toggle doors, or select targets.
 - 🎲 **Game Mechanics & Interactive Chat**: Roll dice with standard or complex drop/keep notation (`4d6kh3`, `1d20r1`). Roll and post interactive, clickable chat cards directly to the Foundry chat log via the companion bridge (`roll_and_post`).
@@ -258,7 +258,8 @@ The bridge drives a GM session, and its loopback port is reachable by every loca
 
 - **Origin**: the WebSocket upgrade is refused (HTTP 403) unless its `Origin` header is the origin of `FOUNDRY_URL` — a page from another site cannot open the socket.
 - **Mutual handshake (protocol v1)**: the server sends a random challenge; the module answers with an HMAC-SHA256 proof, and the server answers with its own proof, which the module checks before obeying. Both are keyed by a random secret the shared process generates at startup and keeps in memory only — never written to disk, logged or returned by a tool. The headless GM session exposes a `window.foundryMcpBridge` function to its page (a Playwright binding) that computes the proofs, so the secret never enters the page or the WebSocket. It disappears with the shared process.
-- **Until authenticated**, a connection receives no command, nothing it sends is processed, and it cannot displace the connected module. It is closed with `4401` (wrong proof, unknown protocol, any other message), `4408` (no answer within 5 s — typically a module older than 0.5.0, logged as such) or `1009` (a message over 4 KiB). Refusals are logged as warnings (rate-limited); `status` and `get_health_status` show whether an authenticated module is connected.
+- **Until authenticated**, a connection receives no command, nothing it sends is processed, and it cannot displace the connected module. It is closed with `4401` (wrong proof, unknown protocol, any other message), `4408` (no answer within 5 s — typically a module older than 0.5.0, logged as such) or `1009` (a message over 4 KiB). Refusals are logged as warnings (rate-limited); `status` and `get_health_status` show whether an authenticated module is connected, and its version: the one it announced (0.6.0 or later), otherwise the version installed in the world followed by `(not announced)`.
+- **Module announcement (0.6.0 or later)**: the module's answer to the challenge also lists its version and the commands it serves. The proofs do not cover this list: it only decides which commands the server tries to send, and an absent or malformed one never fails the authentication.
 - **No manual GM tab**: a GM tab opened by hand has no `window.foundryMcpBridge`, so the module logs `no foundryvtt-mcp credentials in this browser, bridge disabled` to the browser console and stays silent. `FOUNDRY_HEADLESS_GM_ENABLED=false` therefore disables the bridge in practice.
 - **Check it**: with the connector running and the module connected, `npm run check:bridge-security`, from a clone, tries four forged connections and confirms each is refused while the module stays connected.
 
@@ -325,7 +326,7 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
 
 ---
 
-## 🛠️ Tool Catalog (114 Tools)
+## 🛠️ Tool Catalog (115 Tools)
 
 ### 1. Real-Time Event Awareness
 - `watch_events` — long-poll a cursor-addressed activity log (`cursor`, `waitMs`, `limit`, `kinds`, `types`, `actions`, `sceneId`, `excludeSelf`) capturing document broadcasts and canvas activity without polling.
@@ -354,7 +355,7 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
 - `move_tokens` — batch move multiple tokens simultaneously.
 - `set_target` / `get_targets` — set and inspect token targeting reticles across connected users.
 - `update_token_vision` — configure vision ranges, vision modes, dim/bright emitted lights, and angles.
-- `apply_status_effect` — toggle simple status conditions (`prone`, `stunned`, `blinded`, `invisible`, etc.); the token icon is always shown. A game system that defines its own statuses with fixed effect ids may not recognise these as its own conditions.
+- `apply_status_effect` — toggle status conditions (`prone`, `stunned`, `blinded`, `invisible`, etc.). With the companion module 0.6.0 or later connected (it waits up to 10 s for one still connecting), it goes through the game system's own status toggle, so the system recognises the condition, and effects an earlier version wrote for the status are reported, then removed with `active=false`; otherwise it writes an effect carrying the status over the socket (token icon always shown), which a game system that defines its own statuses with fixed effect ids may not recognise. The answer names the path used.
 
 ### 4. Actors & Inventory
 - `create_world_actor` / `create_full_actor` / `delete_world_actor` — create and delete actor documents.
@@ -363,6 +364,7 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
 - `get_actor_details` — retrieve actor system data, statistics, attributes, and health; with `sceneId` + `tokenId`, those of one token (an unlinked token has its own).
 - `update_actor_attributes` — patch nested system data using dot paths (`attributes.hp.value`, `currency.gp`), on a world actor or one token. Write stored fields only: a field the game system computes is saved but has no effect in play.
 - `get_actor_inventory` — list owned items with full system properties, of a world actor or one token.
+- `get_actor_stats` — an actor's prepared system data as JSON, including the values the game system computes and does not store, of a world actor or one token; `paths` narrows it, `maxBytes` bounds it (companion module 0.6.0 or later).
 - `search_items` — search world item documents by name, optionally filtered by type (world items, not owned items).
 - `create_actor_item` — create inline items OR import directly from compendium packs (`source: { type: 'compendium', compendiumId, itemId }`).
 - `update_actor_item` — apply JSON merge patches to owned items.
@@ -401,7 +403,7 @@ Add to `~/.omp/agent/mcp.json` (or `~/.omp/mcp.json`):
 - `roll_dice` — local mathematical dice formula evaluation.
 - `roll_and_post` — evaluates formulas via Foundry's native engine and posts interactive chat cards.
 - `lookup_rule` — search world journals and system compendium packs for rules with snippet previews.
-- `get_document_schema` — introspect game system DataModel schemas for actor and item types.
+- `get_document_schema` — introspect game system DataModel schemas for actor and item types, with computed (`persisted: false`) fields and number bounds; for a type declared only by template.json, its default values with inferred types (module 0.6.0 or later).
 - `search_compendium` — search compendium packs by name and metadata, across all enabled packs or one pack (requires the REST API module; returns no results without it).
 - `search_compendium_content` — deep search inside compendium pack documents and journal pages.
 - `send_chat_message` / `get_chat_messages` — post and read messages from the Foundry chat log.
