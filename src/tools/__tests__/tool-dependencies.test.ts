@@ -3,6 +3,7 @@ import { getAllTools } from '../definitions.js';
 import { getAllResources } from '../resources.js';
 import {
   needsBridge,
+  prefersBridge,
   resourceDependency,
   toolDependency,
   waitsForSocket,
@@ -75,6 +76,10 @@ describe('tool dependencies', () => {
     expect(needsBridge('create_actor_item', { source: { type: 'inline' } })).toBe(false);
     expect(needsBridge('create_actor_item', {})).toBe(false);
     expect(needsBridge('lookup_rule', {})).toBe(false);
+    // Goes through the module when one announcing the command is connected, never waits for it.
+    expect(needsBridge('apply_status_effect', { tokenId: 't', statusId: 's' })).toBe(false);
+    expect(prefersBridge('apply_status_effect')).toBe(true);
+    expect(prefersBridge('create_actor_effect')).toBe(false);
     expect(needsBridge('get_users', {})).toBe(false);
   });
 });

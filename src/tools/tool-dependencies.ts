@@ -161,6 +161,14 @@ const TOOL_DEPENDENCIES: ReadonlyMap<string, ToolDependency> = new Map<string, T
   ['get_health_status', 'health'],
 ]);
 
+/**
+ * Socket tools that go through the companion module when it is there:
+ * FoundryCore waits for a module on its way as it does for a module tool,
+ * but never refuses the call because of it; the tool then falls back to the
+ * socket.
+ */
+const PREFERS_BRIDGE_TOOLS: ReadonlySet<string> = new Set(['apply_status_effect']);
+
 /** Every `foundry://` resource reads the cache, except the REST diagnostics. */
 const RESOURCE_DEPENDENCIES: ReadonlyMap<string, ToolDependency> = new Map<string, ToolDependency>([
   ['foundry://actors', 'socket'],
@@ -190,6 +198,11 @@ export function resourceDependency(uri: string): ToolDependency | undefined {
  */
 export function waitsForSocket(dependency: ToolDependency | undefined): boolean {
   return dependency === undefined || dependency === 'socket' || dependency === 'socket+bridge';
+}
+
+/** True when the tool uses the companion module if it can (see {@link PREFERS_BRIDGE_TOOLS}). */
+export function prefersBridge(name: string): boolean {
+  return PREFERS_BRIDGE_TOOLS.has(name);
 }
 
 /**

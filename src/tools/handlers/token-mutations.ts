@@ -11,8 +11,89 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
+import type { ModuleBridge } from '../../foundry/module-bridge.js';
 import type { WorldEffect } from '../../foundry/types.js';
+import { isRecord } from '../../utils/guards.js';
 import { withToolError } from './utils.js';
+
+/** How apply_status_effect wrote, as its answer says. */
+const STATUS_PATH = {
+  module: "game system (the system's own status effects, through the companion module)",
+  socket: 'socket (an ActiveEffect carrying the status)',
+  none: 'none (no change needed)',
+} as const;
+
+/** Bounds of apply_status_effect's `createOptions`. */
+const CREATE_OPTIONS_MAX_KEYS = 10;
+const CREATE_OPTIONS_MAX_BYTES = 1024;
+const CREATE_OPTION_KEY = /^[A-Za-z_$][\w$]*$/;
+
+/**
+ * Creation options the core sets or reads itself (DatabaseCreateOperation,
+ * common/abstract/_types.mjs, and Document.create); `createOptions` may not
+ * carry them.
+ */
+const RESERVED_CREATE_OPTIONS: ReadonlySet<string> = new Set([
+  'action',
+  'broadcast',
+  'controlObject',
+  'data',
+  'diff',
+  'documentName',
+  'dryRun',
+  'extractedImages',
+  'keepEmbeddedIds',
+  'keepId',
+  'modifiedTime',
+  'noHook',
+  'pack',
+  'parent',
+  'parentUuid',
+  'recursive',
+  'render',
+  'renderSheet',
+  'temporary',
+  '_createData',
+  '_result',
+]);
+
+/**
+ * Checks apply_status_effect's `createOptions`: a plain JSON object of at most
+ * {@link CREATE_OPTIONS_MAX_KEYS} keys and {@link CREATE_OPTIONS_MAX_BYTES}
+ * bytes, no option the core reserves, and only when applying a status.
+ */
+function validateCreateOptions(
+  value: unknown,
+  active: boolean,
+): Record<string, unknown> | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  const invalid = (reason: string) =>
+    new McpError(ErrorCode.InvalidParams, `createOptions ${reason}`);
+  if (!isRecord(value) || Object.getPrototypeOf(value) !== Object.prototype) {
+    throw invalid('must be a JSON object');
+  }
+  if (!active) {
+    throw invalid('only apply when applying a status (active=true)');
+  }
+  const keys = Object.keys(value);
+  if (keys.length > CREATE_OPTIONS_MAX_KEYS) {
+    throw invalid(`may hold at most ${CREATE_OPTIONS_MAX_KEYS} keys`);
+  }
+  const badKey = keys.find((key) => !CREATE_OPTION_KEY.test(key));
+  if (badKey !== undefined) {
+    throw invalid(`key ${JSON.stringify(badKey)} is not a valid option name`);
+  }
+  const reserved = keys.filter((key) => RESERVED_CREATE_OPTIONS.has(key));
+  if (reserved.length > 0) {
+    throw invalid(`may not set the core's own creation options: ${reserved.join(', ')}`);
+  }
+  if (Buffer.byteLength(JSON.stringify(value)) > CREATE_OPTIONS_MAX_BYTES) {
+    throw invalid(`may hold at most ${CREATE_OPTIONS_MAX_BYTES} bytes of JSON`);
+  }
+  return value;
+}
 
 /** Raw token fields we read to resolve its actor and link state. */
 interface TokenActorRef {
@@ -84,8 +165,15 @@ export async function handleMoveToken(
  * under the token's ActorDelta, for which FoundryVTT records a tombstone.
  */
 export async function handleApplyStatusEffect(
-  args: { tokenId: string; statusId: string; active?: boolean; sceneId?: string },
+  args: {
+    tokenId: string;
+    statusId: string;
+    active?: boolean;
+    sceneId?: string;
+    createOptions?: unknown;
+  },
   foundryClient: FoundryClient,
+  moduleBridge: ModuleBridge | null = null,
 ) {
   const { tokenId, statusId, sceneId } = args;
   const active = args.active ?? true;
@@ -96,6 +184,7 @@ export async function handleApplyStatusEffect(
   if (!statusId || typeof statusId !== 'string') {
     throw new McpError(ErrorCode.InvalidParams, 'statusId is required and must be a string');
   }
+  const createOptions = validateCreateOptions(args.createOptions, active);
 
   const located = foundryClient.findToken(tokenId, sceneId);
   if (!located) {
@@ -127,44 +216,138 @@ export async function handleApplyStatusEffect(
   const existing = effects.find((e) => e.statuses?.includes(statusId));
 
   return withToolError('apply status effect', async () => {
-    if (active) {
-      if (existing) {
-        return statusResult(
-          `Status effect '${statusId}' is already active on ${token.name ?? tokenId}.`,
-          tokenId,
-          located.scene,
-          statusId,
-          true,
-        );
-      }
-      const effect = await foundryClient.createActorStatusEffect(parentActorUuid, statusId);
+    // The module's path when a module announcing it is connected (FoundryCore
+    // waited for one on its way): the module decides itself whether the call
+    // changes anything. While writes are disabled, the cache decides, below.
+    const writeEnabled = foundryClient.isWriteEnabled();
+    if (writeEnabled && moduleBridge?.supports('toggle_status_effect')) {
+      const outcome = await moduleBridge.send('toggle_status_effect', {
+        target: { sceneId: located.scene._id, tokenId, actorId },
+        statusId,
+        active,
+        ...(createOptions ? { createOptions } : {}),
+      });
       return statusResult(
-        `Applied status effect '${statusId}' (effect ${effect._id}).`,
+        moduleStatusSummary(
+          outcome,
+          statusId,
+          active,
+          token.name ?? tokenId,
+          createOptions !== undefined,
+        ),
+        tokenId,
+        located.scene,
+        statusId,
+        active,
+        STATUS_PATH.module,
+      );
+    }
+
+    // createOptions only mean something to the game system's own creation.
+    if (createOptions) {
+      const reason = !writeEnabled
+        ? 'writes are disabled (FOUNDRY_WRITE_ENABLED)'
+        : !moduleBridge
+          ? 'the module bridge is disabled'
+          : moduleBridge.isConnected()
+            ? `the connected companion module (${moduleBridge.describeModuleVersion()}) does not provide 'toggle_status_effect'`
+            : 'the companion module is not connected';
+      throw new McpError(
+        ErrorCode.InvalidRequest,
+        `createOptions need the game system's path, through the companion module 0.6.0 or later with writes enabled, and it is not available: ${reason}. Nothing was changed.`,
+      );
+    }
+
+    // The no-op cases are decided from the cache.
+    if (active && existing) {
+      return statusResult(
+        `Status effect '${statusId}' is already active on ${token.name ?? tokenId}.`,
         tokenId,
         located.scene,
         statusId,
         true,
+        STATUS_PATH.none,
       );
     }
-
-    if (!existing) {
+    if (!active && !existing) {
       return statusResult(
         `Status effect '${statusId}' is not active on ${token.name ?? tokenId}; nothing to remove.`,
         tokenId,
         located.scene,
         statusId,
         false,
+        STATUS_PATH.none,
       );
     }
-    await foundryClient.deleteActorEffect(parentActorUuid, existing._id);
+
+    if (!active && existing) {
+      await foundryClient.deleteActorEffect(parentActorUuid, existing._id);
+      return statusResult(
+        `Removed status effect '${statusId}' (effect ${existing._id}).`,
+        tokenId,
+        located.scene,
+        statusId,
+        false,
+        STATUS_PATH.socket,
+      );
+    }
+    const effect = await foundryClient.createActorStatusEffect(parentActorUuid, statusId);
     return statusResult(
-      `Removed status effect '${statusId}' (effect ${existing._id}).`,
+      `Applied status effect '${statusId}' (effect ${effect._id}).`,
       tokenId,
       located.scene,
       statusId,
-      false,
+      true,
+      STATUS_PATH.socket,
     );
   });
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
+
+/**
+ * What the module's toggle_status_effect did, as one or two lines: applied or
+ * already there (with the earlier-version effects that also carry the
+ * status), removed (with their ids), or nothing to remove.
+ */
+function moduleStatusSummary(
+  outcome: unknown,
+  statusId: string,
+  active: boolean,
+  name: string,
+  withCreateOptions: boolean,
+): string {
+  const unexpected = () =>
+    new McpError(
+      ErrorCode.InternalError,
+      'Module returned an unexpected toggle_status_effect shape',
+    );
+  if (!isRecord(outcome) || outcome.active !== active || typeof outcome.changed !== 'boolean') {
+    throw unexpected();
+  }
+  if (!active) {
+    if (!isStringArray(outcome.removed)) {
+      throw unexpected();
+    }
+    return outcome.removed.length > 0
+      ? `Removed status effect '${statusId}' (effect${outcome.removed.length > 1 ? 's' : ''} ${outcome.removed.join(', ')}).`
+      : `Status effect '${statusId}' is not active on ${name}; nothing to remove.`;
+  }
+  const { effectId, legacy } = outcome;
+  if ((effectId !== null && typeof effectId !== 'string') || !isStringArray(legacy)) {
+    throw unexpected();
+  }
+  const summary = outcome.changed
+    ? `Applied status effect '${statusId}' (effect ${effectId}).`
+    : effectId
+      ? `Status effect '${statusId}' is already active on ${name} (effect ${effectId}).` +
+        (withCreateOptions ? ' createOptions were ignored: nothing was created.' : '')
+      : `The game system did not create status effect '${statusId}' on ${name}.`;
+  return legacy.length > 0
+    ? `${summary}\nEffect(s) ${legacy.join(', ')} from an earlier version also carry this status; active=false removes them.`
+    : summary;
 }
 
 /** Builds the MCP text result for a status-effect mutation. */
@@ -174,6 +357,7 @@ function statusResult(
   scene: { _id: string; name: string },
   statusId: string,
   active: boolean,
+  path: string,
 ) {
   return {
     content: [
@@ -183,6 +367,7 @@ function statusResult(
 **Token:** ${tokenId}
 **Scene:** ${scene.name} (${scene._id})
 **Status:** ${statusId}
+**Path:** ${path}
 ${summary}`,
       },
     ],
