@@ -7,6 +7,7 @@ import { rollAndPost } from './commands/roll-and-post.js';
 import { setTarget } from './commands/set-target.js';
 import { getTargets } from './commands/get-targets.js';
 import { getActorStats } from './commands/get-actor-stats.js';
+import { toggleStatusEffect } from './commands/toggle-status-effect.js';
 import { pingCanvas } from './commands/ping-canvas.js';
 import { setPause } from './commands/set-pause.js';
 import { uploadAsset } from './commands/upload-asset.js';
@@ -23,6 +24,7 @@ const COMMANDS = {
   set_target: (params) => setTarget(params),
   get_targets: () => getTargets(),
   get_actor_stats: (params) => getActorStats(params),
+  toggle_status_effect: (params) => toggleStatusEffect(params),
   ping_canvas: (params) => pingCanvas(params),
   set_pause: (params) => setPause(params),
   upload_asset: (params) => uploadAsset(params),

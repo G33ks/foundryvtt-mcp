@@ -34,6 +34,7 @@ import type { HealthRuntime } from './tools/handlers/diagnostics.js';
 import { routeResourceRequest, routeToolRequest } from './tools/index.js';
 import {
   needsBridge,
+  prefersBridge,
   resourceDependency,
   type ToolDependency,
   toolDependency,
@@ -411,6 +412,8 @@ export class FoundryCore {
       await this.waitForReconnection(toolDependency(name));
       if (needsBridge(name, args)) {
         await this.waitForModule();
+      } else if (prefersBridge(name) && this.foundryClient.isWriteEnabled()) {
+        await this.waitForModuleIfComing();
       }
       return (await routeToolRequest(
         name,
@@ -513,6 +516,22 @@ export class FoundryCore {
     throw refuse(
       `still waiting for it after ${BRIDGE_CONNECT_WAIT_MS / 1000} s — ${session.statusText()}. Try again in a moment.`,
     );
+  }
+
+  /**
+   * For a tool that only prefers the module ({@link prefersBridge}): the same
+   * wait as {@link waitForModule}, but a module that cannot come, or does not
+   * come in time, leaves the call to go ahead on its socket path.
+   */
+  private async waitForModuleIfComing(): Promise<void> {
+    try {
+      await this.waitForModule();
+    } catch (error) {
+      if (!isRefusal(error)) {
+        throw error;
+      }
+      logger.debug('Going ahead without the companion module', { reason: refusalReason(error) });
+    }
   }
 
   /** Logs {@link gamemasterAccountWarning} after each authentication. */

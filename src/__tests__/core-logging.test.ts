@@ -1,5 +1,6 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { FoundryClient } from '../foundry/client.js';
 
 vi.mock('../config/index.js', () => ({
   config: {
@@ -30,6 +31,7 @@ const { logger } = await import('../utils/logger.js');
 const { RefusedError, refusalError } = await import('../utils/refusal.js');
 const { withToolError } = await import('../tools/handlers/utils.js');
 const { ModuleBridge } = await import('../foundry/module-bridge.js');
+const { handleApplyStatusEffect } = await import('../tools/handlers/token-mutations.js');
 
 describe('FoundryCore tool logging', () => {
   let info: ReturnType<typeof vi.spyOn>;
@@ -148,6 +150,45 @@ describe('FoundryCore tool logging', () => {
     expect(warn).toHaveBeenCalledTimes(2);
     expect(error).not.toHaveBeenCalled();
     expect(socketSend).not.toHaveBeenCalled();
+  });
+
+  it('logs createOptions refused for a module without the command as a refusal', async () => {
+    const bridge = new ModuleBridge(0, {
+      expectedOrigin: 'http://localhost:30000',
+      installedModuleVersion: () => '0.5.2',
+    });
+    Reflect.set(bridge, 'socket', { readyState: 1, send: vi.fn() });
+    const token = { _id: 'tokenAAAAAAAAAAA', name: 'Goblin', actorId: 'actorAAAAAAAAAAA' };
+    const client = {
+      isWriteEnabled: () => true,
+      findToken: () => ({ scene: { _id: 'sceneAAAAAAAAAAA', name: 'Road' }, token }),
+      getTokenActorEffects: () => [],
+      createActorStatusEffect: vi.fn(),
+    } as unknown as FoundryClient;
+    route.mockImplementation((_name: string, args: Record<string, unknown>) =>
+      handleApplyStatusEffect(
+        args as Parameters<typeof handleApplyStatusEffect>[0],
+        client,
+        bridge,
+      ),
+    );
+    const core = new FoundryCore();
+    Reflect.set(core, 'moduleBridge', bridge);
+
+    const reason =
+      "createOptions need the game system's path, through the companion module 0.6.0 or later with writes enabled, and it is not available: the connected companion module 0.5.2 (not announced) does not provide 'toggle_status_effect', which needs 0.6.0 or later. Nothing was changed.";
+    await expect(
+      core.callTool('apply_status_effect', {
+        tokenId: token._id,
+        statusId: 'prone',
+        createOptions: { level: 4 },
+      }),
+    ).rejects.toThrow(refusalError(ErrorCode.InvalidRequest, reason));
+
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith('Tool call refused', { name: 'apply_status_effect', reason });
+    expect(error).not.toHaveBeenCalled();
+    expect(client.createActorStatusEffect).not.toHaveBeenCalled();
   });
 
   it('still logs real failures as errors', async () => {

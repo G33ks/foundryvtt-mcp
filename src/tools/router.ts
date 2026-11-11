@@ -738,8 +738,15 @@ export async function routeToolRequest(
         throw new Error('Missing required parameter: statusId');
       }
       return handleApplyStatusEffect(
-        args as { tokenId: string; statusId: string; active?: boolean; sceneId?: string },
+        args as {
+          tokenId: string;
+          statusId: string;
+          active?: boolean;
+          sceneId?: string;
+          createOptions?: unknown;
+        },
         foundryClient,
+        moduleBridge,
       );
     case 'spawn_token':
       if (!('actorId' in args) || typeof args.actorId !== 'string') {

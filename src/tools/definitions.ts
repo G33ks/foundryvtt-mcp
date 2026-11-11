@@ -1771,7 +1771,7 @@ export const tokenMutationTools = [
   {
     name: 'apply_status_effect',
     description:
-      'Apply or remove a status condition (e.g. "prone", "stunned") on a token\'s actor. Set active=false to remove. Matches by status id, so re-applying or clearing-when-absent is a no-op. The status icon is always shown on the token. A game system that defines its own statuses with fixed effect ids may not recognise an effect created here as its own condition. On an unlinked token only that token changes: a status it inherits from its base actor is found and can be removed from that token alone. Use when: a condition is gained or lost. Do not use when: changing numeric state such as HP or exhaustion - use update_actor_attributes. ' +
+      'Apply or remove a status condition (e.g. "prone", "stunned") on a token\'s actor. Set active=false to remove. Matches by status id, so re-applying or clearing-when-absent is a no-op. With the module bridge enabled, it first waits up to 10 s for the companion module if it is still connecting. With module 0.6.0 or later, the status goes through the game system\'s own status effects, so the system recognises the effect as its condition; effects carrying the status that were written earlier over the socket are reported when applying and removed with active=false. Some game systems ask for a value when a status is created; pass it in createOptions, under the option name the system documents. Without it, the call fails at once and nothing is created. createOptions need that path: they are refused when it is not available (no module 0.6.0, or writes disabled), and ignored when the status is already active. Otherwise, or if the module does not come, an effect carrying the status is written over the socket (its icon always shown), which a game system that defines its own statuses with fixed effect ids may not recognise. The answer names the path used. On an unlinked token only that token changes: a status it inherits from its base actor is found and can be removed from that token alone. Use when: a condition is gained or lost. Do not use when: changing numeric state such as HP - use update_actor_attributes. ' +
       WRITE_GATE +
       ' Exception: the no-op cases (applying an already-present status, or clearing an absent one) report success without attempting a write, so they also return normally while writes are disabled.',
     inputSchema: {
@@ -1793,6 +1793,11 @@ export const tokenMutationTools = [
         sceneId: {
           type: 'string',
           description: 'Optional Scene ID to scope the token lookup',
+        },
+        createOptions: {
+          type: 'object',
+          description:
+            "Optional creation options the game system reads when a status is created (at most 10 keys, 1 KiB of JSON; not the core's own options such as parent or keepId). Only with active=true, through the companion module 0.6.0 or later",
         },
       },
       required: ['tokenId', 'statusId'],
