@@ -2471,6 +2471,7 @@ export class FoundryClient {
    * @param type - game-system actor type (e.g. "character", "npc")
    * @param system - optional system-specific data merged into `actor.system`
    * @param folder - optional 16-char Folder document id to file the actor under
+   * @param flags - optional module flags (`actor.flags`), keyed by module id
    * @returns the newly created actor document
    */
   async createWorldActor(
@@ -2478,6 +2479,7 @@ export class FoundryClient {
     type: string,
     system?: Record<string, unknown>,
     folder?: string,
+    flags?: Record<string, unknown>,
   ): Promise<WorldActor> {
     this.assertWriteable();
     if (!name || typeof name !== 'string') {
@@ -2489,12 +2491,18 @@ export class FoundryClient {
     if (folder !== undefined && !FOUNDRY_ID_PATTERN.test(folder)) {
       throw new Error(`Invalid folder format: ${folder}`);
     }
+    if (flags !== undefined && (!isRecord(flags) || !Object.values(flags).every(isRecord))) {
+      throw new Error('flags must be an object of per-module objects, e.g. {"my-module": {...}}');
+    }
     const data: Record<string, unknown> = { name, type };
     if (system) {
       data.system = system;
     }
     if (folder) {
       data.folder = folder;
+    }
+    if (flags) {
+      data.flags = flags;
     }
     const result = await this.modifyDocument('Actor', 'create', { data: [data] });
     return result[0] as WorldActor;

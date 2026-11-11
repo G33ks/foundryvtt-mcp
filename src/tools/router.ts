@@ -236,7 +236,13 @@ export async function routeToolRequest(
         throw new Error('Missing required parameter: type');
       }
       return handleCreateWorldActor(
-        args as { name: string; type: string; system?: Record<string, unknown>; folder?: string },
+        args as {
+          name: string;
+          type: string;
+          system?: Record<string, unknown>;
+          folder?: string;
+          flags?: Record<string, unknown>;
+        },
         foundryClient,
       );
     case 'create_full_actor':

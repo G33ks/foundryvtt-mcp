@@ -204,6 +204,11 @@ export const actorMutationTools = [
           type: 'string',
           description: 'Optional Folder document id to file the actor under',
         },
+        flags: {
+          type: 'object',
+          description:
+            'Optional module flags for actor.flags, keyed by module id, e.g. {"my-module": {"key": "value"}} for data a module reads from the new actor',
+        },
       },
       required: ['name', 'type'],
     },

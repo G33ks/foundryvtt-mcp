@@ -85,10 +85,11 @@ export async function handleCreateWorldActor(
     type: string;
     system?: Record<string, unknown>;
     folder?: string;
+    flags?: Record<string, unknown>;
   },
   foundryClient: FoundryClient,
 ) {
-  const { name, type, system, folder } = args;
+  const { name, type, system, folder, flags } = args;
 
   if (!name || typeof name !== 'string') {
     throw new McpError(ErrorCode.InvalidParams, 'name is required and must be a string');
@@ -98,7 +99,7 @@ export async function handleCreateWorldActor(
   }
 
   return withToolError('create world actor', async () => {
-    const actor = await foundryClient.createWorldActor(name, type, system, folder);
+    const actor = await foundryClient.createWorldActor(name, type, system, folder, flags);
 
     return {
       content: [
