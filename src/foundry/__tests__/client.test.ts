@@ -1210,3 +1210,21 @@ describe('FoundryClient', () => {
     });
   });
 });
+
+describe('FoundryClient.installedModuleVersion', () => {
+  it("reads a module's version from the cached world, null when absent", () => {
+    const client = new FoundryClient({ baseUrl: 'http://localhost:30000' });
+    expect(client.installedModuleVersion('foundryvtt-mcp-bridge')).toBeNull();
+
+    Reflect.set(client, 'worldData', {
+      modules: [
+        { id: 'other-module', version: '1.0.0' },
+        { id: 'foundryvtt-mcp-bridge', version: '0.5.2' },
+        { id: 'no-version' },
+      ],
+    });
+    expect(client.installedModuleVersion('foundryvtt-mcp-bridge')).toBe('0.5.2');
+    expect(client.installedModuleVersion('no-version')).toBeNull();
+    expect(client.installedModuleVersion('missing')).toBeNull();
+  });
+});

@@ -3,7 +3,14 @@ import net from 'node:net';
 import os from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
-import { BRIDGE_CLOSE_CODES, BRIDGE_PROTOCOL_VERSION, ModuleBridge } from '../module-bridge.js';
+import { logger } from '../../utils/logger.js';
+import {
+  BRIDGE_CLOSE_CODES,
+  BRIDGE_PROTOCOL_VERSION,
+  LEGACY_COMMANDS,
+  ModuleBridge,
+  parseModuleAnnouncement,
+} from '../module-bridge.js';
 
 const ORIGIN = 'http://localhost:30000';
 
@@ -112,8 +119,15 @@ function openClient(port: number, origin = ORIGIN): Promise<TestClient> {
   });
 }
 
-/** Runs the module side of the handshake, the way the headless page binding does. */
-async function authenticate(bridge: ModuleBridge, client: TestClient): Promise<void> {
+/**
+ * Runs the module side of the handshake, the way the headless page binding
+ * does; `extra` adds fields to `auth_response` (e.g. the `module` announcement).
+ */
+async function authenticate(
+  bridge: ModuleBridge,
+  client: TestClient,
+  extra: Record<string, unknown> = {},
+): Promise<void> {
   const challenge = await client.next();
   const { nonce, clientProof, serverProof } = bridge.prove(challenge.nonce);
   client.send({
@@ -121,6 +135,7 @@ async function authenticate(bridge: ModuleBridge, client: TestClient): Promise<v
     protocol: BRIDGE_PROTOCOL_VERSION,
     nonce,
     proof: clientProof,
+    ...extra,
   });
   const ok = await client.next();
   expect(ok).toEqual({ type: 'auth_ok', proof: serverProof });
@@ -147,7 +162,7 @@ afterEach(async () => {
 
 async function startBridge(
   port: number,
-  options: { authTimeoutMs?: number } = {},
+  options: { authTimeoutMs?: number; installedModuleVersion?: () => string | null } = {},
 ): Promise<ModuleBridge> {
   const bridge = new ModuleBridge(port, { expectedOrigin: ORIGIN, ...options });
   bridges.push(bridge);
@@ -161,12 +176,15 @@ async function client(port: number): Promise<TestClient> {
   return c;
 }
 
-/** A bridge with one authenticated module connected. */
-async function bridgeWithModule(options: { authTimeoutMs?: number } = {}) {
+/** A bridge with one authenticated module connected; `extra` as for {@link authenticate}. */
+async function bridgeWithModule(
+  options: { authTimeoutMs?: number; installedModuleVersion?: () => string | null } = {},
+  extra: Record<string, unknown> = {},
+) {
   const port = await freePort();
   const bridge = await startBridge(port, options);
   const module = await client(port);
-  await authenticate(bridge, module);
+  await authenticate(bridge, module, extra);
   await waitFor(() => bridge.isConnected());
   return { port, bridge, module };
 }
@@ -383,6 +401,113 @@ describe('ModuleBridge handshake', () => {
     const command = await second.next();
     second.send({ id: command.id, result: 'second' });
     await expect(reply).resolves.toBe('second');
+  });
+});
+
+describe('ModuleBridge module announcement', () => {
+  it('stores the version and commands a module announces, until it disconnects', async () => {
+    const { bridge, module } = await bridgeWithModule(
+      {},
+      { module: { version: '0.6.0', commands: ['get_targets', 'new_command'] } },
+    );
+    expect(bridge.moduleAnnouncement()).toEqual({
+      version: '0.6.0',
+      commands: ['get_targets', 'new_command'],
+    });
+    expect(bridge.describeModuleVersion()).toBe('0.6.0');
+    expect(bridge.supports('new_command')).toBe(true);
+    expect(bridge.supports('capture_scene')).toBe(false);
+
+    module.ws.close();
+    await waitFor(() => !bridge.isConnected());
+    expect(bridge.moduleAnnouncement()).toEqual({ version: null, commands: null });
+  });
+
+  it('accepts a module that announces nothing, and sends it only the legacy commands', async () => {
+    const { bridge, module } = await bridgeWithModule({ installedModuleVersion: () => '0.5.2' });
+    expect(bridge.moduleAnnouncement()).toEqual({ version: null, commands: null });
+    expect(bridge.describeModuleVersion()).toBe('0.5.2 (not announced)');
+    for (const command of LEGACY_COMMANDS) {
+      expect(bridge.supports(command)).toBe(true);
+    }
+    expect(LEGACY_COMMANDS).toHaveLength(10);
+
+    expect(() => bridge.send('get_actor_stats', {})).toThrow(
+      'this command needs the companion module 0.6.0 or later; the connected module (0.5.2) does not provide it',
+    );
+    const reply = bridge.send('get_targets');
+    const command = await module.next();
+    expect(command).toMatchObject({ type: 'get_targets' });
+    module.send({ id: command.id, result: [] });
+    await expect(reply).resolves.toEqual([]);
+  });
+
+  it('refuses a command the module did not announce, before sending anything', async () => {
+    const { bridge, module } = await bridgeWithModule(
+      {},
+      { module: { version: '0.7.0-rc.1', commands: ['get_targets'] } },
+    );
+    expect(() => bridge.send('capture_scene')).toThrow(
+      'this command needs a newer companion module; the connected module (0.7.0-rc.1) does not provide it',
+    );
+    expect(() => bridge.send('toggle_status_effect')).toThrow(
+      'this command needs the companion module 0.6.0 or later; the connected module (0.7.0-rc.1) does not provide it',
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(module.received.filter((m) => m.type === 'capture_scene')).toEqual([]);
+  });
+
+  it('names an unknown version when neither the module nor the world has one', async () => {
+    const { bridge } = await bridgeWithModule();
+    expect(bridge.describeModuleVersion()).toBe('unknown (not announced)');
+    expect(() => bridge.send('get_actor_stats')).toThrow(/the connected module \(unknown\)/);
+  });
+
+  it('still authenticates a module whose announcement is malformed, and ignores it', async () => {
+    const warn = vi.spyOn(logger, 'warn');
+    const { bridge } = await bridgeWithModule({}, { module: { version: 7, commands: 'all' } });
+    expect(bridge.isConnected()).toBe(true);
+    expect(bridge.moduleAnnouncement()).toEqual({ version: null, commands: null });
+    expect(bridge.supports('capture_scene')).toBe(true);
+    expect(warn).toHaveBeenCalledWith('Module bridge: ignoring a malformed module version');
+    expect(warn).toHaveBeenCalledWith('Module bridge: ignoring a malformed module command list');
+    warn.mockRestore();
+  });
+});
+
+describe('parseModuleAnnouncement', () => {
+  it('reads nothing from an absent field, without a warning', () => {
+    const warn = vi.spyOn(logger, 'warn');
+    expect(parseModuleAnnouncement(undefined)).toEqual({ version: null, commands: null });
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it('ignores a field that is not an object', () => {
+    expect(parseModuleAnnouncement('0.6.0')).toEqual({ version: null, commands: null });
+    expect(parseModuleAnnouncement(null)).toEqual({ version: null, commands: null });
+  });
+
+  it('keeps each well-formed part on its own', () => {
+    expect(parseModuleAnnouncement({ version: '0.6.0' })).toEqual({
+      version: '0.6.0',
+      commands: null,
+    });
+    expect(parseModuleAnnouncement({ version: '', commands: ['a_b'] })).toEqual({
+      version: null,
+      commands: ['a_b'],
+    });
+  });
+
+  it('bounds the version and the command list', () => {
+    expect(parseModuleAnnouncement({ version: 'v'.repeat(64) }).version).toBe('v'.repeat(64));
+    expect(parseModuleAnnouncement({ version: 'v'.repeat(65) }).version).toBeNull();
+    const hundred = Array.from({ length: 100 }, () => 'c'.repeat(32));
+    expect(parseModuleAnnouncement({ commands: hundred }).commands).toHaveLength(100);
+    expect(parseModuleAnnouncement({ commands: [...hundred, 'c'] }).commands).toBeNull();
+    expect(parseModuleAnnouncement({ commands: ['c'.repeat(33)] }).commands).toBeNull();
+    expect(parseModuleAnnouncement({ commands: ['Bad-Name'] }).commands).toBeNull();
+    expect(parseModuleAnnouncement({ commands: [1] }).commands).toBeNull();
   });
 });
 

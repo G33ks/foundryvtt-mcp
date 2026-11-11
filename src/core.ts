@@ -14,6 +14,7 @@ import {
   McpError,
   type ReadResourceResult,
 } from '@modelcontextprotocol/sdk/types.js';
+import { BRIDGE_MODULE_ID } from './cli/checks.js';
 import { config, configSettings } from './config/index.js';
 import { summarizeSources } from './config/sources.js';
 import { DiagnosticsClient } from './diagnostics/client.js';
@@ -101,6 +102,12 @@ export interface CoreStatus {
     origin: string;
     /** ISO time the current authenticated connection was established, or `null`. */
     moduleConnectedSince: string | null;
+    /** Version the connected module announced, or `null` (none connected, or a module before 0.6.0). */
+    moduleVersion: string | null;
+    /** Version of the module installed in the world, from the cached world; `null` when unknown. */
+    moduleInstalledVersion: string | null;
+    /** Commands the connected module announced, or `null` when it announced none. */
+    moduleCommands: string[] | null;
     /** `not-started` until the FoundryVTT connection is up (the bridge starts after it). */
     state: BridgeState;
     /** Why the bridge failed to start; `null` otherwise. */
@@ -227,6 +234,7 @@ export class FoundryCore {
     this.moduleBridge = config.moduleBridge.enabled
       ? new ModuleBridge(config.moduleBridge.port, {
           expectedOrigin: new URL(config.foundry.url).origin,
+          installedModuleVersion: () => this.foundryClient.installedModuleVersion(BRIDGE_MODULE_ID),
         })
       : null;
     if (this.moduleBridge) {
@@ -601,6 +609,9 @@ export class FoundryCore {
         protocol: BRIDGE_PROTOCOL_VERSION,
         origin: new URL(config.foundry.url).origin,
         moduleConnectedSince: this.moduleBridge?.moduleConnectedSince()?.toISOString() ?? null,
+        moduleVersion: this.moduleBridge?.moduleAnnouncement().version ?? null,
+        moduleInstalledVersion: this.foundryClient.installedModuleVersion(BRIDGE_MODULE_ID),
+        moduleCommands: this.moduleBridge?.moduleAnnouncement().commands ?? null,
       },
       headlessGm: {
         enabled: headlessGmState !== 'disabled',

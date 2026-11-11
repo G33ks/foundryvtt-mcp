@@ -2130,6 +2130,16 @@ export class FoundryClient {
     return this.worldData;
   }
 
+  /**
+   * The version of a module installed in the world, from the cached world's
+   * module list; `null` when the module or its version is not there.
+   */
+  installedModuleVersion(moduleId: string): string | null {
+    const modules = this.worldData?.modules;
+    const entry = Array.isArray(modules) ? modules.find((m) => m.id === moduleId) : undefined;
+    return typeof entry?.version === 'string' ? entry.version : null;
+  }
+
   // ==========================================================================
   // Actor methods
   // ==========================================================================

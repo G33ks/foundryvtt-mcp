@@ -106,8 +106,9 @@ function transportFor(
   url: string,
   prove: (serverNonce: string) => Promise<unknown>,
   onCommand = vi.fn(async () => 'done'),
+  announcement: { version: string; commands: string[] } | null = null,
 ) {
-  const transport = new BridgeTransport(url, onCommand, { prove });
+  const transport = new BridgeTransport(url, onCommand, { prove }, announcement);
   transports.push(transport);
   transport.connect();
   return { transport, onCommand };
@@ -133,6 +134,79 @@ describe('companion transport against the real bridge', () => {
     transport.sendEvent('target_token', { tokenId: 't1' });
     await waitFor(() => onEvent.mock.calls.length > 0);
     expect(onEvent).toHaveBeenCalledWith('target_token', { tokenId: 't1' });
+  });
+});
+
+describe('companion transport module announcement', () => {
+  it('announces its version and commands to the real bridge', async () => {
+    const port = await freePort();
+    const bridge = new ModuleBridge(port, { expectedOrigin: ORIGIN });
+    bridges.push(bridge);
+    await bridge.start();
+
+    const { transport } = transportFor(
+      `ws://localhost:${port}`,
+      async (nonce) => bridge.prove(nonce),
+      undefined,
+      { version: '0.6.0', commands: ['get_targets', 'set_pause'] },
+    );
+    await waitFor(() => bridge.isConnected() && transport.authenticated);
+
+    expect(bridge.moduleAnnouncement()).toEqual({
+      version: '0.6.0',
+      commands: ['get_targets', 'set_pause'],
+    });
+    expect(() => bridge.send('capture_scene')).toThrow(/needs a newer companion module/);
+  });
+
+  it('sends `module` in auth_response, and nothing without an announcement', async () => {
+    const responses: Record<string, unknown>[] = [];
+    const url = await fakeServer(async (c) => {
+      c.send({ type: 'auth_challenge', protocol: 1, nonce: NONCE });
+      responses.push(await c.next());
+    });
+    const prove = async () => ({ nonce: NONCE, clientProof: 'p', serverProof: 's' });
+    transportFor(url, prove, undefined, { version: '0.6.0', commands: ['get_targets'] });
+    transportFor(url, prove);
+    await waitFor(() => responses.length === 2);
+
+    const announced = responses.find((r) => 'module' in r);
+    expect(announced?.module).toEqual({ version: '0.6.0', commands: ['get_targets'] });
+    expect(responses.filter((r) => !('module' in r))).toHaveLength(1);
+  });
+
+  it('keeps a full announcement under the bridge limit before authentication', async () => {
+    const port = await freePort();
+    const bridge = new ModuleBridge(port, { expectedOrigin: ORIGIN });
+    bridges.push(bridge);
+    await bridge.start();
+    let sent = 0;
+    const announcement = {
+      version: 'v'.repeat(64),
+      commands: Array.from({ length: 100 }, () => 'c'.repeat(32)),
+    };
+    const { transport } = transportFor(
+      `ws://localhost:${port}`,
+      async (nonce) => {
+        const proof = bridge.prove(nonce);
+        sent = Buffer.byteLength(
+          JSON.stringify({
+            type: 'auth_response',
+            protocol: 1,
+            nonce: proof.nonce,
+            proof: proof.clientProof,
+            module: announcement,
+          }),
+        );
+        return proof;
+      },
+      undefined,
+      announcement,
+    );
+    await waitFor(() => bridge.isConnected() && transport.authenticated);
+
+    expect(sent).toBeLessThan(4096);
+    expect(bridge.moduleAnnouncement().commands).toHaveLength(100);
   });
 });
 

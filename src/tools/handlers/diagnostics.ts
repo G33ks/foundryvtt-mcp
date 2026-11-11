@@ -471,7 +471,7 @@ export async function handleGetHealthStatus(
         : '⏸️ Not started — it starts once the FoundryVTT connection is up';
     } else if (moduleBridge) {
       if (moduleBridge.isConnected()) {
-        moduleBridgeSection = `✅ Connected — authenticated module (protocol v${BRIDGE_PROTOCOL_VERSION})`;
+        moduleBridgeSection = `✅ Connected — authenticated module ${moduleBridge.describeModuleVersion()} (protocol v${BRIDGE_PROTOCOL_VERSION})`;
       } else if (headlessGmSession) {
         moduleBridgeSection = `❌ Not connected — no authenticated module (protocol v${BRIDGE_PROTOCOL_VERSION}); see the headless GM session below`;
       } else if (runtime.headlessLaunchError) {

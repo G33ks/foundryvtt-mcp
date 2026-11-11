@@ -149,6 +149,36 @@ describe('formatStatus', () => {
     );
   });
 
+  it('shows the version a connected module announced', () => {
+    const status: DaemonStatus = {
+      ...BASE,
+      bridge: {
+        ...BRIDGE,
+        state: 'listening',
+        moduleConnected: true,
+        moduleConnectedSince: '2026-11-11T10:00:00.000Z',
+        moduleVersion: '0.6.0',
+        moduleInstalledVersion: '0.6.0',
+        moduleCommands: ['get_targets'],
+      },
+    };
+    expect(line(status, 'Module bridge')).toBe(
+      '  Module bridge:  listening on port 31415, protocol v1, authenticated module connected: yes (since 2026-11-11T10:00:00.000Z), module 0.6.0',
+    );
+  });
+
+  it('shows the installed version of a module that announces none', () => {
+    const connected = { ...BRIDGE, state: 'listening' as const, moduleConnected: true };
+    expect(
+      line({ ...BASE, bridge: { ...connected, moduleInstalledVersion: '0.5.2' } }, 'Module bridge'),
+    ).toBe(
+      '  Module bridge:  listening on port 31415, protocol v1, authenticated module connected: yes, module 0.5.2 (not announced)',
+    );
+    expect(line({ ...BASE, bridge: connected }, 'Module bridge')).toBe(
+      '  Module bridge:  listening on port 31415, protocol v1, authenticated module connected: yes, module unknown (not announced)',
+    );
+  });
+
   it('shows the real browser launch error rather than "disabled"', () => {
     const status: DaemonStatus = {
       ...BASE,

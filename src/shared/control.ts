@@ -252,8 +252,14 @@ function formatBridge(
   return (
     `listening on port ${bridge.port}, protocol v${bridge.protocol}, authenticated module connected: ` +
     yesNo(bridge.moduleConnected) +
-    (bridge.moduleConnectedSince ? ` (since ${bridge.moduleConnectedSince})` : '')
+    (bridge.moduleConnectedSince ? ` (since ${bridge.moduleConnectedSince})` : '') +
+    (bridge.moduleConnected ? `, module ${formatModuleVersion(bridge)}` : '')
   );
+}
+
+/** The announced module version, otherwise `<installed or unknown> (not announced)`. */
+function formatModuleVersion(bridge: NonNullable<DaemonStatus['bridge']>): string {
+  return bridge.moduleVersion ?? `${bridge.moduleInstalledVersion ?? 'unknown'} (not announced)`;
 }
 
 function formatHeadlessGm(
