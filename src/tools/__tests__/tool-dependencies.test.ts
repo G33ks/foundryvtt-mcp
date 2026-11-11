@@ -13,7 +13,7 @@ const tools = getAllTools().map((tool) => tool.name);
 
 describe('tool dependencies', () => {
   it('classifies every tool definition', () => {
-    expect(tools).toHaveLength(114);
+    expect(tools).toHaveLength(115);
     for (const name of tools) {
       expect(toolDependency(name), name).toBeDefined();
     }
@@ -35,7 +35,7 @@ describe('tool dependencies', () => {
     }
     expect(counts).toEqual({
       socket: 93,
-      'socket+bridge': 2,
+      'socket+bridge': 3,
       bridge: 9,
       rest: 5,
       'rest-or-local': 1,
@@ -70,6 +70,7 @@ describe('tool dependencies', () => {
   it('needs the module for bridge tools and compendium item sources only', () => {
     expect(needsBridge('capture_scene', {})).toBe(true);
     expect(needsBridge('import_compendium_actor', {})).toBe(true);
+    expect(needsBridge('get_actor_stats', { actorId: 'a' })).toBe(true);
     expect(needsBridge('create_actor_item', { source: { type: 'compendium' } })).toBe(true);
     expect(needsBridge('create_actor_item', { source: { type: 'inline' } })).toBe(false);
     expect(needsBridge('create_actor_item', {})).toBe(false);

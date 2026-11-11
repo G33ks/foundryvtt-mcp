@@ -8,6 +8,8 @@ import { extname } from 'node:path';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import type { ModuleBridge } from '../../foundry/module-bridge.js';
+import { isRecord } from '../../utils/guards.js';
+import { type ActorTargetArgs, resolveActorTarget } from './actor-target.js';
 import { withToolError } from './utils.js';
 
 interface CaptureSceneResult {
@@ -420,6 +422,147 @@ function isGetTargetsResult(value: unknown): value is GetTargetsResult {
   return (
     typeof value === 'object' && value !== null && Array.isArray((value as GetTargetsResult).users)
   );
+}
+
+/** Default and largest `maxBytes` of get_actor_stats: the compact JSON it returns. */
+export const ACTOR_STATS_DEFAULT_MAX_BYTES = 32_768;
+export const ACTOR_STATS_MAX_MAX_BYTES = 65_536;
+const ACTOR_STATS_MAX_PATHS = 50;
+/** Keys named in a too-large error; the rest are counted. */
+const TOO_LARGE_LISTED_KEYS = 15;
+
+interface KeySize {
+  key: string;
+  bytes: number;
+}
+
+function formatBytes(bytes: number): string {
+  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KiB`;
+}
+
+/** The sizes of an object's top-level entries as compact JSON, largest first. */
+function topLevelSizes(data: unknown): KeySize[] {
+  if (!isRecord(data)) {
+    return [];
+  }
+  return Object.entries(data)
+    .map(([key, value]) => ({ key, bytes: Buffer.byteLength(JSON.stringify(value) ?? '') }))
+    .sort((a, b) => b.bytes - a.bytes);
+}
+
+function isKeySizes(value: unknown): value is KeySize[] {
+  return (
+    Array.isArray(value) &&
+    value.every((v) => isRecord(v) && typeof v.key === 'string' && typeof v.bytes === 'number')
+  );
+}
+
+/** The error for an answer over maxBytes: its size, its largest keys, and what to do. */
+function tooLargeError(bytes: number, maxBytes: number, sizes: KeySize[], byPath: boolean) {
+  const listed = sizes
+    .slice(0, TOO_LARGE_LISTED_KEYS)
+    .map((s) => `${s.key} (${formatBytes(s.bytes)})`)
+    .join(', ');
+  const more =
+    sizes.length > TOO_LARGE_LISTED_KEYS
+      ? `, and ${sizes.length - TOO_LARGE_LISTED_KEYS} more`
+      : '';
+  return new McpError(
+    ErrorCode.InvalidRequest,
+    `The answer is ${bytes} bytes of JSON, over maxBytes ${maxBytes}. ` +
+      `${byPath ? 'Requested paths' : 'Top-level keys of system'}, largest first: ${listed || '(none)'}${more}. ` +
+      `Pass paths to read only what you need${byPath ? ' (fewer or deeper ones)' : ''}, e.g. ["${sizes[0]?.key ?? 'key'}"]` +
+      (maxBytes < ACTOR_STATS_MAX_MAX_BYTES
+        ? `, or raise maxBytes (at most ${ACTOR_STATS_MAX_MAX_BYTES}).`
+        : '.'),
+  );
+}
+
+/**
+ * Handles reading one actor's prepared `system` data through the companion
+ * module: a world actor by `actorId`, or one token's actor by `sceneId` +
+ * `tokenId`. The target is checked against the cache before anything is sent.
+ * Returns compact JSON; `paths` narrows it, `maxBytes` bounds it.
+ */
+export async function handleGetActorStats(
+  args: Record<string, unknown>,
+  foundryClient: FoundryClient,
+  moduleBridge: ModuleBridge | null,
+) {
+  const { paths } = args;
+  if (
+    paths !== undefined &&
+    (!Array.isArray(paths) ||
+      paths.length === 0 ||
+      paths.length > ACTOR_STATS_MAX_PATHS ||
+      !paths.every((p) => typeof p === 'string' && p.length > 0))
+  ) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `paths must be an array of 1 to ${ACTOR_STATS_MAX_PATHS} dot paths into system`,
+    );
+  }
+  const maxBytes = args.maxBytes ?? ACTOR_STATS_DEFAULT_MAX_BYTES;
+  if (
+    typeof maxBytes !== 'number' ||
+    !Number.isInteger(maxBytes) ||
+    maxBytes < 1 ||
+    maxBytes > ACTOR_STATS_MAX_MAX_BYTES
+  ) {
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `maxBytes must be an integer from 1 to ${ACTOR_STATS_MAX_MAX_BYTES}`,
+    );
+  }
+  const target = resolveActorTarget(args as ActorTargetArgs, foundryClient);
+  if (!moduleBridge) {
+    throw new McpError(
+      ErrorCode.InvalidRequest,
+      'The module bridge is disabled. Set FOUNDRY_MODULE_BRIDGE_ENABLED=true and install the companion Foundry module.',
+    );
+  }
+  const moduleTarget =
+    target.kind === 'actor'
+      ? { actorId: target.actorId }
+      : { sceneId: target.sceneId, tokenId: target.tokenId, actorId: target.actorId };
+
+  return withToolError('get actor stats', async () => {
+    const answer = await moduleBridge.send('get_actor_stats', {
+      targets: [moduleTarget],
+      ...(paths === undefined ? {} : { paths }),
+      maxBytes,
+    });
+    const results = isRecord(answer) ? answer.results : undefined;
+    const entry = Array.isArray(results) && results.length === 1 ? results[0] : undefined;
+    if (!isRecord(answer) || !isRecord(entry)) {
+      throw new McpError(
+        ErrorCode.InternalError,
+        'Module returned an unexpected get_actor_stats shape',
+      );
+    }
+    if (answer.tooLarge === true) {
+      throw tooLargeError(
+        typeof answer.bytes === 'number' ? answer.bytes : 0,
+        maxBytes,
+        isKeySizes(entry.topLevel) ? entry.topLevel : [],
+        paths !== undefined,
+      );
+    }
+    if (typeof entry.error === 'string') {
+      throw new Error(entry.error);
+    }
+    const text = JSON.stringify({ ...entry, truncated: answer.truncated === true });
+    const bytes = Buffer.byteLength(text);
+    if (bytes > maxBytes) {
+      throw tooLargeError(
+        bytes,
+        maxBytes,
+        topLevelSizes(paths === undefined ? entry.system : entry.values),
+        paths !== undefined,
+      );
+    }
+    return { content: [{ type: 'text', text }] };
+  });
 }
 
 export async function handleGetTargets(

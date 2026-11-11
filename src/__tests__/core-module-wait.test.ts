@@ -109,6 +109,21 @@ describe('FoundryCore: calls that need the companion module', () => {
     expect(route).not.toHaveBeenCalled();
   });
 
+  it('waits for the module before reading actor stats', async () => {
+    const core = new FoundryCore();
+    const bridge = internals(core).moduleBridge;
+    if (!bridge) {
+      throw new Error('no bridge');
+    }
+    const wait = vi.spyOn(bridge, 'waitUntilConnected').mockResolvedValue(true);
+    vi.spyOn(core.foundryClient, 'isReconnecting').mockReturnValue(false);
+
+    await core.callTool('get_actor_stats', { actorId: 'actorAAAAAAAAAAA' });
+
+    expect(wait).toHaveBeenCalledWith(BRIDGE_CONNECT_WAIT_MS);
+    expect(route).toHaveBeenCalledWith('get_actor_stats');
+  });
+
   it('does not wait for the module on an inline item, but does on a compendium one', async () => {
     const core = new FoundryCore();
     const bridge = internals(core).moduleBridge;
