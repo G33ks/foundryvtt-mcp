@@ -26,6 +26,7 @@
 - `update_actor_item` reports the item's name and type: FoundryVTT answers with the changed fields only, so they read `undefined`.
 - `get_document_schema` failed on a type declared only by template.json, which has no schema. With the companion module 0.6.0 it lists that type's default values, with types inferred from them and marked as such; for a DataModel type it also reports computed fields (`persisted: false`) and number bounds (`min`, `max`, `integer`, `positive`).
 - The descriptions of `delete_actor_item` and `get_actor_details` no longer say that no tool lists the ids of an actor's items: `get_actor_inventory` does.
+- A tool given `sceneId` + `tokenId` for a scene that is not in the cache says `Scene not found: <sceneId>`, instead of reporting the token missing from that scene.
 
 ### Known limitations
 

@@ -276,6 +276,16 @@ describe('FoundryClient.resolveTokenActor', () => {
       `Token not found: xxxxxxxxxxxxxxxx in scene ${SCENE_ID}`,
     );
   });
+
+  it('names a scene that is not in the cache', () => {
+    const { client } = buildClient();
+    expect(() => client.resolveTokenActor(TOKEN_ID, 'noSceneXXXXXXXXX')).toThrow(
+      'Scene not found: noSceneXXXXXXXXX',
+    );
+    expect(() => client.resolveTokenActor('xxxxxxxxxxxxxxxx')).toThrow(
+      'Token not found: xxxxxxxxxxxxxxxx',
+    );
+  });
 });
 
 describe('FoundryClient.getTokenActor', () => {
