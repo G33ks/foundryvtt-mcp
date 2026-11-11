@@ -138,6 +138,8 @@ const TOOL_DEPENDENCIES: ReadonlyMap<string, ToolDependency> = new Map<string, T
   ['import_compendium_actor', 'socket+bridge'],
   // The module only for a compendium source; see needsBridge.
   ['create_actor_item', 'socket+bridge'],
+  // Checks its target against the cache, then reads it through the module.
+  ['get_actor_stats', 'socket+bridge'],
   ['capture_scene', 'bridge'],
   ['get_document_schema', 'bridge'],
   ['search_compendium_content', 'bridge'],
@@ -192,7 +194,7 @@ export function waitsForSocket(dependency: ToolDependency | undefined): boolean 
 
 /**
  * True when this call goes through the companion module: every `bridge`
- * tool, `import_compendium_actor`, and `create_actor_item` from a
+ * tool, `import_compendium_actor`, `get_actor_stats`, and `create_actor_item` from a
  * compendium source (an inline item needs only the socket).
  */
 export function needsBridge(name: string, args: Record<string, unknown>): boolean {

@@ -75,6 +75,7 @@ import {
 import { handleGetJournal, handleSearchJournals } from './handlers/journals.js';
 import {
   handleCaptureScene,
+  handleGetActorStats,
   handleGetDocumentSchema,
   handleGetTargets,
   handleImportCompendiumActor,
@@ -991,6 +992,8 @@ export async function routeToolRequest(
         args as { tokenIds: string[]; targeted?: boolean; replace?: boolean },
         moduleBridge,
       );
+    case 'get_actor_stats':
+      return handleGetActorStats(args, foundryClient, moduleBridge);
     case 'get_targets':
       return handleGetTargets(args, moduleBridge);
     case 'ping_canvas':
