@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 2.2.0 — 2026-11-13
+
+Recommended companion module: **0.6.0** (`bridge-v0.6.0`). Module 0.5.2 still works with this server: `get_actor_stats` and `createOptions` are refused at once with a clear message, and `apply_status_effect` without `createOptions` writes the effect over the socket.
 
 ### Added
 
@@ -11,7 +13,7 @@
 
 ### Changed
 
-- `apply_status_effect` goes through the game system's own status effects when the companion module 0.6.0 is connected, so the system recognises the effect as its condition; otherwise it keeps writing an effect carrying the status over the socket. With the bridge enabled it first waits up to 10 s for a module still connecting, as the module's tools do, but never fails for want of it. Through the module, a status id the game system does not know is refused with the list of valid ids, and effects carrying the status that an earlier version wrote over the socket are reported when applying and removed with `active=false`. A new `createOptions` argument carries the creation options a game system reads when a status is created (some ask the user for a value otherwise); without it, such a call fails at once and nothing is created. `createOptions` need the module's path and are refused without it. While writes are disabled, the no-op cases are decided from the cache as before. The answer names the path used.
+- `apply_status_effect` goes through the game system's own status effects when the companion module 0.6.0 is connected, so the system recognises the effect as its condition; otherwise it keeps writing an effect carrying the status over the socket. With the bridge enabled it first waits up to 10 s for a module still connecting, as the module's tools do; without `createOptions`, it never fails for want of it. Through the module, a status id the game system does not know is refused with the list of valid ids, and effects carrying the status that an earlier version wrote over the socket are reported when applying and removed with `active=false`. A new `createOptions` argument carries the creation options a game system reads when a status is created (some ask the user for a value otherwise); without it, such a call fails at once and nothing is created. `createOptions` need the module's path and are refused without it. While writes are disabled, the no-op cases are decided from the cache as before. The answer names the path used.
 - `start_combat` begins the encounter at round 1, turn 0, as Foundry's Begin Combat does. From duckpuppy's fork (Patrick Aikens).
 - `get_combat_state`, `next_turn` and `set_initiative` show a combatant's token or actor name when the combatant has none of its own (FoundryVTT v14 leaves it empty), `get_combat_state` the token id and each token's own HP and AC; the AC is left out when the actor has none. From duckpuppy's fork (Patrick Aikens).
 - A status effect from `apply_status_effect` always shows its icon on the token (since v14, a status alone no longer makes an effect temporary, so the icon stayed hidden). From duckpuppy's fork (Patrick Aikens).
@@ -23,7 +25,7 @@
 - The world cache follows unlinked tokens: changes to a token's own data, items and effects, including the first change to an item or effect it inherits (copied from the base actor, as the server does), the removal of one (kept as removed for that token only) and its creation again with the same id (shown again). `refresh_world_data` is no longer needed for them. From duckpuppy's fork (Patrick Aikens), completed.
 - `apply_status_effect` finds a status an unlinked token inherits from its base actor: it is no longer applied a second time, and it can be removed from that token.
 - An effect from `create_actor_effect` with `statuses` shows its icon on the token, as one from `apply_status_effect` does: under v14 the icon stayed hidden. Effects without statuses are unchanged.
-- `update_actor_item` reports the item's name and type: FoundryVTT answers with the changed fields only, so they read `undefined`.
+- `update_actor_item` reports the item's name and type: FoundryVTT answers with the changed fields only, so they used to read `undefined`.
 - `get_document_schema` failed on a type declared only by template.json, which has no schema. With the companion module 0.6.0 it lists that type's default values, with types inferred from them and marked as such; for a DataModel type it also reports computed fields (`persisted: false`) and number bounds (`min`, `max`, `integer`, `positive`).
 - The descriptions of `delete_actor_item` and `get_actor_details` no longer say that no tool lists the ids of an actor's items: `get_actor_inventory` does.
 - A tool given `sceneId` + `tokenId` for a scene that is not in the cache says `Scene not found: <sceneId>`, instead of reporting the token missing from that scene.
@@ -31,6 +33,7 @@
 ### Known limitations
 
 - Without the companion module 0.6.0, `apply_status_effect` still writes an effect that a game system defining its own statuses with fixed effect ids may not recognise as its condition (it is removed later through the module with `active=false`). Through the module, an effect carrying several statuses, this one among them, is never removed by this tool.
+- When a status is created or removed through the module, a game-system window that is not a standard dialog (`DialogV2`) is not closed: the call fails only when the server stops waiting for the module, after 15 s.
 
 ## 2.1.0 — 2026-11-07
 

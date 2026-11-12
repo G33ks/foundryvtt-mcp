@@ -1,6 +1,6 @@
 {
   "name": "@g33ks/foundryvtt-mcp",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Model Context Protocol server for FoundryVTT integration",
   "bin": {
     "foundryvtt-mcp": "dist/index.js"
