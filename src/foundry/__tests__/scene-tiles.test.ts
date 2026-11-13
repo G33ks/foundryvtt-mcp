@@ -158,7 +158,7 @@ describe('FoundryClient scene & tile creation', () => {
     vi.resetAllMocks();
   });
 
-  async function connectClient() {
+  async function connectClient(release?: Record<string, unknown>) {
     const { io } = await import('socket.io-client');
     const { authenticateFoundry } = await import('../auth.js');
     // afterEach's resetAllMocks() clears the module-factory resolved value.
@@ -166,7 +166,11 @@ describe('FoundryClient scene & tile creation', () => {
       session: 'test-session',
       userId: 'test-user-id',
     });
-    const harness = buildMockSocket(structuredClone(baseWorldData()));
+    const world: Record<string, unknown> = structuredClone(baseWorldData());
+    if (release) {
+      world.release = release;
+    }
+    const harness = buildMockSocket(world);
     vi.mocked(io).mockReturnValue(harness.socket as never);
 
     const client = new FoundryClient({
@@ -240,6 +244,83 @@ describe('FoundryClient scene & tile creation', () => {
       await expect(client.createScene('New Scene', '../../../etc/passwd')).rejects.toThrow(
         /escapes the Data directory/,
       );
+    });
+
+    /** The Scene data `createScene` sent in its `modifyDocument` create request. */
+    function sentSceneData(socket: { emit: ReturnType<typeof vi.fn> }) {
+      const call = socket.emit.mock.calls.find((c) => c[0] === 'modifyDocument');
+      const request = call?.[1] as { type: string; action: string; operation: { data: unknown[] } };
+      expect(request).toMatchObject({ type: 'Scene', action: 'create' });
+      return request.operation.data[0] as Record<string, unknown>;
+    }
+
+    it('puts the background on a default Level under FoundryVTT v14', async () => {
+      const { client, socket } = await connectClient({ generation: 14, build: 370 });
+
+      await client.createScene('New Scene', 'assets/maps/v1/Neon Alley [Alley, Neon].png');
+
+      const data = sentSceneData(socket);
+      expect(data).toMatchObject({
+        name: 'New Scene',
+        width: 1000,
+        height: 1000,
+        initialLevel: 'defaultLevel0000',
+        levels: [
+          {
+            _id: 'defaultLevel0000',
+            name: 'Level',
+            background: {
+              src: 'assets/maps/v1/Neon Alley [Alley, Neon].png',
+              color: '#999999',
+            },
+          },
+        ],
+        grid: { type: 1, size: 100, distance: 1, units: 'ft' },
+      });
+      expect(data).not.toHaveProperty('background');
+      expect(data).not.toHaveProperty('backgroundColor');
+    });
+
+    it('carries an explicit background colour on the v14 Level', async () => {
+      const { client, socket } = await connectClient({ generation: 14, build: 370 });
+
+      await client.createScene('New Scene', 'assets/maps/v1/missing.png', {
+        width: 3000,
+        height: 2000,
+        backgroundColor: '#123456',
+      });
+
+      const data = sentSceneData(socket);
+      expect(data).toMatchObject({ width: 3000, height: 2000 });
+      expect(data.levels).toEqual([
+        {
+          _id: 'defaultLevel0000',
+          name: 'Level',
+          background: { src: 'assets/maps/v1/missing.png', color: '#123456' },
+        },
+      ]);
+    });
+
+    it('keeps the scene-level background under FoundryVTT v13', async () => {
+      const { client, socket } = await connectClient({ generation: 13, version: '13.351' });
+
+      await client.createScene('New Scene', 'assets/maps/v1/Neon Alley [Alley, Neon].png');
+
+      const data = sentSceneData(socket);
+      expect(data).toMatchObject({
+        background: { src: 'assets/maps/v1/Neon Alley [Alley, Neon].png' },
+        backgroundColor: '#999999',
+      });
+      expect(data).not.toHaveProperty('levels');
+      expect(data).not.toHaveProperty('initialLevel');
+    });
+
+    it('reads the generation from the release version when it is not given', async () => {
+      const { client, socket } = await connectClient({ version: '14.370' });
+
+      await client.createScene('New Scene', 'assets/maps/v1/Neon Alley [Alley, Neon].png');
+
+      expect(sentSceneData(socket)).toHaveProperty('initialLevel', 'defaultLevel0000');
     });
   });
 

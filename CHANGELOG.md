@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- `create_scene` under FoundryVTT v14 created a scene with no Level, which Foundry could not display: v14 keeps the background on the scene's Levels, and the scene-level `background` and `backgroundColor` the tool sent were dropped. Under v14 the tool now creates the default Level the Foundry client creates (`defaultLevel0000`, carrying the background image and colour) and sets it as the scene's initial Level. Under v13 the scene is created as before.
+
 ## 2.2.0 — 2026-11-13
 
 Recommended companion module: **0.6.0** (`bridge-v0.6.0`). Module 0.5.2 still works with this server: `get_actor_stats` and `createOptions` are refused at once with a clear message, and `apply_status_effect` without `createOptions` writes the effect over the socket.

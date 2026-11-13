@@ -160,6 +160,12 @@ export type WallType = 'wall' | 'door' | 'secretDoor' | 'terrain' | 'invisible' 
  * preset touches the exact "blocking" (NORMAL) value, which is left to the
  * server's own schema default rather than guessed.
  */
+/**
+ * The id FoundryVTT v14 gives the Level it creates with a new scene
+ * (`BaseScene.metadata.defaultLevelId`).
+ */
+const DEFAULT_LEVEL_ID = 'defaultLevel0000';
+
 const WALL_TYPE_PRESETS: Record<WallType, Record<string, number>> = {
   wall: {},
   door: { door: 1, ds: 0 },
@@ -5347,6 +5353,20 @@ export class FoundryClient {
   }
 
   /**
+   * The connected FoundryVTT generation (13, 14, ...), from the world's
+   * `release`: v14 sends `generation` (and no `version`), earlier releases
+   * a `version` such as "13.351". 0 when neither is known.
+   */
+  private getCoreGeneration(): number {
+    const release = this.worldData?.release ?? {};
+    if (typeof release.generation === 'number') {
+      return release.generation;
+    }
+    const major = Number.parseInt(String(release.version ?? ''), 10);
+    return Number.isFinite(major) ? major : 0;
+  }
+
+  /**
    * Creates a new Scene document from a background image already present
    * under FoundryVTT's `Data` directory. Width/height default to the
    * image's real pixel dimensions (read from disk via FOUNDRY_DATA_PATH)
@@ -5388,13 +5408,31 @@ export class FoundryClient {
     const width = options.width ?? size.width;
     const height = options.height ?? size.height;
 
+    const backgroundColor = options.backgroundColor ?? '#999999';
+    // v14 moved the background onto the scene's Levels: a scene created
+    // without one has nothing to draw. The Foundry client adds a default
+    // Level in Scene#_preCreate (client/documents/scene.mjs, 14.370:
+    // 1009-1031), which a socket create never runs, so it is built here.
+    const backgroundData =
+      this.getCoreGeneration() >= 14
+        ? {
+            levels: [
+              {
+                _id: DEFAULT_LEVEL_ID,
+                name: 'Level',
+                background: { src: backgroundSrc, color: backgroundColor },
+              },
+            ],
+            initialLevel: DEFAULT_LEVEL_ID,
+          }
+        : { background: { src: backgroundSrc }, backgroundColor };
+
     const data: Record<string, unknown> = {
       name,
-      background: { src: backgroundSrc },
+      ...backgroundData,
       width,
       height,
       padding: options.padding ?? 0.25,
-      backgroundColor: options.backgroundColor ?? '#999999',
       grid: {
         type: options.gridType ?? 1,
         size: options.gridSize ?? 100,
