@@ -6,7 +6,7 @@
 
 - [ ] Tests added or updated, and `npm test` passes
 - [ ] `npm run lint` and `npx tsc --noEmit` pass
-- [ ] Documentation updated (README, SETUP_GUIDE, docs/) where behaviour changes
+- [ ] Documentation updated (README, docs/) where behaviour changes; `docs/tools.md` regenerated (`npm run docs:tools`) when a tool changes
 - [ ] Commits follow [Conventional Commits](https://www.conventionalcommits.org/)
 - [ ] A new tool that changes the world is listed in `src/tools/write-tools.ts`
 
