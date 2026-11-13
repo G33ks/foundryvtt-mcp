@@ -13,6 +13,7 @@
     "smoke": "node scripts/smoke-test.js",
     "smoke:dotenv": "node scripts/smoke-dotenv.js",
     "smoke:pack": "node scripts/smoke-pack.js",
+    "docs:tools": "node scripts/generate-tools-doc.js",
     "stress:shared": "node scripts/stress-shared.js",
     "check:bridge-security": "node scripts/check-bridge-security.js",
     "bridge:package": "node scripts/package-bridge.js",
