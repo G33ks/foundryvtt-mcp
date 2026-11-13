@@ -73,7 +73,7 @@ export const actorTools = [
   {
     name: 'search_actors',
     description:
-      "Search actors (player characters, NPCs) by name, optionally filtered by type. Returns a summary line per match: name, type, level and current/max HP. Use when: checking whether an actor exists, or getting a quick roster with HP. Do not use when: you already have the actorId and want that actor's ability scores - use get_actor_details; or you need the actorId itself, which this tool does not print - read the foundry://actors resource, whose JSON lists up to the first 100 actors with their _id (not exhaustive in larger worlds).",
+      "Search actors (player characters, NPCs) by name, optionally filtered by type. Returns a summary line per match: name, type, and the level and current/max hit points when the actor stores them at details.level and attributes.hp. Use when: checking whether an actor exists, or getting a quick roster. Do not use when: you already have the actorId and want more of that actor's values - use get_actor_details; or you need the actorId itself, which this tool does not print - read the foundry://actors resource, whose JSON lists up to the first 100 actors with their _id (not exhaustive in larger worlds).",
     inputSchema: {
       type: 'object',
       properties: {
@@ -100,7 +100,7 @@ export const actorTools = [
   {
     name: 'get_actor_details',
     description:
-      'Get details for one actor by id: type, level, current/max HP, AC and ability scores; no biography or description text is returned (the description line always reads "No description available."). Use when: you have an actorId and need its current HP or ability scores - notably as the read-before-write step for update_actor_attributes. For one token on a map, give sceneId + tokenId instead of actorId: an unlinked token (a copy of a monster with its own HP) reports its own values, a linked token the values of its world actor. Do not use when: you only have a name - run search_actors first; or you need the ids of items the actor owns, which this tool does not return - get_actor_inventory lists them.',
+      'Get details for one actor by id: type, and the level, current/max hit points, armour class and ability values the actor stores at details.level, attributes.hp, attributes.ac and abilities (a game system that stores them elsewhere shows fewer fields; get_actor_stats returns all of its data); no biography or description text is returned (the description line always reads "No description available."). Use when: you have an actorId and need its current values - notably as the read-before-write step for update_actor_attributes. For one token on a map, give sceneId + tokenId instead of actorId: an unlinked token (a copy of a creature with its own values) reports its own values, a linked token the values of its world actor. Do not use when: you only have a name - run search_actors first; or you need the ids of items the actor owns, which this tool does not return - get_actor_inventory lists them.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -124,7 +124,7 @@ export const actorTools = [
   {
     name: 'get_actor_inventory',
     description:
-      "List an actor's owned items (equipment, spells, features) with full system data per item, unlike get_actor_details which only reports the actor's own top-level stats. Use when: checking what a character or NPC carries or knows before an attack, spell, or trade. For one token on a map, give sceneId + tokenId instead of actorId: an unlinked token lists its own items (those it inherits from its base actor and its own, without the ones removed from it), a linked token its world actor's. Do not use when: you only need the actor's HP/AC/abilities - use get_actor_details.",
+      "List an actor's owned items (equipment, features, abilities…) with full system data per item, unlike get_actor_details which only reports the actor's own top-level stats. Use when: checking what a character or NPC carries or knows before an action or a trade. For one token on a map, give sceneId + tokenId instead of actorId: an unlinked token lists its own items (those it inherits from its base actor and its own, without the ones removed from it), a linked token its world actor's. Do not use when: you only need the actor's own values - use get_actor_details.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -158,7 +158,7 @@ export const actorMutationTools = [
   {
     name: 'update_actor_attributes',
     description:
-      'Update fields on an actor\'s system data. Patch keys are dot-paths into actor.system (e.g. "attributes.hp.value", "attributes.hp.temp", "currency.gp", "resources.primary.value", "spells.spell1.value", "attributes.exhaustion") and values are absolute target values, never relative deltas. Validates HP <= max + temp, spell slots <= max, and exhaustion within 0-10 (2024) or 0-6 (2014), and returns the post-update value for every patched path. Use when: applying damage or healing, spending a spell slot or resource, or adjusting currency on a known actorId. For one token on a map - an unlinked copy of a monster, which has its own HP - give sceneId + tokenId instead of actorId: only that token changes, not the base actor or its other copies. Write only stored fields: a field the game system computes from others is accepted and saved by the server, but has no effect in play. Do not use when: changing an item the actor owns (use update_actor_item) or only reading current values (use get_actor_details). ' +
+      'Update fields on an actor\'s system data. Patch keys are dot-paths into actor.system (e.g. "attributes.health.value", "resources.primary.value", "details.notes") and values are absolute target values, never relative deltas. If the actor stores a value at one of these paths, it is range-checked: attributes.hp.value against max + temp, spells.<key>.value against the max of that entry, and attributes.exhaustion against 0-10 (0-6 when the data of the actor marks older rules). Returns the post-update value for every patched path. Use when: applying damage or healing, spending a resource, or adjusting a stored value on a known actorId. For one token on a map - an unlinked copy of a creature, which has its own values - give sceneId + tokenId instead of actorId: only that token changes, not the base actor or its other copies. Write only stored fields: a field the game system computes from others is accepted and saved by the server, but has no effect in play. Do not use when: changing an item the actor owns (use update_actor_item) or only reading current values (use get_actor_details). ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -180,7 +180,7 @@ export const actorMutationTools = [
           type: 'object',
           description:
             'Map of dot-path → value, where each dot-path addresses a field under actor.system ' +
-            '(e.g. {"attributes.hp.value": 30, "currency.gp": 12}). Values must be number, string, or boolean.',
+            '(e.g. {"attributes.health.value": 30, "resources.primary.value": 2}). Values must be number, string, or boolean.',
           additionalProperties: {
             type: ['number', 'string', 'boolean'],
           },
@@ -225,7 +225,7 @@ export const actorMutationTools = [
   {
     name: 'create_full_actor',
     description:
-      "Create a new top-level Actor document AND seed it with starting items (skills, gear, weapons, cyberware, …) in one call, instead of create_world_actor followed by one create_actor_item per item. Pairs with get_document_schema: call that once per Actor/Item type to learn the real field names for `system`, then build the whole character here in a single call. The actor is always created first - a failure there aborts the whole call. Item creation is best-effort per item, not atomic: a bad item (e.g. a typo'd type) is reported in the response's item-failures list rather than losing the actor or the items that did succeed. Use when: standing up a fully-statted PC or NPC (correct ability scores/attributes plus starting equipment/skills) in one round trip. Do not use when: the actor already exists - use create_actor_item to add items to it; or a bare/generic actor is enough - use create_world_actor. " +
+      "Create a new top-level Actor document AND seed it with starting items (gear, weapons, features, …) in one call, instead of create_world_actor followed by one create_actor_item per item. Pairs with get_document_schema: call that once per Actor/Item type to learn the real field names for `system`, then build the whole character here in a single call. The actor is always created first - a failure there aborts the whole call. Item creation is best-effort per item, not atomic: a bad item (e.g. a typo'd type) is reported in the response's item-failures list rather than losing the actor or the items that did succeed. Use when: standing up a fully-statted PC or NPC (correct attributes plus starting equipment and features) in one round trip. Do not use when: the actor already exists - use create_actor_item to add items to it; or a bare/generic actor is enough - use create_world_actor. " +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -250,7 +250,7 @@ export const actorMutationTools = [
         items: {
           type: 'array',
           description:
-            'Optional starting items (skills, weapons, gear, cyberware, …) to create on the actor immediately after it exists',
+            'Optional starting items (weapons, gear, features, …) to create on the actor immediately after it exists',
           items: {
             type: 'object',
             properties: {
@@ -261,7 +261,7 @@ export const actorMutationTools = [
               type: {
                 type: 'string',
                 description:
-                  'Game-system item type (e.g. "weapon", "skill") - use get_document_schema("Item", type) to learn the real field names first',
+                  'Game-system item type (e.g. "weapon", "feature") - use get_document_schema("Item", type) to learn the real field names first',
               },
               system: {
                 type: 'object',
@@ -340,7 +340,7 @@ export const compendiumTools = [
   {
     name: 'search_compendium',
     description:
-      'Search FoundryVTT compendium packs by name and metadata; searches all enabled packs unless compendiumId scopes it to one pack. Use when: looking up spells, monsters, or equipment that are not yet present in the world. Do not use when: the document already exists in the world - use search_items or search_world. Requires the REST API module (FOUNDRY_API_KEY); without it the search returns no results instead of failing.',
+      'Search FoundryVTT compendium packs by name and metadata; searches all enabled packs unless compendiumId scopes it to one pack. Use when: looking up creatures, items or rules that are not yet present in the world. Do not use when: the document already exists in the world - use search_items or search_world. Requires the REST API module (FOUNDRY_API_KEY); without it the search returns no results instead of failing.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -915,7 +915,7 @@ export const tileMutationTools = [
   {
     name: 'create_tile',
     description:
-      "Place a decorative Tile on a scene from an image already present under FoundryVTT's Data directory (see list_scene_assets). Width/height default to the image's real pixel dimensions when not given. Position is either explicit pixel x/y (top-left corner) or a gridCol/gridRow cell (the tile is centred in that cell - see find_open_cells for candidates). By default refuses to place a tile whose bounding box crosses a scene wall; pass allowWallOverlap: true to place anyway (e.g. a wall-mounted prop). Use when: decorating a scene with scenery (crates, dumpsters, vehicles, graffiti) that is not a creature or NPC. Do not use when: the object is a creature/NPC that should have HP and act in combat - use create_world_actor + spawn_token instead. " +
+      "Place a decorative Tile on a scene from an image already present under FoundryVTT's Data directory (see list_scene_assets). Width/height default to the image's real pixel dimensions when not given. Position is either explicit pixel x/y (top-left corner) or a gridCol/gridRow cell (the tile is centred in that cell - see find_open_cells for candidates). By default refuses to place a tile whose bounding box crosses a scene wall; pass allowWallOverlap: true to place anyway (e.g. a wall-mounted prop). Use when: decorating a scene with scenery (crates, dumpsters, vehicles, graffiti) that is not a creature or NPC. Do not use when: the object is a creature/NPC that should have its own statistics and act in combat - use create_world_actor + spawn_token instead. " +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -1466,7 +1466,7 @@ export const generationTools = [
   {
     name: 'generate_npc',
     description:
-      'Generate a random NPC (name, race, class, HP, ability scores, background) as text. Use when: the user needs a throwaway NPC on the spot. Do not use when: the NPC must exist in FoundryVTT - this creates no documents, and the result still has to be entered into the world by hand.',
+      'Generate a random fantasy-style NPC as text, from built-in lists that do not depend on the game system of the world (name, people, profession, hit points, ability values, background). Use when: the user needs a throwaway NPC on the spot. Do not use when: the NPC must exist in FoundryVTT - this creates no documents, and the result still has to be entered into the world by hand.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1491,13 +1491,13 @@ export const generationTools = [
   {
     name: 'generate_loot',
     description:
-      "Generate random treasure for an encounter as text. Only the currency amounts vary: they scale with the challenge rating, while the item list is fixed (a Healing Potion and a Silver Ring) and the treasureType argument is accepted but not used. Use when: the user wants a quick coin total for an encounter. Do not use when: the loot should end up in an actor's inventory - this creates no documents; use create_actor_item for that.",
+      "Generate random fantasy-style treasure for an encounter as text, from built-in tables that do not depend on the game system of the world. Only the coin amounts vary: they scale with challengeRating, while the item list is fixed (a healing potion and a silver ring) and the treasureType argument is accepted but not used. Use when: the user wants a quick coin total for an encounter. Do not use when: the loot should end up in an actor's inventory - this creates no documents; use create_actor_item for that.",
     inputSchema: {
       type: 'object',
       properties: {
         challengeRating: {
           type: 'number',
-          description: 'Challenge rating for loot generation',
+          description: 'Difficulty of the encounter; the coin amounts scale with it',
           minimum: 0,
           maximum: 30,
         },
@@ -1629,7 +1629,7 @@ export const combatTools = [
   {
     name: 'get_combat_state',
     description:
-      "Get the active combat encounter: initiative order with each combatant's name, initiative, HP and AC, plus the current round and which combatant is up. Use when: reporting whose turn it is, or checking whether a combat is already running before start_combat. Do not use when: you need a combatantId for set_initiative - this prints names and ordinals, not ids; read the foundry://combat resource, whose JSON includes each combatant's _id and lists combatants in this same initiative order, so the Nth entry printed here is that resource's combatants[N-1] and combat.turn indexes it directly.",
+      "Get the active combat encounter: initiative order with each combatant's name and initiative, its hit points and armour class when its actor stores them at attributes.hp and attributes.ac, plus the current round and which combatant is up. Use when: reporting whose turn it is, or checking whether a combat is already running before start_combat. Do not use when: you need a combatantId for set_initiative - this prints names and ordinals, not ids; read the foundry://combat resource, whose JSON includes each combatant's _id and lists combatants in this same initiative order, so the Nth entry printed here is that resource's combatants[N-1] and combat.turn indexes it directly.",
     inputSchema: {
       type: 'object',
       properties: {},
@@ -1780,7 +1780,7 @@ export const tokenMutationTools = [
   {
     name: 'apply_status_effect',
     description:
-      'Apply or remove a status condition (e.g. "prone", "stunned") on a token\'s actor. Set active=false to remove. Matches by status id, so re-applying or clearing-when-absent is a no-op. With the module bridge enabled, it first waits up to 10 s for the companion module if it is still connecting. With module 0.6.0 or later, the status goes through the game system\'s own status effects, so the system recognises the effect as its condition; effects carrying the status that were written earlier over the socket are reported when applying and removed with active=false. Some game systems ask for a value when a status is created; pass it in createOptions, under the option name the system documents. Without it, the call fails at once and nothing is created. createOptions need that path: they are refused when it is not available (no module 0.6.0, or writes disabled), and ignored when the status is already active. Otherwise, or if the module does not come, an effect carrying the status is written over the socket (its icon always shown), which a game system that defines its own statuses with fixed effect ids may not recognise. The answer names the path used. On an unlinked token only that token changes: a status it inherits from its base actor is found and can be removed from that token alone. Use when: a condition is gained or lost. Do not use when: changing numeric state such as HP - use update_actor_attributes. ' +
+      'Apply or remove a status condition (e.g. "prone", "stunned") on a token\'s actor. Set active=false to remove. Matches by status id, so re-applying or clearing-when-absent is a no-op. With the module bridge enabled, it first waits up to 10 s for the companion module if it is still connecting. With module 0.6.0 or later, the status goes through the game system\'s own status effects, so the system recognises the effect as its condition; effects carrying the status that were written earlier over the socket are reported when applying and removed with active=false. Some game systems ask for a value when a status is created; pass it in createOptions, under the option name the system documents. Without it, the call fails at once and nothing is created. createOptions need that path: they are refused when it is not available (no module 0.6.0, or writes disabled), and ignored when the status is already active. Otherwise, or if the module does not come, an effect carrying the status is written over the socket (its icon always shown), which a game system that defines its own statuses with fixed effect ids may not recognise. The answer names the path used. On an unlinked token only that token changes: a status it inherits from its base actor is found and can be removed from that token alone. Use when: a condition is gained or lost. Do not use when: changing numeric state such as hit points - use update_actor_attributes. ' +
       WRITE_GATE +
       ' Exception: the no-op cases (applying an already-present status, or clearing an absent one) report success without attempting a write, so they also return normally while writes are disabled.',
     inputSchema: {
@@ -1815,7 +1815,7 @@ export const tokenMutationTools = [
   {
     name: 'spawn_token',
     description:
-      "Place a new token for an existing actor onto a scene at given x/y pixel coordinates, defaulting to the active scene when sceneId is omitted. Base display fields (texture, size, vision) are seeded from the actor's prototypeToken. Use when: a monster, NPC, or reinforcement needs to appear on the map. Do not use when: repositioning a token that is already on the scene - use move_token. " +
+      "Place a new token for an existing actor onto a scene at given x/y pixel coordinates, defaulting to the active scene when sceneId is omitted. Base display fields (texture, size, vision) are seeded from the actor's prototypeToken. Use when: a creature, NPC, or reinforcement needs to appear on the map. Do not use when: repositioning a token that is already on the scene - use move_token. " +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -1851,7 +1851,7 @@ export const tokenMutationTools = [
   {
     name: 'delete_token',
     description:
-      "Remove a token from a scene without deleting the underlying actor. Use when: a monster is defeated and removed from the battle, or a token was placed by mistake. Do not use when: the actor document itself should be deleted - use delete_world_actor; this only removes the token's placement on the map. " +
+      "Remove a token from a scene without deleting the underlying actor. Use when: a creature is defeated and removed from the battle, or a token was placed by mistake. Do not use when: the actor document itself should be deleted - use delete_world_actor; this only removes the token's placement on the map. " +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -2840,14 +2840,14 @@ export const moduleBridgeTools = [
   {
     name: 'import_compendium_actor',
     description:
-      'Import a compendium Actor (with its embedded items and effects) as a new top-level world Actor - the gap spawn_token cannot close alone, since it requires an actor that already exists in the world. Best-effort on embedded items: if the game system rejects embedded documents on create, the actor is recreated without them and each item is seeded individually, reporting per-item failures rather than losing the whole import. Requires the companion Foundry module. Use when: adding a monster or NPC from a compendium to the world before spawning its token. Do not use when: the actor already exists in the world - use spawn_token directly.' +
+      'Import a compendium Actor (with its embedded items and effects) as a new top-level world Actor - the gap spawn_token cannot close alone, since it requires an actor that already exists in the world. Best-effort on embedded items: if the game system rejects embedded documents on create, the actor is recreated without them and each item is seeded individually, reporting per-item failures rather than losing the whole import. Requires the companion Foundry module. Use when: adding a creature or NPC from a compendium to the world before spawning its token. Do not use when: the actor already exists in the world - use spawn_token directly.' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
       properties: {
         compendiumId: {
           type: 'string',
-          description: 'Compendium pack id the actor lives in (e.g. "dnd5e.monsters")',
+          description: 'Compendium pack id the actor lives in (e.g. "world.creatures")',
         },
         actorId: {
           type: 'string',
@@ -3064,7 +3064,7 @@ export const effectTools = [
               key: {
                 type: 'string',
                 description:
-                  'Dot-path into the actor being modified (e.g. "system.attributes.hp.max")',
+                  'Dot-path into the actor being modified (e.g. "system.attributes.health.max")',
               },
               mode: {
                 type: 'string',
