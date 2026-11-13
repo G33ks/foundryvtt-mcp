@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Tool descriptions no longer name a particular game system: their examples are neutral, and where a tool reads or checks a given path (`search_actors`, `get_actor_details`, `get_combat_state`, the range checks of `update_actor_attributes`), the description names the path and says it applies when the actor stores a value there.
+
+### Documentation
+
+- The README is short: what the connector does, the requirements, a five-step quick start, the known limitations. The details moved to `docs/`: installation, configuration (every setting, checked against the code), architecture, security and compatibility.
+- `docs/tools.md` lists every tool with its description, parameters, whether it writes and what it needs. `scripts/generate-tools-doc.js` generates it from the tool definitions (`npm run docs:tools`), and CI checks that it is up to date.
+- `SETUP_GUIDE.md` and `docs/guides/configuration.md` became short pages pointing to the new ones; `docs/guides/integration.md`, `docs/guides/development.md` and `examples/mcp-client-configs.md` were removed, their content moved to `docs/installation.md` and `CONTRIBUTING.md`.
+- The README no longer describes `roll_dice` as local only: it rolls with FoundryVTT's own engine when `FOUNDRY_API_KEY` is set, and locally otherwise.
+
 ## 2.2.1 — 2026-11-13
 
 ### Security
