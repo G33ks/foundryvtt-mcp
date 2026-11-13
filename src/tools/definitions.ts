@@ -40,7 +40,7 @@ const CONFIRM_FIRST =
  * *listed*, so a divergence would be invisible.
  */
 export const ROLL_DICE_DESCRIPTION =
-  'Roll dice and return the total with a per-term breakdown. Dice terms and whole numbers joined by + or -, with whitespace allowed anywhere ("1d20+5", "1d20 + 5", "1d20+5+3", "2d6 + 1d4", "3d6"; a count-less "d20" means one die), always work and every term counts towards the total - that is the portable grammar, safe on either transport. Multiplication and Foundry modifier syntax such as "4d6kh3" or "1d20r1" are rejected on both transports, with an error naming the offending character and its position, never dropped from the total in silence. Parentheses are the one difference: with FOUNDRY_API_KEY set the formula goes to FoundryVTT\'s own Roll engine, which evaluates them, while the default Socket.IO transport rolls locally and rejects them by name - and a REST roll that cannot reach the server falls back to that same local roller, so a parenthesised formula can still fail there. Prefer the expanded form when it matters. Use when: the user asks for a check, save, attack, damage, or any random result.';
+  'Roll dice and return the total with a per-term breakdown. Dice terms and whole numbers joined by + or -, with whitespace allowed anywhere ("1d20+5", "1d20 + 5", "1d20+5+3", "2d6 + 1d4", "3d6"; a count-less "d20" means one die), always work and every term counts towards the total - that is the portable grammar, safe on either transport. Multiplication and Foundry modifier syntax such as "4d6kh3" or "1d20r1" are rejected on both transports, with an error naming the offending character and its position, never dropped from the total in silence. Parentheses are the one difference: with FOUNDRY_API_KEY set the formula goes to FoundryVTT\'s own Roll engine, which evaluates them, while the default Socket.IO transport rolls locally and rejects them by name - and a REST roll that cannot reach the server falls back to that same local roller, so a parenthesised formula can still fail there. Prefer the expanded form when it matters. Use when: the user asks for a check, an attack, damage, or any random result.';
 
 /**
  * Dice rolling tool definitions
@@ -362,7 +362,7 @@ export const compendiumTools = [
             },
             itemType: {
               type: 'string',
-              description: 'Item type filter (spell, weapon, feat, etc.)',
+              description: 'Item type filter (e.g. weapon, equipment, feature)',
             },
             spellLevel: {
               type: 'number',
@@ -401,7 +401,7 @@ export const itemMutationTools = [
   {
     name: 'create_actor_item',
     description:
-      'Create an item on an actor from an inline item document (type, name, system) or by referencing a compendium pack entry (compendium sources require the companion Foundry module). Use when: adding a new weapon, spell, feature, or piece of equipment to a known actorId. For one token on a map, give sceneId + tokenId (an actorId given as well must be the actor of the token): an unlinked token gets the item on that token only, a linked token on its world actor. Do not use when: editing an item the actor already owns - use update_actor_item. Replacing an item is not atomic: create the replacement first and delete the old one second. Canonical target: D&D 5e v4+ activity schema. ' +
+      'Create an item on an actor from an inline item document (type, name, system) or by referencing a compendium pack entry (compendium sources require the companion Foundry module). Use when: adding a new weapon, feature, or piece of equipment to a known actorId. For one token on a map, give sceneId + tokenId (an actorId given as well must be the actor of the token): an unlinked token gets the item on that token only, a linked token on its world actor. Do not use when: editing an item the actor already owns - use update_actor_item. Replacing an item is not atomic: create the replacement first and delete the old one second. Canonical target: D&D 5e v4+ activity schema. ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -561,7 +561,7 @@ export const sceneMutationTools = [
         backgroundSrc: {
           type: 'string',
           description:
-            'Data-relative path to the background image (e.g. "assets/cyberpunk/maps/v1/x.jpg"), as returned by list_scene_assets',
+            'Data-relative path to the background image (e.g. "assets/maps/v1/x.jpg"), as returned by list_scene_assets',
         },
         width: {
           type: 'number',
@@ -1058,7 +1058,7 @@ export const placeableTools = [
   {
     name: 'list_templates',
     description:
-      'List the Measured Templates (AOE spell/effect shapes) placed on a scene (id, template type, position, distance, direction, angle, width, colors, hidden), defaulting to the active scene when sceneId is omitted. Read from cached worldData - no canvas access needed. Use when: inspecting active spell areas or finding a templateId for delete_template.',
+      'List the Measured Templates (area-of-effect shapes) placed on a scene (id, template type, position, distance, direction, angle, width, colors, hidden), defaulting to the active scene when sceneId is omitted. Read from cached worldData - no canvas access needed. Use when: inspecting active areas of effect or finding a templateId for delete_template.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1395,7 +1395,7 @@ export const placeableMutationTools = [
   {
     name: 'create_template',
     description:
-      'Place a Measured Template (spell/area-of-effect shape: "circle", "cone", "rect", "ray") on a scene at pixel x/y or a gridCol/gridRow cell. Distance is specified in scene grid units (e.g. metres or feet). ' +
+      'Place a Measured Template (area-of-effect shape: "circle", "cone", "rect", "ray") on a scene at pixel x/y or a gridCol/gridRow cell. Distance is specified in scene grid units (e.g. metres or feet). ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -2702,7 +2702,7 @@ export const settingsTools = [
   {
     name: 'get_world_setting',
     description:
-      'Read a world setting by its namespaced key (e.g. "cyberpunk-red-core.customSetting" or "simple-calendar.year"). If the setting has never been modified from its system/module default, exists will be false. Use when: inspecting world configuration.',
+      'Read a world setting by its namespaced key (e.g. "my-module.customSetting" or "simple-calendar.year"). If the setting has never been modified from its system/module default, exists will be false. Use when: inspecting world configuration.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2717,7 +2717,7 @@ export const settingsTools = [
   {
     name: 'set_world_setting',
     description:
-      'Update or create a world setting value for a system or module namespace (e.g. "cyberpunk-red-core.settingName"). Refuses writes to the "core.*" namespace (core settings control the Foundry client itself and can break the world; change those in the UI). ' +
+      'Update or create a world setting value for a system or module namespace (e.g. "my-module.settingName"). Refuses writes to the "core.*" namespace (core settings control the Foundry client itself and can break the world; change those in the UI). ' +
       CONFIRM_FIRST +
       ' ' +
       WRITE_GATE,
@@ -2771,7 +2771,7 @@ export const moduleBridgeTools = [
         type: {
           type: 'string',
           description:
-            'The Actor or Item type to introspect (e.g. "character", "npc", "weapon", "spell") - system-specific; list valid types by trying an obviously-wrong one, or check get_world_summary/the system documentation',
+            'The Actor or Item type to introspect (e.g. "character", "npc", "weapon") - system-specific; list valid types by trying an obviously-wrong one, or check get_world_summary/the system documentation',
         },
       },
       required: ['documentType', 'type'],
@@ -2868,7 +2868,7 @@ export const moduleBridgeTools = [
   {
     name: 'set_target',
     description:
-      "Set or clear this GM user's target selection on the active canvas (renders the targeting reticle in connected player browsers). tokenIds are token document IDs on the currently viewed scene. Requires the companion Foundry module. Use when: directing player attention, declaring spell targets, or marking focus fire. " +
+      "Set or clear this GM user's target selection on the active canvas (renders the targeting reticle in connected player browsers). tokenIds are token document IDs on the currently viewed scene. Requires the companion Foundry module. Use when: directing player attention, declaring targets, or marking a shared target. " +
       MODULE_WRITE_GATE,
     inputSchema: {
       type: 'object',
@@ -3018,7 +3018,7 @@ export const effectTools = [
   {
     name: 'create_actor_effect',
     description:
-      'Create a general-purpose ActiveEffect on an actor with mechanical changes (attribute modifiers) and/or a duration - not just a status toggle (use apply_status_effect for that). Give actorId alone for a world actor, or actorId plus the sceneId+tokenId pair for one token: a linked token writes its world actor, an unlinked token only that token (its own copy of the actor), never the base actor or its other tokens. The token must carry actorId. changes[].mode is a named FoundryVTT ACTIVE_EFFECT_MODES combine rule (add/multiply/override/upgrade/downgrade/custom), not a raw number. Use when: applying a spell buff, a debuff, or an equipment bonus with a real mechanical effect. Do not use when: toggling a simple named condition (prone, stunned) - use apply_status_effect. ' +
+      'Create a general-purpose ActiveEffect on an actor with mechanical changes (attribute modifiers) and/or a duration - not just a status toggle (use apply_status_effect for that). Give actorId alone for a world actor, or actorId plus the sceneId+tokenId pair for one token: a linked token writes its world actor, an unlinked token only that token (its own copy of the actor), never the base actor or its other tokens. The token must carry actorId. changes[].mode is a named FoundryVTT ACTIVE_EFFECT_MODES combine rule (add/multiply/override/upgrade/downgrade/custom), not a raw number. Use when: applying a buff, a debuff, or an equipment bonus with a real mechanical effect. Do not use when: toggling a simple named condition (prone, stunned) - use apply_status_effect. ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',
