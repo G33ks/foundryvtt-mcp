@@ -19,7 +19,7 @@ anything or writing anything — safe while the shared process runs:
 4. a Chromium-based browser starts headless for the invisible GM session.
 
 Each failed step says what to fix. To write or fix the configuration
-interactively, run `foundryvtt-mcp init` (see [SETUP_GUIDE.md](SETUP_GUIDE.md)).
+interactively, run `foundryvtt-mcp init` (see [Installation](docs/installation.md#3-run-init)).
 
 ### Health Check
 ```bash
@@ -144,10 +144,11 @@ The client entries name the Node.js that ran `init` by its path, which changes w
 ### Feature-Specific Issues
 
 #### Dice Rolling Not Working
-**Symptoms**: Dice roll commands fail
+**Symptoms**: `roll_dice` refuses a formula
 **Solutions**:
-1. **Check formula**: Ensure dice notation is valid (e.g., "1d20+5", "3d6")
-2. **FoundryVTT version**: The server handles FoundryVTT v13 and v14 explicitly; older versions are not verified
+1. **Use the portable form**: dice terms and whole numbers joined by `+` or `-` (`"1d20+5"`, `"2d6 + 1d4"`) work everywhere. The error names the character it refuses and its position.
+2. **Modifiers and multiplication** (`"4d6kh3"`, `"1d20r1"`, `*`): `roll_dice` refuses them; `roll_and_post`, through the companion module, rolls them with FoundryVTT's own engine and posts the result to chat.
+3. **Parentheses**: only with `FOUNDRY_API_KEY` set, when the REST API module rolls the formula; the default local roller refuses them.
 
 #### A journal edit was overwritten
 **Symptoms**: A journal tool response starts with `⚠️ Journal overwrite detected`, `get_health_status` lists an overwrite under **Journal Integrity**, or the GMs received a whispered chat message about it. Text the connector wrote to a page is gone, or a change made in FoundryVTT was replaced by the connector's write.
@@ -172,7 +173,7 @@ Detection compares paragraphs of text, not HTML, so markup rewritten by FoundryV
 **Symptoms**: the bridge tools (`capture_scene`, `search_compendium_content`, …) report that no authenticated module is connected; **FoundryVTT MCP Bridge** is absent from **Manage Modules**; or `daemon.log` shows `likely an outdated foundryvtt-mcp-bridge module (< 0.5.0), redeploy it`.
 
 **Solutions**:
-1. **Module absent**: install it from the Setup screen, **Add-on Modules** → **Install Module**, with the manifest URL `https://raw.githubusercontent.com/G33ks/foundryvtt-mcp/main/foundry-module/module.json` (see [SETUP_GUIDE.md](SETUP_GUIDE.md#2-install-companion-module-foundryvtt-mcp-bridge)), then enable it in the world's **Manage Modules** and reload.
+1. **Module absent**: install it from the Setup screen, **Add-on Modules** → **Install Module**, with the manifest URL `https://raw.githubusercontent.com/G33ks/foundryvtt-mcp/main/foundry-module/module.json` (see [Installation](docs/installation.md#install-the-module)), then enable it in the world's **Manage Modules** and reload.
 2. **Module too old**: **Add-on Modules** → **Check for Updates** in the Setup screen, then reload the world. A copy installed by hand has no manifest URL, so Foundry cannot update it: move its folder out of `Data/modules/foundryvtt-mcp-bridge` with the world shut down, then install by manifest URL as in 1. The world keeps the module enabled, since the id is the same.
 3. **Check for Updates says the module is current, but a final release is out**: a final release never replaces its own pre-release through the update check. Foundry ranks `0.5.1-rc.1` above `0.5.1`, so a world running a pre-release sees the final as older. Use **Install Module** with the manifest URL above: it installs the final release over the pre-release.
 4. **Installed version**: the Setup screen's **Add-on Modules** list shows it. `status` and `get_health_status` only show that an authenticated module (protocol v1) is connected, not its version.
@@ -191,7 +192,7 @@ Detection compares paragraphs of text, not HTML, so markup rewritten by FoundryV
 #### "Module bridge refused a connection: …"
 **Symptoms**: The server log (`daemon.log` in shared-process mode) shows `Module bridge refused a connection: <reason>`, and the module bridge stays disconnected — or stays connected, if the refused client was not the module.
 
-**Cause**: The bridge port is reachable by every local process and every page open in a local browser, so the bridge only accepts the companion module (0.5.0 or later) running in the headless GM session, after a mutual authentication (see the README, [Module Bridge Security](README.md#module-bridge-security)). Any other client is refused, and the refused connection never affects the connected module. At most 10 refusals are logged per minute; the rest are summarised as `N more refused connection(s) not logged in the last minute`.
+**Cause**: The bridge port is reachable by every local process and every page open in a local browser, so the bridge only accepts the companion module (0.5.0 or later) running in the headless GM session, after a mutual authentication (see [Security](docs/security.md#the-module-bridge)). Any other client is refused, and the refused connection never affects the connected module. At most 10 refusals are logged per minute; the rest are summarised as `N more refused connection(s) not logged in the last minute`.
 
 **Reasons**:
 - **`unexpected Origin`** (with the `origin` received): the WebSocket did not come from a page served at `FOUNDRY_URL`'s origin. If it is the module, the address the headless browser loaded does not match the origin of `FOUNDRY_URL` exactly — scheme (`http`/`https`), host (IP address vs domain name, `localhost` vs `127.0.0.1`) and port must all be identical; fix `FOUNDRY_URL`. Otherwise it is a foreign page or program (origin `(none)` for a non-browser client), and the refusal is expected.
@@ -204,7 +205,7 @@ Detection compares paragraphs of text, not HTML, so markup rewritten by FoundryV
 
 ### Shared Process
 
-By default MCP clients start lightweight relays, and one background **shared process** holds the FoundryVTT connection, the module bridge and the headless GM session (see the README, *Shared Process Mode*).
+By default MCP clients start lightweight relays, and one background **shared process** holds the FoundryVTT connection, the module bridge and the headless GM session (see [Architecture](docs/architecture.md#relays-and-the-shared-process)).
 
 #### Where are the logs?
 In the state directory — `%LOCALAPPDATA%\foundryvtt-mcp\` on Windows, `$XDG_STATE_HOME/foundryvtt-mcp/` or `~/.local/state/foundryvtt-mcp/` elsewhere:
@@ -265,7 +266,7 @@ The `token` file changed while a shared process was running (deleted or edited b
 #### Where is my configuration?
 `foundryvtt-mcp status` answers, with or without a running shared process. Its last section, **This terminal**, shows the configuration file it looked for (and whether it exists) and every setting with where it comes from: `env` (an environment variable — a client's `env` block, or the system), `.env` (a `.env` in the working directory), `file` (the configuration file). With a shared process running, `status` also shows the settings that process runs with, and what each connected client declared. Passwords and API keys show as `<set>`.
 
-The file is `%LOCALAPPDATA%\foundryvtt-mcp\config.env` on Windows and `$XDG_CONFIG_HOME/foundryvtt-mcp/config.env` (or `~/.config/foundryvtt-mcp/config.env`) elsewhere; `FOUNDRY_MCP_CONFIG` names another one, and `FOUNDRY_MCP_STATE_DIR` moves it into that directory. See the README, *Configuration File*.
+The file is `%LOCALAPPDATA%\foundryvtt-mcp\config.env` on Windows and `$XDG_CONFIG_HOME/foundryvtt-mcp/config.env` (or `~/.config/foundryvtt-mcp/config.env`) elsewhere; `FOUNDRY_MCP_CONFIG` names another one, and `FOUNDRY_MCP_STATE_DIR` moves it into that directory. See [Configuration](docs/configuration.md#the-configuration-file).
 
 #### "FoundryVTT MCP is not configured: …"
 No `FOUNDRY_URL` anywhere, or a setting that does not validate (the message names it and where it comes from). The server keeps running and lists its tools; every call answers with this message and reads the configuration again. Write the file at the path the message gives — at least `FOUNDRY_URL`, `FOUNDRY_USERNAME` and `FOUNDRY_PASSWORD`, each value between `'…'` — and call the tool again: no client restart needed.
@@ -291,14 +292,14 @@ Claude Desktop starts MCP servers in `C:\Windows\System32`, where no `.env` file
 **Symptoms**: Health monitoring and log tools fail
 **Solutions**:
 1. **REST API module required**: `get_system_health`, `get_recent_logs`, `search_logs` and `diagnose_errors` need the optional Foundry Local REST API module; without `FOUNDRY_API_KEY` they are refused at once (`… requires the REST API module (FOUNDRY_API_KEY is not set)`), with no request. `get_health_status` answers without it and only adds the server's health when it is there. When the module does not answer, the tool says `… unavailable from the REST API module: <HTTP status or error>`, and `daemon.log` has one warning line (`LOG_LEVEL=debug` adds the stack).
-2. **Install module**: it is a separate project, not distributed by this repository — see [the configuration guide](docs/guides/configuration.md#optional-diagnostics-tools)
+2. **Install module**: it is a separate project, not distributed by this repository — see [Configuration](docs/configuration.md#the-optional-rest-api-module)
 3. **Enable module**: Activate it in your world's module settings
 4. **Set API key**: Add `FOUNDRY_API_KEY` to your configuration file, then run `foundryvtt-mcp stop`
 
 ## Environment Configuration
 
 ### Configuration File Template
-`foundryvtt-mcp init` writes the configuration file (`%LOCALAPPDATA%\foundryvtt-mcp\config.env` on Windows, `~/.config/foundryvtt-mcp/config.env` elsewhere). Written by hand, it looks like this:
+`foundryvtt-mcp init` writes the configuration file; [Configuration](docs/configuration.md) gives its location, its format and every setting. Written by hand, it looks like this:
 ```env
 # Required
 FOUNDRY_URL='http://localhost:30000'
@@ -315,7 +316,7 @@ FOUNDRY_MODULE_BRIDGE_ENABLED='true'
 # Optional: more detail in daemon.log
 # LOG_LEVEL='debug'
 ```
-Less common settings (`FOUNDRY_USER_ID`, `FOUNDRY_TIMEOUT`, `FOUNDRY_RETRY_ATTEMPTS`…) are in the [configuration guide](docs/guides/configuration.md). After editing the file, run `foundryvtt-mcp stop`.
+Less common settings (`FOUNDRY_USER_ID`, `FOUNDRY_TIMEOUT`, `FOUNDRY_RETRY_ATTEMPTS`…) are in [Configuration](docs/configuration.md#advanced-settings). After editing the file, run `foundryvtt-mcp stop`.
 
 ### Configuration Validation
 Check your configuration against the live FoundryVTT:
@@ -381,7 +382,8 @@ Use the MCP tools to test specific functionality:
 ## Getting Help
 
 ### Documentation
-- **Setup Guide**: [SETUP_GUIDE.md](SETUP_GUIDE.md)
+- **Installation**: [docs/installation.md](docs/installation.md)
+- **Configuration**: [docs/configuration.md](docs/configuration.md)
 - **README**: [README.md](README.md)
 - **FoundryVTT Docs**: [https://foundryvtt.com/api/](https://foundryvtt.com/api/)
 

@@ -27,7 +27,40 @@ With npm 12, `npm ci` ends with a warning that the install script of `esbuild` (
 
 The user guides name the installed command, `foundryvtt-mcp`; from the clone, run `node dist/index.js` instead (`node dist/index.js init`, `status`, `stop`, `--version`). `node dist/index.js init` prints client entries that start the clone's `dist/index.js`. Give every MCP client entries for one install only: relays of a clone and of an installed package would replace each other's shared process.
 
-[docs/guides/development.md](docs/guides/development.md) describes the project layout and the development commands in more detail.
+## Project layout
+
+```
+src/
+├── index.ts           # entry point: picks the role (relay, daemon, init, status, stop)
+├── core.ts            # FoundryCore: client, module bridge, GM session, write queue, tool calls
+├── mcp-server.ts      # the MCP server (tools/list, tools/call, resources)
+├── server.ts          # the all-in-one mode (FOUNDRY_MCP_SHARED=false)
+├── cli/               # init and init --check
+├── config/            # settings: sources (environment, .env, file, defaults) and validation
+├── shared/            # relay, shared process, IPC, status and stop
+├── foundry/           # Socket.IO client and world cache, login, module bridge, GM session, journal integrity
+├── tools/             # tool definitions, router, handlers, write tools, dependencies
+├── diagnostics/       # REST API module client
+└── utils/             # logger, errors, guards, small helpers
+foundry-module/        # the companion module (plain browser JavaScript)
+scripts/               # smoke tests, docs generation, release helpers
+docs/                  # user documentation, design records
+```
+
+[docs/architecture.md](docs/architecture.md) explains how these parts work together.
+
+## Development commands
+
+```bash
+npm run build          # compile to dist/
+npm run dev            # run from the sources, reloading on change
+npm test               # unit tests (Vitest); npm run test:watch, npm run test:coverage
+npm run lint           # Biome: lint and formatting; npm run lint:fix to fix
+npx tsc --noEmit       # type check
+npm run docs:tools     # regenerate docs/tools.md from the tool definitions (after a build)
+```
+
+`npm run lint && npx tsc --noEmit && npm test` runs the lint, type check and unit tests in one go.
 
 ## Checks before a pull request
 
@@ -39,6 +72,7 @@ npm run build
 npm run smoke        # the built server starts
 npm run smoke:dotenv # configuration from a .env file is read in time
 npm run smoke:pack   # the published package installs and starts
+npm run docs:tools -- --check   # docs/tools.md matches the tool definitions
 ```
 
 The three smoke tests are isolated: they strip `FOUNDRY_*` variables, ignore your configuration file, use a temporary state directory (and so their own pipe or socket), and switch the module bridge and the invisible GM session off. They can run while your own connector is running.
@@ -52,7 +86,7 @@ CI runs the same steps on Linux, Windows and macOS with Node 22 and 24, plus a p
 - **Module bridge**: a WebSocket on loopback (port 31415 by default) between the shared process and the companion module. Each side proves its identity to the other before any command.
 - **Invisible GM session**: a headless browser the shared process drives with `playwright-core`, logged in to the world, where the companion module runs. It serves what only a real Foundry page can do (canvas capture, native rolls, compendium documents, uploads).
 
-The diagram and details are in the README, [How it works](README.md#-how-it-works).
+The diagram and details are in [docs/architecture.md](docs/architecture.md).
 
 ## Adding a tool
 
@@ -60,7 +94,9 @@ The diagram and details are in the README, [How it works](README.md#-how-it-work
 2. **Routing**: add its `case` to `routeToolRequest` in `src/tools/router.ts`.
 3. **Handler**: implement it in `src/tools/handlers/`, validating arguments with Zod and reading through `FoundryClient` (`src/foundry/client.ts`).
 4. **Tests**: unit tests for the handler (and the client method, if you add one) next to the code, in `__tests__/`.
-5. **A tool that changes the world**: add its name to `WRITE_TOOLS` in `src/tools/write-tools.ts`, so its calls wait in the write queue, and have its `FoundryClient` method call `assertWriteable()`, so it is refused unless `FOUNDRY_WRITE_ENABLED=true`. Writes go through Foundry's `modifyDocument` protocol: read `.claude/rules/foundry-write-protocol.md` first.
+5. **A tool that changes the world**: add its name to `WRITE_TOOLS` in `src/tools/write-tools.ts`, so its calls wait in the write queue, and have its `FoundryClient` method call `assertWriteable()`, so it is refused unless `FOUNDRY_WRITE_ENABLED=true` (a tool the companion module carries out calls `assertWritesEnabled()` in `src/tools/handlers/module-bridge.ts` instead, before sending anything). Give it arguments in `src/tools/__tests__/write-gate.test.ts`, which checks that every write tool is refused while writes are disabled. Writes go through Foundry's `modifyDocument` protocol: read `.claude/rules/foundry-write-protocol.md` first.
+6. **Dependencies**: classify the tool in `src/tools/tool-dependencies.ts` (socket, companion module, REST API module or local).
+7. **Documentation**: a new group of tools needs its section in `scripts/generate-tools-doc.js`; then `npm run build && npm run docs:tools` regenerates `docs/tools.md`, which CI checks.
 
 ## Testing against a real FoundryVTT
 
