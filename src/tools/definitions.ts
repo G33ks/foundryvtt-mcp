@@ -17,6 +17,15 @@ const WRITE_GATE =
   'WRITE: mutates the live world. Requires FOUNDRY_WRITE_ENABLED=true (default false) and an active Socket.IO connection, and is refused otherwise; Foundry additionally enforces GM/owner permission on the document.';
 
 /**
+ * Write-safety clause for the tools the companion module carries out. They
+ * never use the Socket.IO connection, so it is not a condition; the module
+ * runs in a GM client. Enforced by `assertWritesEnabled()`
+ * (`src/tools/handlers/module-bridge.ts`).
+ */
+const MODULE_WRITE_GATE =
+  'WRITE: changes the live world. Requires FOUNDRY_WRITE_ENABLED=true (default false) and the companion module, and is refused otherwise; FoundryVTT additionally enforces the GM permission.';
+
+/**
  * Extra clause for destructive tools (data removal that this server cannot undo).
  */
 const CONFIRM_FIRST =
@@ -2796,7 +2805,8 @@ export const moduleBridgeTools = [
   {
     name: 'roll_and_post',
     description:
-      'Evaluate a dice formula using Foundry\'s native Roll engine and post it directly to chat as a rendered, clickable roll card. Supports full Foundry dice syntax (e.g. "4d6kh3", "1d20r1", exploding dice) that the local parser rejects. Requires the companion Foundry module.',
+      'Evaluate a dice formula using Foundry\'s native Roll engine and post it directly to chat as a rendered, clickable roll card. Supports full Foundry dice syntax (e.g. "4d6kh3", "1d20r1", exploding dice) that the local parser rejects. Requires the companion Foundry module. ' +
+      MODULE_WRITE_GATE,
     inputSchema: {
       type: 'object',
       properties: {
@@ -2859,7 +2869,7 @@ export const moduleBridgeTools = [
     name: 'set_target',
     description:
       "Set or clear this GM user's target selection on the active canvas (renders the targeting reticle in connected player browsers). tokenIds are token document IDs on the currently viewed scene. Requires the companion Foundry module. Use when: directing player attention, declaring spell targets, or marking focus fire. " +
-      WRITE_GATE,
+      MODULE_WRITE_GATE,
     inputSchema: {
       type: 'object',
       properties: {
@@ -2930,7 +2940,7 @@ export const moduleBridgeTools = [
     name: 'ping_canvas',
     description:
       "Emit an animated canvas ping at specific pixel coordinates on the active scene's view, drawing every connected player's camera and attention to that exact location. Requires the companion Foundry module. Use when: pointing out a trap, landmark, or hidden detail on the map. " +
-      WRITE_GATE,
+      MODULE_WRITE_GATE,
     inputSchema: {
       type: 'object',
       properties: {
@@ -2948,7 +2958,7 @@ export const moduleBridgeTools = [
     name: 'set_pause',
     description:
       'Pause or unpause the game clock. When paused, token movement and real-time combat timers freeze for players. Requires the companion Foundry module. Use when: stepping away, narrating a long cutscene, or resolving a complex rules question. ' +
-      WRITE_GATE,
+      MODULE_WRITE_GATE,
     inputSchema: {
       type: 'object',
       properties: {
@@ -2962,18 +2972,19 @@ export const moduleBridgeTools = [
   {
     name: 'upload_asset',
     description:
-      "Upload a file (image, audio, etc.) into FoundryVTT's Data storage via the GM browser's FilePicker, returning the Foundry-relative path to feed directly into create_scene (backgroundSrc), create_tile (src), or create_sound (path). Provide exactly one of contentBase64 (base64-encoded file content) or sourcePath (an absolute path readable by this MCP server, which base64-encodes it server-side). Rejects payloads over 8 MiB. Requires the companion Foundry module. Use when: adding new map art, tokens, or audio the world does not already have. " +
-      WRITE_GATE,
+      "Upload a file (image, audio, etc.) into FoundryVTT's Data storage via the GM browser's FilePicker, returning the Foundry-relative path to feed directly into create_scene (backgroundSrc), create_tile (src), or create_sound (path). Provide exactly one of contentBase64 (base64-encoded file content) or sourcePath (a file inside the folder named by FOUNDRY_UPLOAD_SOURCE_DIR, which the server reads; refused when that setting is unset). Only media files: .png, .jpg, .jpeg, .webp, .gif, .mp3, .ogg, .wav, .m4a, .webm, .mp4, and filename must have the source file's extension. targetDir is a folder relative to the Data storage (no \"..\", no absolute path) and filename a plain file name. Rejects files over 8 MiB. Requires the companion Foundry module. Use when: adding new map art, tokens, or audio the world does not already have. " +
+      MODULE_WRITE_GATE,
     inputSchema: {
       type: 'object',
       properties: {
         targetDir: {
           type: 'string',
-          description: 'Data-relative destination folder (e.g. "assets/uploads")',
+          description:
+            'Destination folder relative to the Data storage (e.g. "assets/uploads"); no ".." and no absolute path',
         },
         filename: {
           type: 'string',
-          description: 'Destination filename, including extension',
+          description: 'Destination file name with a media extension (e.g. "map.png"), no folder',
         },
         contentBase64: {
           type: 'string',
@@ -2982,12 +2993,12 @@ export const moduleBridgeTools = [
         sourcePath: {
           type: 'string',
           description:
-            'Absolute filesystem path readable by this MCP server. Mutually exclusive with contentBase64.',
+            'Path of a file inside the FOUNDRY_UPLOAD_SOURCE_DIR folder (refused when that setting is unset). Mutually exclusive with contentBase64.',
         },
         mimeType: {
           type: 'string',
           description:
-            'Optional MIME type override; inferred from the filename extension if omitted',
+            'Optional MIME type; must be the one of the filename extension, which is used when omitted',
         },
       },
       required: ['targetDir', 'filename'],

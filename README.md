@@ -209,6 +209,7 @@ The same names work in the configuration file, in an `env` block, in the system 
 | `FOUNDRY_HEADLESS_GM_PASSWORD` | No | `FOUNDRY_PASSWORD` | Password of that other account (two-account mode only) |
 | `FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH` | No | — | Path to any Chromium-based browser binary (Chrome, Edge, Brave, Vivaldi…), skipping auto-detection |
 | `FOUNDRY_DATA_PATH` | No | — | Local path to Foundry `Data/` for asset dimension discovery |
+| `FOUNDRY_UPLOAD_SOURCE_DIR` | No | — | The one folder `upload_asset` may read a local file from (`sourcePath`); unset, it takes `contentBase64` only |
 | `FOUNDRY_API_KEY` | No | — | Optional REST API key for server diagnostics tools |
 | `FOUNDRY_EVENT_BUFFER_SIZE` | No | `500` | In-memory event log ring buffer capacity |
 | `FOUNDRY_EVENT_WAIT_MS` | No | `25000` | Default long-polling timeout for `watch_events` |

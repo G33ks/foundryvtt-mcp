@@ -19,7 +19,10 @@ function buildBridge(sendImpl: (type: string, params: Record<string, unknown>) =
 describe('handleImportCompendiumActor', () => {
   it('rejects a compendium document with no usable name', async () => {
     const bridge = buildBridge(() => ({ type: 'npc' }));
-    const client = { createActorFromData: vi.fn() } as unknown as FoundryClient;
+    const client = {
+      isWriteEnabled: () => true,
+      createActorFromData: vi.fn(),
+    } as unknown as FoundryClient;
 
     await expect(
       handleImportCompendiumActor(
@@ -33,7 +36,10 @@ describe('handleImportCompendiumActor', () => {
 
   it('rejects a compendium document with no usable type', async () => {
     const bridge = buildBridge(() => ({ name: 'Ganger' }));
-    const client = { createActorFromData: vi.fn() } as unknown as FoundryClient;
+    const client = {
+      isWriteEnabled: () => true,
+      createActorFromData: vi.fn(),
+    } as unknown as FoundryClient;
 
     await expect(
       handleImportCompendiumActor(
@@ -53,7 +59,11 @@ describe('handleImportCompendiumActor', () => {
     }));
     const createActorFromData = vi.fn(async () => ({ _id: ACTOR_ID, name: 'Ganger' }));
     const createActorItem = vi.fn();
-    const client = { createActorFromData, createActorItem } as unknown as FoundryClient;
+    const client = {
+      isWriteEnabled: () => true,
+      createActorFromData,
+      createActorItem,
+    } as unknown as FoundryClient;
 
     const result = await handleImportCompendiumActor(
       { compendiumId: 'cpr.npcs', actorId: 'docAAAAAAAAAAAAA' },
@@ -86,7 +96,11 @@ describe('handleImportCompendiumActor', () => {
       .mockResolvedValueOnce({ _id: 'newItemAAAAAAAA', name: 'Pistol', type: 'weapon' })
       .mockRejectedValueOnce(new Error('Invalid item type: bogus'));
 
-    const client = { createActorFromData, createActorItem } as unknown as FoundryClient;
+    const client = {
+      isWriteEnabled: () => true,
+      createActorFromData,
+      createActorItem,
+    } as unknown as FoundryClient;
 
     const result = await handleImportCompendiumActor(
       { compendiumId: 'cpr.npcs', actorId: 'docAAAAAAAAAAAAA' },
@@ -118,7 +132,7 @@ describe('handleImportCompendiumActor', () => {
   it('surfaces the original error when create fails with no embedded items to blame', async () => {
     const bridge = buildBridge(() => ({ name: 'Ganger', type: 'npc' }));
     const createActorFromData = vi.fn().mockRejectedValue(new Error('system totally broken'));
-    const client = { createActorFromData } as unknown as FoundryClient;
+    const client = { isWriteEnabled: () => true, createActorFromData } as unknown as FoundryClient;
 
     await expect(
       handleImportCompendiumActor(
@@ -131,7 +145,10 @@ describe('handleImportCompendiumActor', () => {
   });
 
   it('rejects when the module bridge is not configured', async () => {
-    const client = { createActorFromData: vi.fn() } as unknown as FoundryClient;
+    const client = {
+      isWriteEnabled: () => true,
+      createActorFromData: vi.fn(),
+    } as unknown as FoundryClient;
     await expect(
       handleImportCompendiumActor(
         { compendiumId: 'cpr.npcs', actorId: 'docAAAAAAAAAAAAA' },

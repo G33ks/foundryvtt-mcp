@@ -203,6 +203,8 @@ describe('handleRollAndPost', () => {
     } as unknown as ModuleBridge;
   }
 
+  const writer = { isWriteEnabled: () => true } as unknown as FoundryClient;
+
   it('evaluates and posts roll via bridge', async () => {
     const bridge = buildBridge(() => ({
       formula: '4d6kh3',
@@ -210,7 +212,11 @@ describe('handleRollAndPost', () => {
       result: '5 + 5 + 5 (dropped 2)',
     }));
 
-    const result = await handleRollAndPost({ formula: '4d6kh3', flavor: 'Stat Roll' }, bridge);
+    const result = await handleRollAndPost(
+      { formula: '4d6kh3', flavor: 'Stat Roll' },
+      writer,
+      bridge,
+    );
     expect(result.content[0].text).toContain('Dice Rolled & Posted to Chat');
     expect(result.content[0].text).toContain('4d6kh3');
     expect(result.content[0].text).toContain('15');
@@ -223,7 +229,7 @@ describe('handleRollAndPost', () => {
 
   it('rejects missing formula', async () => {
     const bridge = buildBridge(() => ({}));
-    await expect(handleRollAndPost({ formula: '' }, bridge)).rejects.toThrow(McpError);
+    await expect(handleRollAndPost({ formula: '' }, writer, bridge)).rejects.toThrow(McpError);
   });
 });
 

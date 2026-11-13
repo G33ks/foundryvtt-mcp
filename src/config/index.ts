@@ -113,6 +113,11 @@ const ConfigSchema = z.object({
    */
   assets: z.object({
     dataPath: z.string().optional(),
+    /**
+     * The one folder `upload_asset` may read a `sourcePath` from. Unset, the
+     * tool takes `contentBase64` only: the server reads no local file for it.
+     */
+    uploadSourceDir: z.string().optional(),
   }),
 
   /**
@@ -204,6 +209,7 @@ function rawConfig(v: ResolvedSettings['values']) {
 
     assets: {
       dataPath: v.FOUNDRY_DATA_PATH,
+      uploadSourceDir: v.FOUNDRY_UPLOAD_SOURCE_DIR,
     },
 
     events: {

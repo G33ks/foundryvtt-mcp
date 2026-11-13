@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Security
+
+- `set_target`, `ping_canvas`, `set_pause` and `upload_asset`, carried out by the companion module, were not refused while writes were disabled, although their descriptions said so. They are now refused unless `FOUNDRY_WRITE_ENABLED=true`, before anything is sent to the module or read from disk.
+- `upload_asset` read its `sourcePath` from any folder, whatever the file type, and did not validate its destination. `sourcePath` is now read only from the folder named by the new setting `FOUNDRY_UPLOAD_SOURCE_DIR` (a regular file inside it, links resolved, at most 8 MiB, checked before reading); only media files are accepted (.png, .jpg, .jpeg, .webp, .gif, .mp3, .ogg, .wav, .m4a, .webm, .mp4), with the same extension for the source and the destination; `targetDir` must stay inside the Data storage and `filename` be a plain file name.
+
+### Changed
+
+- `upload_asset` refuses `sourcePath` unless `FOUNDRY_UPLOAD_SOURCE_DIR` is set; `contentBase64` works as before. SVG, JSON and PDF files are no longer accepted, and a `mimeType` that does not match the file extension is refused.
+- `roll_and_post` and `import_compendium_actor` are refused while writes are disabled, before the module is asked anything: `roll_and_post` posts a chat message, as `send_chat_message` does, and `import_compendium_actor` no longer reads the compendium document when the import would be refused.
+
 ### Fixed
 
 - `create_scene` under FoundryVTT v14 created a scene with no Level, which Foundry could not display: v14 keeps the background on the scene's Levels, and the scene-level `background` and `backgroundColor` the tool sent were dropped. Under v14 the tool now creates the default Level the Foundry client creates (`defaultLevel0000`, carrying the background image and colour) and sets it as the scene's initial Level. Under v13 the scene is created as before.

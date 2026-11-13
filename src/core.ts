@@ -202,6 +202,9 @@ export class FoundryCore {
     if (config.assets.dataPath) {
       clientConfig.dataPath = config.assets.dataPath;
     }
+    if (config.assets.uploadSourceDir) {
+      clientConfig.uploadSourceDir = config.assets.uploadSourceDir;
+    }
     // Same state directory as the shared process's daemon.json, in both modes.
     clientConfig.journalHistoryDir = path.join(defaultStateDir(), 'journal-history');
     clientConfig.journalConflictsFile = path.join(defaultStateDir(), 'journal-conflicts.json');

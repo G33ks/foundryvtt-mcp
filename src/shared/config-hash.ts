@@ -33,6 +33,7 @@ export const IDENTITY_SETTINGS = {
   FOUNDRY_HEADLESS_GM_PASSWORD: (c: Config) => c.headlessGm.password,
   FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH: (c: Config) => c.headlessGm.executablePath,
   FOUNDRY_DATA_PATH: (c: Config) => c.assets.dataPath,
+  FOUNDRY_UPLOAD_SOURCE_DIR: (c: Config) => c.assets.uploadSourceDir,
 } as const satisfies Record<string, (c: Config) => unknown>;
 
 export type IdentitySetting = keyof typeof IDENTITY_SETTINGS;

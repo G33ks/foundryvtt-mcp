@@ -338,6 +338,11 @@ export interface FoundryClientConfig {
    */
   dataPath?: string;
   /**
+   * The one folder `upload_asset` may read a local `sourcePath` from
+   * (FOUNDRY_UPLOAD_SOURCE_DIR). Unset: no local file is read for an upload.
+   */
+  uploadSourceDir?: string;
+  /**
    * Capacity of the in-memory world-event ring backing `watch_events`
    * (FOUNDRY_EVENT_BUFFER_SIZE). Defaults to 500 when unset.
    */
@@ -1871,6 +1876,11 @@ export class FoundryClient {
    */
   isWriteEnabled(): boolean {
     return this.config.writeEnabled === true;
+  }
+
+  /** The folder `upload_asset` may read a `sourcePath` from; `undefined` when none is set. */
+  uploadSourceDir(): string | undefined {
+    return this.config.uploadSourceDir;
   }
 
   /**
