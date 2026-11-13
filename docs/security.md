@@ -1,6 +1,6 @@
 # Security
 
-What the connector can do in your world, what it keeps on your computer, and how to keep both under control. To report a vulnerability, see [SECURITY.md](../SECURITY.md): never in a public issue.
+What the connector can do in your world, what it keeps on your computer, and how to keep both under control.
 
 ## What the connector can do
 
@@ -44,3 +44,7 @@ The browser the session runs starts with a fresh, empty profile each time and on
 - The configuration file **readable by you only**.
 - **Close a journal page in FoundryVTT before the AI writes to it**: an open editor's autosave can overwrite the AI's change. The connector detects it and keeps a copy, but cannot prevent it.
 - **One connector per computer**: two would compete for the bridge's port.
+
+## Reporting a vulnerability
+
+Report it privately, as [SECURITY.md](../SECURITY.md) describes: never in a public issue. Fixed vulnerabilities are published as [security advisories](https://github.com/G33ks/foundryvtt-mcp/security/advisories), such as [GHSA-vq5h-hxcv-ffqv](https://github.com/G33ks/foundryvtt-mcp/security/advisories/GHSA-vq5h-hxcv-ffqv) (companion-module tools and `upload_asset`, fixed in 2.2.1).

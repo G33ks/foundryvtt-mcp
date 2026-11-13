@@ -48,7 +48,7 @@ npm install -g @g33ks/foundryvtt-mcp
 foundryvtt-mcp --version
 ```
 
-- In Windows PowerShell, if `npm` is refused with *running scripts is disabled on this system*, type `npm.cmd` instead of `npm`.
+- In Windows PowerShell, if `npm` or `foundryvtt-mcp` is refused with *running scripts is disabled on this system*, type `npm.cmd` and `foundryvtt-mcp.cmd` instead: npm installs a PowerShell launcher next to each command, which that setting blocks.
 - npm may print warnings (a blocked install script, funding messages); they do not stop the install.
 - **The package is `@g33ks/foundryvtt-mcp`.** The unscoped `foundryvtt-mcp` package on npm belongs to the original project.
 - **Install it globally**, not through `npx`: npx keeps packages in a cache that npm replaces or deletes, so `init` would print no client entry from there.
@@ -71,7 +71,7 @@ foundryvtt-mcp init
 8. It prints the entries for your MCP client (next step).
 9. If the shared process is running with other connection settings, it offers to stop it.
 
-`init` needs an interactive terminal. It never asks about the advanced settings; see [Configuration](configuration.md) for those.
+`init` needs an interactive terminal: on Windows, PowerShell, Windows Terminal or Command Prompt (in Git Bash, `winpty foundryvtt-mcp init`). It never asks about the advanced settings; see [Configuration](configuration.md) for those.
 
 ## 4. Add the connector to your MCP client
 

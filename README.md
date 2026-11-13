@@ -5,7 +5,7 @@
 [![npm](https://img.shields.io/npm/v/@g33ks/foundryvtt-mcp.svg)](https://www.npmjs.com/package/@g33ks/foundryvtt-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/G33ks/foundryvtt-mcp/blob/main/LICENSE)
 
-A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that lets an AI assistant such as Claude read and run a **Foundry Virtual Tabletop** world with you: look things up, keep notes, place tokens and scenery, run combat, roll dice. It works with any game system, through FoundryVTT's own documents.
+A [Model Context Protocol](https://modelcontextprotocol.io/) (MCP) server that lets an AI assistant such as Claude read and run a **Foundry Virtual Tabletop** world with you: look things up, keep notes, place tokens and scenery, run combat, roll dice. It is not tied to a game system: it works through FoundryVTT's own documents and each system's data as it is (see [Compatibility](https://github.com/G33ks/foundryvtt-mcp/blob/main/docs/compatibility.md)).
 
 ## How it works
 
@@ -20,7 +20,7 @@ More than a hundred tools, in these groups ([full list](https://github.com/G33ks
 - **Actors and items**: search, details, inventory, attribute changes, owned items, active effects, on a world actor or on one token.
 - **Tokens**: place, move (with pathfinding around walls), remove, vision, status conditions.
 - **Scenes**: create, activate, lighting, weather, fog of war.
-- **Canvas**: walls and doors, lights, sounds, map notes, drawings, templates, regions, tiles, free cells, the images and sounds available.
+- **Canvas**: walls and doors, lights, sounds, map notes, drawings, templates, regions, tiles, free grid cells, the images and sounds available.
 - **Combat**: start, initiative, turns, end, current state.
 - **Journals**: search, read, create, and edit pages safely (version check, local copies, overwrite detection).
 - **Chat and dice**: read and send messages; roll dice, with FoundryVTT's own engine when the REST API module's key is set and locally otherwise.
@@ -34,7 +34,7 @@ Writes are off until you allow them; while they are off, every tool that changes
 ## Requirements
 
 - **Node.js 22 or newer**, with npm.
-- **FoundryVTT v13 or v14** with a world you can open as its Gamemaster, on this computer or on a server (v14 tried: see [Compatibility](https://github.com/G33ks/foundryvtt-mcp/blob/main/docs/compatibility.md)).
+- **FoundryVTT v13 or v14** with a world you can open as its Gamemaster, on this computer or on a server. Tried with v14 builds 369 and 370; v13 is accepted by the companion module and handled by the code, but not tried (see [Compatibility](https://github.com/G33ks/foundryvtt-mcp/blob/main/docs/compatibility.md)).
 - **A Chromium-based browser** on this computer: Google Chrome, Microsoft Edge, Brave, Vivaldi or Chromium. You never see it open.
 - **An MCP client**: Claude desktop or Claude Code (others that start servers over stdio should work).
 
@@ -48,7 +48,7 @@ Writes are off until you allow them; while they are off, every tool that changes
    https://raw.githubusercontent.com/G33ks/foundryvtt-mcp/main/foundry-module/module.json
    ```
 
-2. Launch your world as its Gamemaster. **Game Settings** → **User Management** → **Create Additional User**: name it `mcp-api`, give it a long password used nowhere else and the **Assistant GM** role.
+2. Launch your world as its Gamemaster. **Game Settings** → **User Management** → **Create Additional User**: name it, for example, `mcp-api`, give it a long password used nowhere else and the **Assistant GM** role.
 3. **Game Settings** → **Manage Modules**: check **FoundryVTT MCP Bridge**, then **Save Module Settings**.
 
 ### 2. Install the connector
@@ -58,7 +58,7 @@ npm install -g @g33ks/foundryvtt-mcp
 foundryvtt-mcp --version
 ```
 
-In Windows PowerShell, if `npm` is refused (*running scripts is disabled*), type `npm.cmd`. The package is `@g33ks/foundryvtt-mcp`, not the unscoped `foundryvtt-mcp`.
+In Windows PowerShell, if `npm` or `foundryvtt-mcp` is refused (*running scripts is disabled*), type `npm.cmd` and `foundryvtt-mcp.cmd` instead. The package is `@g33ks/foundryvtt-mcp`, not the unscoped `foundryvtt-mcp`.
 
 ### 3. Run `init`
 
@@ -66,7 +66,7 @@ In Windows PowerShell, if `npm` is refused (*running scripts is disabled*), type
 foundryvtt-mcp init
 ```
 
-It asks for FoundryVTT's address (the one you open in your browser), the account from step 1 and whether the AI may change the world (no by default). It checks each answer against your FoundryVTT, writes the configuration file, and prints what to give your MCP client.
+It asks for FoundryVTT's address (the one you open in your browser), the account from step 1 and whether the AI may change the world (no by default). It checks each answer against your FoundryVTT, writes the configuration file, and prints what to give your MCP client. It needs an interactive terminal: on Windows, PowerShell or Command Prompt (in Git Bash, prefix it with `winpty`). You can allow writes later: see [Configuration](https://github.com/G33ks/foundryvtt-mcp/blob/main/docs/configuration.md).
 
 ### 4. Add the connector to your MCP client
 
@@ -74,6 +74,8 @@ It asks for FoundryVTT's address (the one you open in your browser), the account
 - **Claude Code**: run the `claude mcp add foundryvtt …` command `init` printed, then start a new session.
 
 ### 5. First try
+
+With your world launched in FoundryVTT:
 
 1. `foundryvtt-mcp init --check` should end with `All checks passed.`
 2. Ask your AI client: *"Show the FoundryVTT connector's health status."* It should show the FoundryVTT connection, the module bridge and the GM session connected. The first call can take a few seconds.
@@ -88,6 +90,7 @@ When something fails, the message says why; [TROUBLESHOOTING.md](https://github.
 - **`watch_events` does not see the connector's own changes**, only those of other users.
 - **One connector per computer**: two would compete for the companion module's port.
 - **Some changes stay yours**: the connector does not promote anyone to Gamemaster nor change the world's permission settings.
+- **After FoundryVTT restarts, launch the world again.** The connector waits for it and reconnects by itself.
 - **After an update, restart your MCP client**: a client started earlier keeps the previous list of tools.
 
 ## Documentation
