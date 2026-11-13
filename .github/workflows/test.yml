@@ -39,6 +39,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Tools reference is up to date
+        run: npm run docs:tools -- --check
+
       - name: Run tests
         run: npm test
         env:
