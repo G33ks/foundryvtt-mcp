@@ -38,6 +38,7 @@ describe('configFingerprint', () => {
     ['FOUNDRY_HEADLESS_GM_EXECUTABLE_PATH', 'C:\\brave.exe'],
     ['FOUNDRY_MODULE_BRIDGE_PORT', '31416'],
     ['FOUNDRY_DATA_PATH', '/data'],
+    ['FOUNDRY_UPLOAD_SOURCE_DIR', '/uploads'],
   ] as const)('changes with %s', (name, value) => {
     const changed = configOf({
       FOUNDRY_USERNAME: 'mcp-api',

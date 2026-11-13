@@ -977,6 +977,7 @@ export async function routeToolRequest(
           whisperTo?: string[];
           rollMode?: string;
         },
+        foundryClient,
         moduleBridge,
       );
     case 'import_compendium_actor':
@@ -997,6 +998,7 @@ export async function routeToolRequest(
       }
       return handleSetTarget(
         args as { tokenIds: string[]; targeted?: boolean; replace?: boolean },
+        foundryClient,
         moduleBridge,
       );
     case 'get_actor_stats':
@@ -1010,9 +1012,13 @@ export async function routeToolRequest(
       if (!('y' in args) || typeof args.y !== 'number') {
         throw new Error('Missing required parameter: y');
       }
-      return handlePingCanvas(args as { x: number; y: number; sceneId?: string }, moduleBridge);
+      return handlePingCanvas(
+        args as { x: number; y: number; sceneId?: string },
+        foundryClient,
+        moduleBridge,
+      );
     case 'set_pause':
-      return handleSetPause(args as { paused?: boolean }, moduleBridge);
+      return handleSetPause(args as { paused?: boolean }, foundryClient, moduleBridge);
     case 'upload_asset':
       if (!('targetDir' in args) || typeof args.targetDir !== 'string') {
         throw new Error('Missing required parameter: targetDir');
@@ -1028,6 +1034,7 @@ export async function routeToolRequest(
           sourcePath?: string;
           mimeType?: string;
         },
+        foundryClient,
         moduleBridge,
       );
 

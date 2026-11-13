@@ -3,8 +3,8 @@
  * Foundry module over {@link ModuleBridge} rather than FoundryVTT's own
  * Socket.IO document API — see module-bridge.ts for why.
  */
-import { readFile } from 'node:fs/promises';
-import { extname } from 'node:path';
+import { readFile, realpath, stat } from 'node:fs/promises';
+import { extname, isAbsolute, relative, sep } from 'node:path';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import type { ModuleBridge } from '../../foundry/module-bridge.js';
@@ -260,6 +260,20 @@ function isRollAndPostResult(value: unknown): value is RollAndPostResult {
   );
 }
 
+/**
+ * Refuses a tool that changes the world while FOUNDRY_WRITE_ENABLED is off.
+ * The module tools never reach `FoundryClient.assertWriteable()`, so they
+ * check here, before anything is sent to the module or read from disk.
+ */
+function assertWritesEnabled(foundryClient: FoundryClient): void {
+  if (!foundryClient.isWriteEnabled()) {
+    throw new McpError(
+      ErrorCode.InvalidRequest,
+      'Write operations are disabled. Set FOUNDRY_WRITE_ENABLED=true to allow game-state mutation.',
+    );
+  }
+}
+
 export async function handleRollAndPost(
   args: {
     formula: string;
@@ -268,12 +282,14 @@ export async function handleRollAndPost(
     whisperTo?: string[];
     rollMode?: string;
   },
+  foundryClient: FoundryClient,
   moduleBridge: ModuleBridge | null,
 ) {
   const { formula } = args;
   if (!formula || typeof formula !== 'string') {
     throw new McpError(ErrorCode.InvalidParams, 'formula is required and must be a string');
   }
+  assertWritesEnabled(foundryClient);
   if (!moduleBridge) {
     throw new McpError(
       ErrorCode.InvalidRequest,
@@ -324,6 +340,8 @@ export async function handleImportCompendiumActor(
   if (!actorId || typeof actorId !== 'string') {
     throw new McpError(ErrorCode.InvalidParams, 'actorId is required and must be a string');
   }
+  // Before the compendium document is read through the module.
+  assertWritesEnabled(foundryClient);
   if (!moduleBridge) {
     throw new McpError(
       ErrorCode.InvalidRequest,
@@ -427,8 +445,10 @@ function isSetTargetResult(value: unknown): value is SetTargetResult {
 
 export async function handleSetTarget(
   args: { tokenIds?: string[]; targeted?: boolean; replace?: boolean },
+  foundryClient: FoundryClient,
   moduleBridge: ModuleBridge | null,
 ) {
+  assertWritesEnabled(foundryClient);
   if (!moduleBridge) {
     throw new McpError(
       ErrorCode.InvalidRequest,
@@ -660,6 +680,7 @@ function isPingCanvasResult(value: unknown): value is PingCanvasResult {
 
 export async function handlePingCanvas(
   args: { x: number; y: number; sceneId?: string },
+  foundryClient: FoundryClient,
   moduleBridge: ModuleBridge | null,
 ) {
   if (typeof args.x !== 'number' || typeof args.y !== 'number') {
@@ -668,6 +689,7 @@ export async function handlePingCanvas(
       'x and y coordinates are required and must be numbers',
     );
   }
+  assertWritesEnabled(foundryClient);
   if (!moduleBridge) {
     throw new McpError(
       ErrorCode.InvalidRequest,
@@ -708,8 +730,10 @@ function isSetPauseResult(value: unknown): value is SetPauseResult {
 
 export async function handleSetPause(
   args: { paused?: boolean },
+  foundryClient: FoundryClient,
   moduleBridge: ModuleBridge | null,
 ) {
+  assertWritesEnabled(foundryClient);
   if (!moduleBridge) {
     throw new McpError(
       ErrorCode.InvalidRequest,
@@ -745,12 +769,16 @@ function isUploadAssetResult(value: unknown): value is UploadAssetResult {
   );
 }
 
-const MIME_EXTENSIONS: Record<string, string> = {
+/**
+ * The media types `upload_asset` accepts, by extension: images, audio and
+ * video. No SVG (it can carry script, served from FoundryVTT's origin), and
+ * nothing that is not media.
+ */
+const MEDIA_TYPES: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.webp': 'image/webp',
-  '.svg': 'image/svg+xml',
   '.gif': 'image/gif',
   '.mp3': 'audio/mpeg',
   '.ogg': 'audio/ogg',
@@ -758,11 +786,89 @@ const MIME_EXTENSIONS: Record<string, string> = {
   '.m4a': 'audio/mp4',
   '.webm': 'video/webm',
   '.mp4': 'video/mp4',
-  '.json': 'application/json',
-  '.pdf': 'application/pdf',
 };
 
 const MAX_UPLOAD_BYTES = 8 * 1024 * 1024; // 8 MiB
+
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+// biome-ignore lint/suspicious/noControlCharactersInRegex: control characters are what it refuses
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
+
+function invalidUpload(message: string): McpError {
+  return new McpError(ErrorCode.InvalidParams, message);
+}
+
+/** A folder relative to FoundryVTT's Data storage: no root, drive, scheme or `..`. */
+function checkTargetDir(targetDir: string): void {
+  if (
+    CONTROL_CHARACTERS.test(targetDir) ||
+    targetDir.startsWith('/') ||
+    targetDir.includes('\\') ||
+    targetDir.includes(':')
+  ) {
+    throw invalidUpload(
+      `targetDir must be a folder relative to FoundryVTT's Data storage, such as "assets/maps": ${JSON.stringify(targetDir)}`,
+    );
+  }
+  if (targetDir.split('/').includes('..')) {
+    throw invalidUpload(`targetDir must not contain "..": ${JSON.stringify(targetDir)}`);
+  }
+}
+
+/** A plain file name: no folder, no drive, not hidden. */
+function checkFilename(filename: string): void {
+  if (CONTROL_CHARACTERS.test(filename) || /[/\\:]/.test(filename) || filename.startsWith('.')) {
+    throw invalidUpload(
+      `filename must be a plain file name such as "map.png", with no folder, ":" or leading ".": ${JSON.stringify(filename)}`,
+    );
+  }
+}
+
+/**
+ * Reads `sourcePath` for an upload: only a regular file inside
+ * FOUNDRY_UPLOAD_SOURCE_DIR (links resolved), with `extension`, within the
+ * size limit — checked before the file is read.
+ */
+async function readUploadSource(
+  sourcePath: string,
+  extension: string,
+  sourceDir: string | undefined,
+): Promise<Buffer> {
+  if (!sourceDir) {
+    throw invalidUpload(
+      'sourcePath is disabled: set FOUNDRY_UPLOAD_SOURCE_DIR to the folder files may be uploaded from, or send contentBase64 instead.',
+    );
+  }
+  if (extname(sourcePath).toLowerCase() !== extension) {
+    throw invalidUpload(
+      `The extension of filename (${extension}) must match the source file's: ${sourcePath}`,
+    );
+  }
+  let root: string;
+  let file: string;
+  try {
+    root = await realpath(sourceDir);
+  } catch (error) {
+    throw invalidUpload(`FOUNDRY_UPLOAD_SOURCE_DIR cannot be read: ${(error as Error).message}`);
+  }
+  try {
+    file = await realpath(sourcePath);
+  } catch (error) {
+    throw invalidUpload(`sourcePath cannot be read: ${(error as Error).message}`);
+  }
+  const inside = relative(root, file);
+  if (inside === '' || inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
+    throw invalidUpload(`sourcePath is outside FOUNDRY_UPLOAD_SOURCE_DIR (${root}): ${sourcePath}`);
+  }
+  const info = await stat(file);
+  if (!info.isFile()) {
+    throw invalidUpload(`sourcePath is not a regular file: ${sourcePath}`);
+  }
+  if (info.size > MAX_UPLOAD_BYTES) {
+    throw invalidUpload(`File size (${info.size} bytes) exceeds the 8 MiB upload limit`);
+  }
+  return readFile(file);
+}
 
 export async function handleUploadAsset(
   args: {
@@ -772,6 +878,7 @@ export async function handleUploadAsset(
     sourcePath?: string;
     mimeType?: string;
   },
+  foundryClient: FoundryClient,
   moduleBridge: ModuleBridge | null,
 ) {
   const { targetDir, filename, contentBase64, sourcePath } = args;
@@ -792,6 +899,9 @@ export async function handleUploadAsset(
     );
   }
 
+  // Before anything is read from disk or sent to the module.
+  assertWritesEnabled(foundryClient);
+
   if (!moduleBridge) {
     throw new McpError(
       ErrorCode.InvalidRequest,
@@ -799,12 +909,30 @@ export async function handleUploadAsset(
     );
   }
 
+  checkTargetDir(targetDir);
+  checkFilename(filename);
+  const extension = extname(filename).toLowerCase();
+  const mimeType = MEDIA_TYPES[extension];
+  if (!mimeType) {
+    throw invalidUpload(
+      `filename must end with a media file type (${Object.keys(MEDIA_TYPES).join(', ')}): ${JSON.stringify(filename)}`,
+    );
+  }
+  if (args.mimeType !== undefined && args.mimeType !== mimeType) {
+    throw invalidUpload(
+      `mimeType ${JSON.stringify(args.mimeType)} does not match ${extension} (${mimeType})`,
+    );
+  }
+  if (hasBase64 && !BASE64.test(contentBase64 ?? '')) {
+    throw invalidUpload('contentBase64 is not base64');
+  }
+
   return withToolError('upload asset', async () => {
     let base64Payload: string;
-    let mimeType = args.mimeType;
 
     if (hasSource && sourcePath) {
-      const buffer = await readFile(sourcePath);
+      const buffer = await readUploadSource(sourcePath, extension, foundryClient.uploadSourceDir());
+      // The file may have grown since it was checked.
       if (buffer.byteLength > MAX_UPLOAD_BYTES) {
         throw new McpError(
           ErrorCode.InvalidParams,
@@ -812,10 +940,6 @@ export async function handleUploadAsset(
         );
       }
       base64Payload = buffer.toString('base64');
-      if (!mimeType) {
-        const ext = extname(sourcePath).toLowerCase();
-        mimeType = MIME_EXTENSIONS[ext] ?? 'application/octet-stream';
-      }
     } else {
       base64Payload = contentBase64 ?? '';
       const estimatedBytes = Math.ceil((base64Payload.length * 3) / 4);
@@ -824,10 +948,6 @@ export async function handleUploadAsset(
           ErrorCode.InvalidParams,
           `Estimated payload size (${estimatedBytes} bytes) exceeds the 8 MiB upload limit`,
         );
-      }
-      if (!mimeType) {
-        const ext = extname(filename).toLowerCase();
-        mimeType = MIME_EXTENSIONS[ext] ?? 'application/octet-stream';
       }
     }
 

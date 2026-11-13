@@ -197,6 +197,30 @@ describe('Config', () => {
     });
   });
 
+  describe('assets', () => {
+    it('leaves the upload source folder unset by default', async () => {
+      process.env = { ...HERMETIC, FOUNDRY_URL: 'http://localhost:30000' };
+
+      const { config, resetConfig } = await import('../index.js');
+      resetConfig();
+
+      expect(config.assets.uploadSourceDir).toBeUndefined();
+    });
+
+    it('reads FOUNDRY_UPLOAD_SOURCE_DIR', async () => {
+      process.env = {
+        ...HERMETIC,
+        FOUNDRY_URL: 'http://localhost:30000',
+        FOUNDRY_UPLOAD_SOURCE_DIR: '/srv/uploads',
+      };
+
+      const { config, resetConfig } = await import('../index.js');
+      resetConfig();
+
+      expect(config.assets.uploadSourceDir).toBe('/srv/uploads');
+    });
+  });
+
   describe('type conversion', () => {
     it('should convert string numbers to numbers', async () => {
       process.env = {
