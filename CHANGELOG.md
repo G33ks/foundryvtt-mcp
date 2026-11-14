@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 3.0.0 — 2026-11-14
+
+**Breaking change for programs that call the tools themselves:** a failed tool call now returns a result marked `isError: true` instead of a JSON-RPC error (see Changed). AI clients such as Claude desktop and Claude Code need no change. Companion module unchanged: **0.6.0** (`bridge-v0.6.0`) recommended.
 
 ### Added
 
@@ -8,7 +10,7 @@
 
 ### Changed
 
-- **Visible to MCP clients:** a tool call that fails now returns a result marked `isError: true` instead of a JSON-RPC error, so the AI reads the reason and can act on it. The text is unchanged, with one `MCP error <code>: ` prefix and the same code as before. An unknown tool and a failed resource read remain JSON-RPC errors. A client or script that caught the error of a failed tool call must now check `isError` in the result. The result no longer carries the error's `data` (such as `{"refusal": true}` on a refusal): the text says what was refused. `docs/architecture.md` describes the error format.
+- **Breaking:** a tool call that fails now returns a result marked `isError: true` instead of a JSON-RPC error, as the MCP specification asks for errors raised while running a tool, so the AI reads the reason and can act on it. The text is unchanged, with one `MCP error <code>: ` prefix and the same code as before. An unknown tool and a failed resource read remain JSON-RPC errors. A client or script that caught the error of a failed tool call must now check `isError` in the result. The result no longer carries the error's `data` (such as `{"refusal": true}` on a refusal): the text says what was refused. `docs/architecture.md` describes the error format.
 - Tool descriptions no longer name a particular game system: their examples are neutral, and where a tool reads or checks a given path (`search_actors`, `get_actor_details`, `get_combat_state`, the range checks of `update_actor_attributes`), the description names the path and says it applies when the actor stores a value there.
 
 ### Fixed
@@ -23,6 +25,11 @@
 - `docs/tools.md` lists every tool with its description, parameters, whether it writes and what it needs. `scripts/generate-tools-doc.js` generates it from the tool definitions (`npm run docs:tools`), and CI checks that it is up to date.
 - `SETUP_GUIDE.md` and `docs/guides/configuration.md` became short pages pointing to the new ones; `docs/guides/integration.md`, `docs/guides/development.md` and `examples/mcp-client-configs.md` were removed, their content moved to `docs/installation.md` and `CONTRIBUTING.md`.
 - The README no longer describes `roll_dice` as local only: it rolls with FoundryVTT's own engine when `FOUNDRY_API_KEY` is set, and locally otherwise.
+
+### Known limitations
+
+- Deleting a document (seen with scenes and with a combat) can, rarely, go unanswered: FoundryVTT deletes it, but the tool reports an error after 10 s and the cached world keeps the document until `refresh_world_data`.
+- A combat created by `start_combat` can stay out of the GM's combat tracker until the GM reloads the page, while actors created by the connector show at once.
 
 ## 2.2.1 — 2026-11-13
 
