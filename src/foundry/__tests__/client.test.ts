@@ -556,6 +556,24 @@ describe('FoundryClient', () => {
       expect(info.title).toBe('Not connected');
     });
 
+    it.each([
+      // v13 and v14 send ReleaseData without its `version` getter.
+      [{ generation: 14, build: 370 }, '14.370 (generation 14, build 370)'],
+      [{ generation: 13, build: 351, version: '13.351' }, '13.351 (generation 13, build 351)'],
+      [{ version: '12.331' }, '12.331'],
+      [{ generation: 14 }, '14'],
+      [{}, 'unknown'],
+    ])('shows the core version from release %j', async (release, expected) => {
+      client = new FoundryClient({ baseUrl: 'http://localhost:30000' });
+      (client as unknown as { worldData: Record<string, unknown> }).worldData = {
+        world: { id: 'w', title: 'W' },
+        system: { id: 's', version: '1.0.0' },
+        release,
+      };
+      const info = await client.getWorldInfo();
+      expect(info.coreVersion).toBe(expected);
+    });
+
     it('should require credentials for connect in Socket.IO mode', async () => {
       client = new FoundryClient({ baseUrl: 'http://localhost:30000' });
       await expect(client.connect()).rejects.toThrow('Socket.IO mode requires');

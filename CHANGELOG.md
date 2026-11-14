@@ -6,6 +6,10 @@
 
 - Tool descriptions no longer name a particular game system: their examples are neutral, and where a tool reads or checks a given path (`search_actors`, `get_actor_details`, `get_combat_state`, the range checks of `update_actor_attributes`), the description names the path and says it applies when the actor stores a value there.
 
+### Fixed
+
+- `get_world_summary` and `get_health_status` show the FoundryVTT version with its build, as in "Core Version: 14.370 (generation 14, build 370)". FoundryVTT sends its release without the version string, so the tools showed only the generation ("14").
+
 ### Documentation
 
 - The README is short: what the connector does, the requirements, a five-step quick start, the known limitations. The details moved to `docs/`: installation, configuration (every setting, checked against the code), architecture, security and compatibility.

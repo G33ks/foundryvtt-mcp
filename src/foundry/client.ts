@@ -3605,7 +3605,7 @@ export class FoundryClient {
       title: (w.title as string) || 'Unknown World',
       description: (w.description as string) || '',
       system: (s.id as string) || 'unknown',
-      coreVersion: (r.version as string) || (r.generation as string) || 'unknown',
+      coreVersion: coreVersionLabel(r),
       systemVersion: (s.version as string) || 'unknown',
       playtime: 0,
       created: new Date().toISOString(),
@@ -7519,6 +7519,22 @@ function worldActorToFoundry(a: WorldActor): FoundryActor {
   }
 
   return actor;
+}
+
+/**
+ * The core version from the world's `release`. FoundryVTT sends its
+ * ReleaseData without the `version` getter (`<generation>.<build>`), so it is
+ * rebuilt from `generation` and `build`; a bare `version` is used as it is.
+ */
+function coreVersionLabel(release: Record<string, unknown> | undefined): string {
+  const { generation, build, version } = release ?? {};
+  if (typeof generation === 'number' && typeof build === 'number') {
+    return `${generation}.${build} (generation ${generation}, build ${build})`;
+  }
+  if (typeof version === 'string' && version) {
+    return version;
+  }
+  return typeof generation === 'number' ? String(generation) : 'unknown';
 }
 
 function worldSceneToFoundry(s: WorldScene): FoundryScene {
