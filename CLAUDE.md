@@ -57,7 +57,7 @@ commands must not load Socket.IO or Playwright.
 | Shared mode | `src/shared/` | Relay, shared process, IPC protocol, autostart, `status`/`stop` |
 | Write tools | `src/tools/write-tools.ts` | Tools serialised by the write queue — add every new mutation tool |
 | Tool dependencies | `src/tools/tool-dependencies.ts` | What each tool and resource needs (socket, module, REST, local) — classify every new tool |
-| MCP errors | `src/utils/mcp-errors.ts` | Errors leave `createMcpServer` with their bare message (the client adds the prefix) |
+| MCP errors | `src/utils/mcp-errors.ts` | A failed tool call leaves `createMcpServer` as an `isError` result with one `MCP error <code>: ` prefix; an unknown tool and resource errors stay JSON-RPC errors with their bare message (the client adds the prefix) |
 | Client | `src/foundry/client.ts` | Socket.IO connection, world state cache |
 | Journal integrity | `src/foundry/journal-integrity.ts`, `journal-history.ts`, `journal-conflicts.ts` | Page version tokens, overwrite watch (`modifyDocument` + `pm.autosave`), local copies and the 24-hour overwrite list (`journal-conflicts.json`) in the state dir |
 | Chat author | `src/foundry/message-author.ts` | A chat message's author: `author`, then the older `user` |
