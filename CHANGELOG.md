@@ -8,6 +8,7 @@
 
 ### Changed
 
+- **Visible to MCP clients:** a tool call that fails now returns a result marked `isError: true` instead of a JSON-RPC error, so the AI reads the reason and can act on it. The text is unchanged, with one `MCP error <code>: ` prefix and the same code as before. An unknown tool and a failed resource read remain JSON-RPC errors. A client or script that caught the error of a failed tool call must now check `isError` in the result. The result no longer carries the error's `data` (such as `{"refusal": true}` on a refusal): the text says what was refused. `docs/architecture.md` describes the error format.
 - Tool descriptions no longer name a particular game system: their examples are neutral, and where a tool reads or checks a given path (`search_actors`, `get_actor_details`, `get_combat_state`, the range checks of `update_actor_attributes`), the description names the path and says it applies when the actor stores a value there.
 
 ### Fixed
