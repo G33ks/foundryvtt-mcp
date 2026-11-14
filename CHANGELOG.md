@@ -13,6 +13,8 @@
 ### Fixed
 
 - `get_world_summary` and `get_health_status` show the FoundryVTT version with its build, as in "Core Version: 14.370 (generation 14, build 370)". FoundryVTT sends its release without the version string, so the tools showed only the generation ("14").
+- `set_scene_lighting` had no effect: it wrote `darkness`, `globalLight` and `globalLightThreshold` at the top of the Scene document, which FoundryVTT has kept under `environment` since v12 and drops from an update in v14. It now writes `environment.darknessLevel`, `environment.globalLight.enabled` and `environment.globalLight.darkness.max`, for v13 and v14 alike.
+- `get_scene_info` showed "Darkness Level: NaN%" and the global light as disabled: it reads them from `environment` now, from the older fields when only those are there, and says "Unknown" when neither is.
 
 ### Documentation
 

@@ -377,7 +377,7 @@ Parameters:
 
 ### `set_scene_lighting`
 
-Set a scene's ambient darkness level (0-1) and/or global illumination fields (globalLight, globalLightThreshold). Plain Scene document fields - no canvas access required. Use when: transitioning to night, dimming a room, or lighting a torch-lit area. Do not use when: you only need to read current lighting - use get_scene_info. WRITE: mutates the live world. Requires FOUNDRY_WRITE_ENABLED=true (default false) and an active Socket.IO connection, and is refused otherwise; Foundry additionally enforces GM/owner permission on the document.
+Set a scene's ambient darkness level (0-1) and/or global illumination (globalLight, globalLightThreshold). Written to the Scene document's environment fields (environment.darknessLevel, environment.globalLight) - no canvas access required. Use when: transitioning to night, dimming a room, or lighting a torch-lit area. Do not use when: you only need to read current lighting - use get_scene_info. WRITE: mutates the live world. Requires FOUNDRY_WRITE_ENABLED=true (default false) and an active Socket.IO connection, and is refused otherwise; Foundry additionally enforces GM/owner permission on the document.
 
 Parameters:
 

@@ -189,6 +189,67 @@ describe('FoundryClient scene & tile creation', () => {
     return { client, ...harness };
   }
 
+  describe('scene lighting', () => {
+    it('setSceneLighting writes darkness and global light under environment', async () => {
+      const { client, socket } = await connectClient();
+
+      await client.setSceneLighting(SCENE_ID, {
+        darkness: 0.5,
+        globalLight: true,
+        globalLightThreshold: 0.75,
+      });
+
+      const call = socket.emit.mock.calls.find(([event]) => event === 'modifyDocument');
+      if (!call) {
+        throw new Error('no modifyDocument request');
+      }
+      expect(call[1]).toMatchObject({
+        type: 'Scene',
+        action: 'update',
+        operation: {
+          updates: [
+            {
+              _id: SCENE_ID,
+              environment: {
+                darknessLevel: 0.5,
+                globalLight: { enabled: true, darkness: { max: 0.75 } },
+              },
+            },
+          ],
+        },
+      });
+      const update = (call[1] as { operation: { updates: Record<string, unknown>[] } }).operation
+        .updates[0];
+      expect(update).not.toHaveProperty('darkness');
+      expect(update).not.toHaveProperty('globalLight');
+      expect(update).not.toHaveProperty('globalLightThreshold');
+    });
+
+    it('getCurrentScene reads environment once a v14 scene carries it', async () => {
+      const { client, fire } = await connectClient();
+
+      fire('modifyDocument', {
+        type: 'Scene',
+        action: 'update',
+        result: [
+          { _id: SCENE_ID, environment: { darknessLevel: 0.5, globalLight: { enabled: true } } },
+        ],
+      });
+
+      const scene = await client.getCurrentScene(SCENE_ID);
+      expect(scene.darkness).toBe(0.5);
+      expect(scene.globalLight).toBe(true);
+    });
+
+    it('getCurrentScene still reads the older top-level fields', async () => {
+      const { client } = await connectClient();
+
+      const scene = await client.getCurrentScene(SCENE_ID);
+      expect(scene.darkness).toBe(0);
+      expect(scene.globalLight).toBe(false);
+    });
+  });
+
   describe('listSceneAssets', () => {
     it('lists images with real dimensions and parsed bracket tags', async () => {
       const { client } = await connectClient();
