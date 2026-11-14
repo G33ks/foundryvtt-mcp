@@ -393,6 +393,76 @@ describe('authenticateFoundry — rejected /join is reported, not thrown raw (la
   });
 });
 
+describe('authenticateFoundry — POST /join status in the log', () => {
+  /** Everything the log received, as one string, to look for secrets in it. */
+  function logged(): string {
+    return JSON.stringify(vi.mocked(logger.info).mock.calls);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockJoinCookieResponse();
+  });
+
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('logs the status and the redirect path, without its query, cookie or password', async () => {
+    mockAxios.post = vi.fn().mockResolvedValue({
+      status: 200,
+      headers: { 'set-cookie': ['session=new-secret-cookie; Path=/'] },
+      data: { status: 'success', redirect: '/game?token=abc#top' },
+    });
+
+    await authenticateFoundry('https://example.com', 'abc123DEF456ghij', 'hunter2');
+
+    expect(logger.info).toHaveBeenCalledWith('POST /join answered', {
+      status: 200,
+      redirect: '/game',
+    });
+    expect(logged()).not.toMatch(/hunter2|secret-cookie|test-session-cookie|token=abc/);
+  });
+
+  it('logs a rejected join (401) before reporting it', async () => {
+    mockAxios.post = vi.fn().mockResolvedValue({ status: 401, data: 'JOIN.ErrorInvalidPassword' });
+
+    await expect(
+      authenticateFoundry('https://example.com', 'abc123DEF456ghij', 'hunter2'),
+    ).rejects.toThrow('HTTP 401');
+
+    expect(logger.info).toHaveBeenCalledWith('POST /join answered', { status: 401 });
+  });
+
+  it('logs the status of an answer axios throws on (400), then rethrows it', async () => {
+    const error = Object.assign(new Error('Request failed with status code 400'), {
+      response: {
+        status: 400,
+        headers: { 'set-cookie': ['session=new-secret-cookie'] },
+        data: 'Bad Request',
+      },
+    });
+    mockAxios.post = vi.fn().mockRejectedValue(error);
+
+    await expect(
+      authenticateFoundry('https://example.com', 'abc123DEF456ghij', 'hunter2'),
+    ).rejects.toBe(error);
+
+    expect(logger.info).toHaveBeenCalledWith('POST /join answered', { status: 400 });
+    expect(logged()).not.toMatch(/hunter2|secret-cookie|test-session-cookie/);
+  });
+
+  it('logs nothing when no answer came back (network error)', async () => {
+    mockAxios.post = vi.fn().mockRejectedValue(new Error('connect ECONNREFUSED'));
+
+    await expect(
+      authenticateFoundry('https://example.com', 'abc123DEF456ghij', 'hunter2'),
+    ).rejects.toThrow('ECONNREFUSED');
+
+    expect(logger.info).not.toHaveBeenCalledWith('POST /join answered', expect.anything());
+  });
+});
+
 describe('authenticateFoundry — no active world (Setup screen)', () => {
   /**
    * With no world launched, FoundryVTT v14 answers `getJoinData` with `{}`

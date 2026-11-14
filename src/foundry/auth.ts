@@ -11,6 +11,7 @@
 import axios from 'axios';
 import type { ManagerOptions, SocketOptions } from 'socket.io-client';
 import { io } from 'socket.io-client';
+import { isRecord } from '../utils/guards.js';
 import { logger } from '../utils/logger.js';
 import { RefusedError } from '../utils/refusal.js';
 
@@ -182,6 +183,47 @@ async function resolveUserId(baseUrl: string, user: string, session: string): Pr
   return found._id;
 }
 
+/** A redirect path as FoundryVTT gives it, without its query or fragment. */
+function redirectPath(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value) {
+    return undefined;
+  }
+  return value.split(/[?#]/, 1)[0] || undefined;
+}
+
+/**
+ * Logs the HTTP status of a POST /join answer and where it redirects to,
+ * for diagnosis after a FoundryVTT update. Never the headers (cookie), the
+ * body or the request.
+ */
+function logJoinAnswer(response: { status?: unknown; data?: unknown; headers?: unknown }): void {
+  if (typeof response.status !== 'number') {
+    return;
+  }
+  const data = response.data;
+  const redirect =
+    redirectPath(isRecord(data) ? data.redirect : undefined) ??
+    redirectPath(isRecord(response.headers) ? response.headers.location : undefined);
+  logger.info('POST /join answered', {
+    status: response.status,
+    ...(redirect ? { redirect } : {}),
+  });
+}
+
+/** `axios.post` that logs the status of the answer, including one axios throws on. */
+async function postJoin(...args: Parameters<typeof axios.post>) {
+  try {
+    const response = await axios.post(...args);
+    logJoinAnswer(response);
+    return response;
+  } catch (error) {
+    if (isRecord(error) && isRecord(error.response)) {
+      logJoinAnswer(error.response);
+    }
+    throw error;
+  }
+}
+
 /**
  * Authenticates with FoundryVTT using the proven 4-step flow.
  *
@@ -223,7 +265,7 @@ export async function authenticateFoundry(
   const userId = await resolveUserId(baseUrl, user, session);
 
   // Step 3: POST /join as JSON with document _id
-  const joinRes = await axios.post(
+  const joinRes = await postJoin(
     `${baseUrl}/join`,
     {
       action: 'join',
