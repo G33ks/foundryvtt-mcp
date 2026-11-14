@@ -12,7 +12,7 @@ What the connector has been tried with, and what it needs. "Tried" means a real 
 
 ## The companion module
 
-| Module | With connector 2.2 |
+| Module | With connector 2.2 and 3.0 |
 | :--- | :--- |
 | 0.6.0 | Recommended. |
 | 0.5.x | Works, without the commands added in 0.6.0: `get_actor_stats` and the `createOptions` of `apply_status_effect` are refused at once with a clear message. |
