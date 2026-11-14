@@ -42,7 +42,7 @@ The shared process runs in the background, so its startup messages go to `daemon
 npm's global folder is not on your `PATH`. `npm prefix -g` prints it (on Windows the command sits in that folder, usually `%APPDATA%\npm`; elsewhere in its `bin/` subfolder). Add it to `PATH` and open a new terminal. The MCP clients do not depend on it: their entries name Node.js and the server by absolute path.
 
 #### The wrong package is installed
-`npm ls -g --depth=0` lists `foundryvtt-mcp` without `@g33ks/`, or `foundryvtt-mcp --version` does not print a 2.x version (an old one may not answer at all; stop it with Ctrl+C). The unscoped `foundryvtt-mcp` package on npm is the original project's, not this one. Remove it and install this project's package:
+`npm ls -g --depth=0` lists `foundryvtt-mcp` without `@g33ks/`, or `foundryvtt-mcp --version` prints a version below 2.0 (an old one may not answer at all; stop it with Ctrl+C). The unscoped `foundryvtt-mcp` package on npm is the original project's, not this one. Remove it and install this project's package:
 
 ```bash
 npm uninstall -g foundryvtt-mcp
