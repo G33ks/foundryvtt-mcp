@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- The log records the HTTP status of FoundryVTT's answer to the login (`POST /join answered`), and the path it redirects to without its query, also when the login is refused (400, 401, 403…). It never records the cookie, the headers, the body or the password. Useful after a FoundryVTT update changes the login.
+
 ### Changed
 
 - Tool descriptions no longer name a particular game system: their examples are neutral, and where a tool reads or checks a given path (`search_actors`, `get_actor_details`, `get_combat_state`, the range checks of `update_actor_attributes`), the description names the path and says it applies when the actor stores a value there.
