@@ -38,6 +38,11 @@ import {
   OVERWRITTEN_BY_CONNECTOR,
   RECENT_AUTOSAVE_MS,
 } from './journal-integrity.js';
+import {
+  readSceneLighting,
+  type SceneLightingChange,
+  sceneLightingUpdate,
+} from './scene-lighting.js';
 import type {
   ActorAttributeUpdateResult,
   ActorEffectInput,
@@ -3605,7 +3610,7 @@ export class FoundryClient {
       title: (w.title as string) || 'Unknown World',
       description: (w.description as string) || '',
       system: (s.id as string) || 'unknown',
-      coreVersion: (r.version as string) || (r.generation as string) || 'unknown',
+      coreVersion: coreVersionLabel(r),
       systemVersion: (s.version as string) || 'unknown',
       playtime: 0,
       created: new Date().toISOString(),
@@ -5085,17 +5090,14 @@ export class FoundryClient {
   // ==========================================================================
 
   /**
-   * Sets a scene's ambient darkness level and/or global illumination fields.
-   * All three are plain top-level fields on the `Scene` document (mirrors
-   * {@link switchScene}) — no canvas access required.
+   * Sets a scene's ambient darkness level and/or global illumination fields,
+   * under the `Scene` document's `environment` (see scene-lighting.ts) — no
+   * canvas access required.
    *
    * @param sceneId - 16-char alphanumeric Scene document id
    * @param options - at least one of darkness (0-1), globalLight, globalLightThreshold
    */
-  async setSceneLighting(
-    sceneId: string,
-    options: { darkness?: number; globalLight?: boolean; globalLightThreshold?: number },
-  ): Promise<unknown> {
+  async setSceneLighting(sceneId: string, options: SceneLightingChange): Promise<unknown> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(sceneId)) {
       throw new Error(`Invalid sceneId format: ${sceneId}`);
@@ -5106,16 +5108,7 @@ export class FoundryClient {
     ) {
       throw new Error(`Invalid darkness: ${options.darkness} (must be a number between 0 and 1)`);
     }
-    const update: Record<string, unknown> = { _id: sceneId };
-    if (options.darkness !== undefined) {
-      update.darkness = options.darkness;
-    }
-    if (options.globalLight !== undefined) {
-      update.globalLight = options.globalLight;
-    }
-    if (options.globalLightThreshold !== undefined) {
-      update.globalLightThreshold = options.globalLightThreshold;
-    }
+    const update: Record<string, unknown> = { _id: sceneId, ...sceneLightingUpdate(options) };
     if (Object.keys(update).length === 1) {
       throw new Error('At least one of darkness, globalLight, globalLightThreshold is required');
     }
@@ -7521,6 +7514,22 @@ function worldActorToFoundry(a: WorldActor): FoundryActor {
   return actor;
 }
 
+/**
+ * The core version from the world's `release`. FoundryVTT sends its
+ * ReleaseData without the `version` getter (`<generation>.<build>`), so it is
+ * rebuilt from `generation` and `build`; a bare `version` is used as it is.
+ */
+function coreVersionLabel(release: Record<string, unknown> | undefined): string {
+  const { generation, build, version } = release ?? {};
+  if (typeof generation === 'number' && typeof build === 'number') {
+    return `${generation}.${build} (generation ${generation}, build ${build})`;
+  }
+  if (typeof version === 'string' && version) {
+    return version;
+  }
+  return typeof generation === 'number' ? String(generation) : 'unknown';
+}
+
 function worldSceneToFoundry(s: WorldScene): FoundryScene {
   const scene: FoundryScene = {
     _id: s._id,
@@ -7532,8 +7541,7 @@ function worldSceneToFoundry(s: WorldScene): FoundryScene {
     padding: s.padding,
     shiftX: 0,
     shiftY: 0,
-    globalLight: s.globalLight,
-    darkness: s.darkness,
+    ...readSceneLighting(s),
   };
   if (s.img) {
     scene.img = s.img;

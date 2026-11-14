@@ -22,7 +22,7 @@ import { packageVersion } from './shared/version.js';
 import { getAllTools } from './tools/definitions.js';
 import { getAllResources } from './tools/resources.js';
 import { logger } from './utils/logger.js';
-import { withBareErrors } from './utils/mcp-errors.js';
+import { toolErrorResult, withBareErrors } from './utils/mcp-errors.js';
 
 export interface McpBackend {
   callTool(name: string, args: Record<string, unknown>): Promise<CallToolResult>;
@@ -62,14 +62,20 @@ export function createMcpServer(backend: McpBackend): Server {
     };
   });
 
-  // Handle tool calls. Errors leave with their bare message: the client adds
-  // the "MCP error <code>: " prefix itself (see withBareErrors).
+  // Handle tool calls. A failure is an isError result carrying one
+  // "MCP error <code>: " prefix; an unknown tool stays a JSON-RPC error
+  // (see toolErrorResult).
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const { name, arguments: args } = request.params;
-    return withBareErrors(() => backend.callTool(name, args || {}));
+    try {
+      return await backend.callTool(name, args || {});
+    } catch (error) {
+      return toolErrorResult(error);
+    }
   });
 
-  // Handle resource reads
+  // Handle resource reads. Errors leave with their bare message: the client
+  // adds the "MCP error <code>: " prefix itself (see withBareErrors).
   server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
     return withBareErrors(() => backend.readResource(request.params.uri));
   });

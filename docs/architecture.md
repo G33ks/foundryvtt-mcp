@@ -61,6 +61,12 @@ From version 0.6.0 the module announces its version and the commands it serves w
 
 With `FOUNDRY_API_KEY` set, the connector also talks over HTTP to the Foundry Local REST API module, a separate project: see [Configuration](configuration.md#the-optional-rest-api-module).
 
+## Errors
+
+A tool call that fails returns a result marked `isError: true`, so the AI reads why: invalid or missing arguments, FoundryVTT not reachable or reconnecting, no active world, a request that took too long, a refusal (writes disabled, an outdated journal page version, a command the module does not serve), or an error from FoundryVTT or the module. Its text starts with one `MCP error <code>: ` prefix carrying a JSON-RPC code, most often `-32602` (invalid parameters), `-32600` (refused) or `-32603` (failed); the code is a hint, not an exact classification of the cause. The same call gives the same text through a relay and all-in-one.
+
+These remain JSON-RPC errors, which the MCP client shows with its own `MCP error <code>: ` prefix: an unknown tool, a malformed request, and a failed resource read (`resources/read` has no `isError` in MCP). A tool called while the configuration is missing or invalid returns an `isError` result whose text is the configuration message alone, without a prefix.
+
 ## Design records
 
 The decisions behind this design are kept in [docs/adrs](adrs/README.md) and [docs/blueprint](blueprint/README.md).

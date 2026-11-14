@@ -191,11 +191,12 @@ export interface FoundryScene {
   description?: string;
   notes?: string;
   weather?: string;
-  environment?: string;
-  // Scene lighting
-  globalLight: boolean;
+  /** Darkness and global light since v12 (see scene-lighting.ts). */
+  environment?: Record<string, unknown>;
+  // Scene lighting, as read by readSceneLighting (absent when unknown)
+  globalLight?: boolean;
   globalLightThreshold?: number;
-  darkness: number;
+  darkness?: number;
   // Tokens and objects on the scene
   tokens?: FoundryToken[];
   walls?: FoundryWall[];
@@ -921,8 +922,11 @@ export interface WorldScene {
   templates?: Array<Record<string, unknown>>;
   /** Scene Region documents (FoundryVTT v12+). */
   regions?: Array<Record<string, unknown>>;
-  darkness: number;
-  globalLight: boolean;
+  /** Darkness and global light since v12 (see scene-lighting.ts). */
+  environment?: Record<string, unknown>;
+  /** Before v12: migrated to `environment` by FoundryVTT. */
+  darkness?: number;
+  globalLight?: boolean;
   globalLightThreshold?: number;
   folder?: string | null;
   sort?: number;

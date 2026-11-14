@@ -2,9 +2,20 @@
 
 ## Unreleased
 
+### Added
+
+- The log records the HTTP status of FoundryVTT's answer to the login (`POST /join answered`), and the path it redirects to without its query, also when the login is refused (400, 401, 403…). It never records the cookie, the headers, the body or the password. Useful after a FoundryVTT update changes the login.
+
 ### Changed
 
+- **Visible to MCP clients:** a tool call that fails now returns a result marked `isError: true` instead of a JSON-RPC error, so the AI reads the reason and can act on it. The text is unchanged, with one `MCP error <code>: ` prefix and the same code as before. An unknown tool and a failed resource read remain JSON-RPC errors. A client or script that caught the error of a failed tool call must now check `isError` in the result. The result no longer carries the error's `data` (such as `{"refusal": true}` on a refusal): the text says what was refused. `docs/architecture.md` describes the error format.
 - Tool descriptions no longer name a particular game system: their examples are neutral, and where a tool reads or checks a given path (`search_actors`, `get_actor_details`, `get_combat_state`, the range checks of `update_actor_attributes`), the description names the path and says it applies when the actor stores a value there.
+
+### Fixed
+
+- `get_world_summary` and `get_health_status` show the FoundryVTT version with its build, as in "Core Version: 14.370 (generation 14, build 370)". FoundryVTT sends its release without the version string, so the tools showed only the generation ("14").
+- `set_scene_lighting` had no effect: it wrote `darkness`, `globalLight` and `globalLightThreshold` at the top of the Scene document, which FoundryVTT has kept under `environment` since v12 and drops from an update in v14. It now writes `environment.darknessLevel`, `environment.globalLight.enabled` and `environment.globalLight.darkness.max`, for v13 and v14 alike.
+- `get_scene_info` showed "Darkness Level: NaN%" and the global light as disabled: it reads them from `environment` now, from the older fields when only those are there, and says "Unknown" when neither is.
 
 ### Documentation
 
