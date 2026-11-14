@@ -6,6 +6,7 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
+import { readSceneLighting } from '../../foundry/scene-lighting.js';
 import { withToolError } from './utils.js';
 
 /**
@@ -21,6 +22,10 @@ export async function handleGetSceneInfo(
 
   return withToolError('get scene info', async () => {
     const scene = await foundryClient.getCurrentScene(sceneId);
+    // The REST API module answers with the raw document, which keeps them under `environment`.
+    const { darkness, globalLight } = readSceneLighting(scene);
+    const lightLabel = globalLight === undefined ? 'Unknown' : globalLight ? 'Enabled' : 'Disabled';
+    const darknessLabel = darkness === undefined ? 'Unknown' : `${Math.round(darkness * 100)}%`;
 
     return {
       content: [
@@ -34,8 +39,8 @@ export async function handleGetSceneInfo(
 **Dimensions:** ${scene.width} x ${scene.height} pixels
 **Padding:** ${scene.padding * 100}%
 **Grid:** ${scene.grid ? `${scene.grid.size}px, distance ${scene.grid.distance}${scene.grid.units ? ` ${scene.grid.units}` : ''}` : 'Unknown'}
-**Global Light:** ${scene.globalLight ? 'Enabled' : 'Disabled'}
-**Darkness Level:** ${scene.darkness * 100}%
+**Global Light:** ${lightLabel}
+**Darkness Level:** ${darknessLabel}
 
 **Description:** ${scene.description || 'No description available.'}`,
         },

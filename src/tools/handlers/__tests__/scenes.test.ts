@@ -1,11 +1,54 @@
 import { McpError } from '@modelcontextprotocol/sdk/types.js';
 import { describe, expect, it, vi } from 'vitest';
 import type { FoundryClient, SceneToken } from '../../../foundry/client.js';
-import type { WorldScene } from '../../../foundry/types.js';
-import { handleListTokens } from '../scenes.js';
+import type { FoundryScene, WorldScene } from '../../../foundry/types.js';
+import { handleGetSceneInfo, handleListTokens } from '../scenes.js';
 
 const SCENE_ID = 'ssssssssssssssss'; // 16 alphanumeric chars
 const OTHER_SCENE_ID = 'oooooooooooooooo';
+
+describe('handleGetSceneInfo — lighting', () => {
+  const sceneInfo = async (lighting: Partial<FoundryScene>) => {
+    const scene: FoundryScene = {
+      _id: SCENE_ID,
+      name: 'Test Scene',
+      active: true,
+      navigation: true,
+      width: 1000,
+      height: 1000,
+      padding: 0.25,
+      shiftX: 0,
+      shiftY: 0,
+      ...lighting,
+    };
+    const client = {
+      getCurrentScene: vi.fn().mockResolvedValue(scene),
+    } as unknown as FoundryClient;
+    const result = await handleGetSceneInfo({ sceneId: SCENE_ID }, client);
+    return result.content[0]?.text ?? '';
+  };
+
+  it('shows the darkness and global light read from the cache', async () => {
+    const text = await sceneInfo({ darkness: 0.07, globalLight: true });
+    expect(text).toContain('**Global Light:** Enabled');
+    expect(text).toContain('**Darkness Level:** 7%');
+  });
+
+  it('reads environment from a raw document (REST API module)', async () => {
+    const text = await sceneInfo({
+      environment: { darknessLevel: 0.5, globalLight: { enabled: false } },
+    });
+    expect(text).toContain('**Global Light:** Disabled');
+    expect(text).toContain('**Darkness Level:** 50%');
+  });
+
+  it('says Unknown rather than NaN when neither form is there', async () => {
+    const text = await sceneInfo({});
+    expect(text).toContain('**Global Light:** Unknown');
+    expect(text).toContain('**Darkness Level:** Unknown');
+    expect(text).not.toContain('NaN');
+  });
+});
 
 describe('handleListTokens', () => {
   const createMockClient = (opts: {

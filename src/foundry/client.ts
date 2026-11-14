@@ -38,6 +38,11 @@ import {
   OVERWRITTEN_BY_CONNECTOR,
   RECENT_AUTOSAVE_MS,
 } from './journal-integrity.js';
+import {
+  readSceneLighting,
+  type SceneLightingChange,
+  sceneLightingUpdate,
+} from './scene-lighting.js';
 import type {
   ActorAttributeUpdateResult,
   ActorEffectInput,
@@ -5085,17 +5090,14 @@ export class FoundryClient {
   // ==========================================================================
 
   /**
-   * Sets a scene's ambient darkness level and/or global illumination fields.
-   * All three are plain top-level fields on the `Scene` document (mirrors
-   * {@link switchScene}) — no canvas access required.
+   * Sets a scene's ambient darkness level and/or global illumination fields,
+   * under the `Scene` document's `environment` (see scene-lighting.ts) — no
+   * canvas access required.
    *
    * @param sceneId - 16-char alphanumeric Scene document id
    * @param options - at least one of darkness (0-1), globalLight, globalLightThreshold
    */
-  async setSceneLighting(
-    sceneId: string,
-    options: { darkness?: number; globalLight?: boolean; globalLightThreshold?: number },
-  ): Promise<unknown> {
+  async setSceneLighting(sceneId: string, options: SceneLightingChange): Promise<unknown> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(sceneId)) {
       throw new Error(`Invalid sceneId format: ${sceneId}`);
@@ -5106,16 +5108,7 @@ export class FoundryClient {
     ) {
       throw new Error(`Invalid darkness: ${options.darkness} (must be a number between 0 and 1)`);
     }
-    const update: Record<string, unknown> = { _id: sceneId };
-    if (options.darkness !== undefined) {
-      update.darkness = options.darkness;
-    }
-    if (options.globalLight !== undefined) {
-      update.globalLight = options.globalLight;
-    }
-    if (options.globalLightThreshold !== undefined) {
-      update.globalLightThreshold = options.globalLightThreshold;
-    }
+    const update: Record<string, unknown> = { _id: sceneId, ...sceneLightingUpdate(options) };
     if (Object.keys(update).length === 1) {
       throw new Error('At least one of darkness, globalLight, globalLightThreshold is required');
     }
@@ -7548,8 +7541,7 @@ function worldSceneToFoundry(s: WorldScene): FoundryScene {
     padding: s.padding,
     shiftX: 0,
     shiftY: 0,
-    globalLight: s.globalLight,
-    darkness: s.darkness,
+    ...readSceneLighting(s),
   };
   if (s.img) {
     scene.img = s.img;
