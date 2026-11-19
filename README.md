@@ -92,6 +92,8 @@ When something fails, the message says why; [TROUBLESHOOTING.md](https://github.
 - **Some changes stay yours**: the connector does not promote anyone to Gamemaster nor change the world's permission settings.
 - **After FoundryVTT restarts, launch the world again.** The connector waits for it and reconnects by itself.
 - **After an update, restart your MCP client**: a client started earlier keeps the previous list of tools.
+- **A deletion can, rarely, go unanswered**: FoundryVTT deletes the document, but its answer never reaches the connector. It has not been reproduced on demand. The connector then reads the document back: the tool succeeds with a note when the document is gone, and reports the timeout otherwise. If such an error still happens, note the time, call `refresh_world_data`, and keep the connector's log lines from that time ([where the log is](https://github.com/G33ks/foundryvtt-mcp/blob/main/docs/architecture.md#the-state-directory)).
+- **A combat created by `start_combat` may not show in the combat tracker.** Some game systems define a combat's own data in code that only the browsers load; the connector creates the combat on the server without that data, and the browsers reject it. The fix needs a future version of the companion module.
 
 ## Documentation
 

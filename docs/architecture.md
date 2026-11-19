@@ -67,6 +67,8 @@ A tool call that fails returns a result marked `isError: true`, so the AI reads 
 
 These remain JSON-RPC errors, which the MCP client shows with its own `MCP error <code>: ` prefix: an unknown tool, a malformed request, and a failed resource read (`resources/read` has no `isError` in MCP). A tool called while the configuration is missing or invalid returns an `isError` result whose text is the configuration message alone, without a prefix.
 
+A deletion whose answer from FoundryVTT does not arrive in time (`FOUNDRY_TIMEOUT`, 10 s by default) is checked before it is reported: the connector reads the document back once. When it is gone, the call succeeds with a note saying the answer timed out, and the cached world drops it; when it is still there, or the read fails too, the call returns the timeout error. This is rare and has not been reproduced on demand. If such an error still happens, note the time, call `refresh_world_data`, and keep the log lines from that time (`daemon.log`, in the [state directory](#the-state-directory)): a timeout gives the age of FoundryVTT's last ping, whether the connection was up and how many requests were waiting, and an answer that arrives late is logged as a warning.
+
 ## Design records
 
 The decisions behind this design are kept in [docs/adrs](adrs/README.md) and [docs/blueprint](blueprint/README.md).
