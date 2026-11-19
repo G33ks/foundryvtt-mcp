@@ -5,7 +5,7 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import type { OWNERSHIP_LEVELS } from '../../foundry/types.js';
-import { withToolError } from './utils.js';
+import { deletionNote, withToolError } from './utils.js';
 
 // ============================================================================
 // Folder handlers
@@ -145,13 +145,13 @@ export async function handleDeleteMacro(args: { macroId: string }, foundryClient
   }
 
   return withToolError('delete macro', async () => {
-    await foundryClient.deleteMacro(macroId);
+    const note = await foundryClient.deleteMacro(macroId);
 
     return {
       content: [
         {
           type: 'text',
-          text: `🗑️ **Macro Deleted**\n**ID:** ${macroId}`,
+          text: `🗑️ **Macro Deleted**\n**ID:** ${macroId}${deletionNote(note)}`,
         },
       ],
     };
@@ -268,13 +268,13 @@ export async function handleDeletePlaylist(
   }
 
   return withToolError('delete playlist', async () => {
-    await foundryClient.deletePlaylist(playlistId);
+    const note = await foundryClient.deletePlaylist(playlistId);
 
     return {
       content: [
         {
           type: 'text',
-          text: `🗑️ **Playlist Deleted**\n**ID:** ${playlistId}`,
+          text: `🗑️ **Playlist Deleted**\n**ID:** ${playlistId}${deletionNote(note)}`,
         },
       ],
     };

@@ -8,7 +8,7 @@
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
 import { resolveSceneId } from './scenes.js';
-import { withToolError } from './utils.js';
+import { deletionNote, withToolError } from './utils.js';
 
 /**
  * Handles creating a new Scene document from a background image on disk.
@@ -99,10 +99,15 @@ export async function handleDeleteScene(args: { sceneId: string }, foundryClient
   return withToolError('delete scene', async () => {
     const target = foundryClient.getScenes().find((s) => s._id === sceneId);
     const name = target?.name ?? sceneId;
-    await foundryClient.deleteScene(sceneId);
+    const note = await foundryClient.deleteScene(sceneId);
 
     return {
-      content: [{ type: 'text', text: `🗑️ **Scene Deleted**\n**Scene:** ${name} (${sceneId})` }],
+      content: [
+        {
+          type: 'text',
+          text: `🗑️ **Scene Deleted**\n**Scene:** ${name} (${sceneId})${deletionNote(note)}`,
+        },
+      ],
     };
   });
 }

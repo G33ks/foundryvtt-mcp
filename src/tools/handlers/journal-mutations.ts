@@ -19,7 +19,7 @@ import type {
 } from '../../foundry/types.js';
 import { VISIBILITY_LEVELS } from '../../foundry/types.js';
 import { refusalError } from '../../utils/refusal.js';
-import { withJournalWarnings, withToolError } from './utils.js';
+import { deletionNote, withJournalWarnings, withToolError } from './utils.js';
 
 /** Version token of a page body as returned by the server. */
 function pageVersion(page: { text?: { content?: string | null } } | undefined): string {
@@ -315,11 +315,14 @@ export async function handleDeleteJournalEntry(
   return withToolError('delete journal entry', async () => {
     const target = foundryClient.getJournal(journalId);
     const name = target?.name ?? journalId;
-    await foundryClient.deleteJournalEntry(journalId);
+    const note = await foundryClient.deleteJournalEntry(journalId);
 
     return withJournalWarnings(foundryClient, {
       content: [
-        { type: 'text', text: `🗑️ **Journal Entry Deleted**\n**Entry:** ${name} (${journalId})` },
+        {
+          type: 'text',
+          text: `🗑️ **Journal Entry Deleted**\n**Entry:** ${name} (${journalId})${deletionNote(note)}`,
+        },
       ],
     });
   });

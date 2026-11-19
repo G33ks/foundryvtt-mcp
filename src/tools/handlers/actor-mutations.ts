@@ -8,7 +8,7 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { AttributePatch, FoundryClient } from '../../foundry/client.js';
-import { withToolError } from './utils.js';
+import { deletionNote, withToolError } from './utils.js';
 
 /**
  * Handles actor attribute update requests.
@@ -183,10 +183,12 @@ export async function handleDeleteWorldActor(
   }
 
   return withToolError('delete actor', async () => {
-    await foundryClient.deleteWorldActor(actorId);
+    const note = await foundryClient.deleteWorldActor(actorId);
 
     return {
-      content: [{ type: 'text', text: `🗑️ **Actor Deleted**\n**ID:** ${actorId}` }],
+      content: [
+        { type: 'text', text: `🗑️ **Actor Deleted**\n**ID:** ${actorId}${deletionNote(note)}` },
+      ],
     };
   });
 }

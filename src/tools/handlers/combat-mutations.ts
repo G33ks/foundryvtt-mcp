@@ -17,7 +17,7 @@ import {
   getTurnOrder,
   turnIndexAfterInitiativeChange,
 } from './combat-order.js';
-import { withToolError } from './utils.js';
+import { deletionNote, withToolError } from './utils.js';
 
 /** A combatant seed derived from a scene token, sent to the create wire. */
 interface CombatantSeed {
@@ -124,7 +124,7 @@ export async function handleEndCombat(
   }
 
   return withToolError('end combat', async () => {
-    await foundryClient.endCombat(combat._id);
+    const note = await foundryClient.endCombat(combat._id);
 
     return {
       content: [
@@ -132,7 +132,7 @@ export async function handleEndCombat(
           type: 'text',
           text: `⚔️ **Combat Ended**
 **Encounter:** ${combat._id}
-The active combat encounter has been removed.`,
+The active combat encounter has been removed.${deletionNote(note)}`,
         },
       ],
     };

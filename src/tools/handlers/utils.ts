@@ -30,6 +30,14 @@ export function withJournalWarnings<T extends { content: Array<{ type: string; t
 }
 
 /**
+ * Ends a deletion's response with the client's note when only a re-read
+ * confirmed the deletion (see `FoundryClient.deleteScene` and the like).
+ */
+export function deletionNote(note: string | undefined): string {
+  return note ? `\n\n⚠️ ${note}` : '';
+}
+
+/**
  * Wraps an async handler function with standard error logging and McpError conversion.
  *
  * @param toolName - Label used in error log messages (e.g. 'search actors')

@@ -714,6 +714,10 @@ export function gamemasterAccountWarning(
 /** A Socket.IO request whose acknowledgement did not arrive within the timeout. */
 class AckTimeoutError extends Error {}
 
+/** Response note of a deletion that only a re-read could confirm. */
+export const DELETE_VERIFIED_NOTE =
+  'FoundryVTT deleted the document but its acknowledgement timed out; verified by re-reading it.';
+
 /** Action, document type and id of a `modifyDocument` request, for the log. */
 function describeAckRequest(payload: unknown): { action?: string; type?: string; id?: string } {
   if (!isRecord(payload)) {
@@ -2962,6 +2966,68 @@ export class FoundryClient {
     return result;
   }
 
+  /**
+   * Deletes one world document. When the acknowledgement times out, reads
+   * the document back once over the socket instead of reporting a failure
+   * FoundryVTT may not have had: gone means deleted (the cache is updated as
+   * an acknowledgement would have); still there, or the read failing, keeps
+   * the timeout error. Never sends the deletion again. A scene confirmed this
+   * way also marks the cache stale: FoundryVTT deletes its combats with it,
+   * and their deletion was never received.
+   *
+   * @returns a note for the response when only the re-read confirmed the deletion
+   */
+  private async deleteWorldDocument(type: string, id: string): Promise<string | undefined> {
+    try {
+      await this.modifyDocument(type, 'delete', { ids: [id] });
+      return undefined;
+    } catch (error) {
+      if (!(error instanceof AckTimeoutError)) {
+        throw error;
+      }
+      let exists: boolean;
+      try {
+        exists = await this.worldDocumentExists(type, id);
+      } catch (readError) {
+        const reason = readError instanceof Error ? readError.message : String(readError);
+        throw new Error(`${error.message} (re-reading the document to check failed: ${reason})`);
+      }
+      if (exists) {
+        throw error;
+      }
+      logger.warn('Deletion acknowledgement timed out, but re-reading shows the document is gone', {
+        type,
+        id,
+      });
+      this.changeCache((worldData) =>
+        applyDocumentBroadcast(worldData, { type, action: 'delete', result: [id] }),
+      );
+      if (type === 'Scene') {
+        this.markWorldDataStale(
+          true,
+          'a scene deletion was only confirmed by re-reading it; its combats may still be cached',
+        );
+      }
+      return DELETE_VERIFIED_NOTE;
+    }
+  }
+
+  /** Whether the server still has this world document (`modifyDocument` `get`). */
+  private async worldDocumentExists(type: string, id: string): Promise<boolean> {
+    const response = await this.emitWithAck<DocumentSocketResponse>('modifyDocument', {
+      type,
+      action: 'get',
+      operation: { query: { _id: id }, pack: null },
+    });
+    if (response?.error) {
+      throw new Error(response.error.message || 'unknown error');
+    }
+    if (!Array.isArray(response?.result)) {
+      throw new Error('unexpected answer');
+    }
+    return response.result.length > 0;
+  }
+
   // ==========================================================================
   // Item mutation methods (WRITE — Socket.IO modifyDocument)
   // ==========================================================================
@@ -3111,13 +3177,14 @@ export class FoundryClient {
    * Ends (deletes) the active combat encounter (FR-018).
    *
    * @param combatId - 16-char alphanumeric Combat document id
+   * @returns a note when only a re-read confirmed the deletion ({@link deleteWorldDocument})
    */
-  async endCombat(combatId: string): Promise<void> {
+  async endCombat(combatId: string): Promise<string | undefined> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(combatId)) {
       throw new Error(`Invalid combatId format: ${combatId}`);
     }
-    await this.modifyDocument('Combat', 'delete', { ids: [combatId] });
+    return this.deleteWorldDocument('Combat', combatId);
   }
 
   /**
@@ -4477,26 +4544,28 @@ export class FoundryClient {
    * Permanently deletes a top-level Actor document (mirrors {@link createWorldActor}).
    *
    * @param actorId - 16-char alphanumeric Actor document id to delete
+   * @returns a note when only a re-read confirmed the deletion ({@link deleteWorldDocument})
    */
-  async deleteWorldActor(actorId: string): Promise<void> {
+  async deleteWorldActor(actorId: string): Promise<string | undefined> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(actorId)) {
       throw new Error(`Invalid actorId format: ${actorId}`);
     }
-    await this.modifyDocument('Actor', 'delete', { ids: [actorId] });
+    return this.deleteWorldDocument('Actor', actorId);
   }
 
   /**
    * Permanently deletes a Scene document (mirrors {@link switchScene}).
    *
    * @param sceneId - 16-char alphanumeric Scene document id to delete
+   * @returns a note when only a re-read confirmed the deletion ({@link deleteWorldDocument})
    */
-  async deleteScene(sceneId: string): Promise<void> {
+  async deleteScene(sceneId: string): Promise<string | undefined> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(sceneId)) {
       throw new Error(`Invalid sceneId format: ${sceneId}`);
     }
-    await this.modifyDocument('Scene', 'delete', { ids: [sceneId] });
+    return this.deleteWorldDocument('Scene', sceneId);
   }
 
   /**
@@ -4560,13 +4629,14 @@ export class FoundryClient {
    * Permanently deletes a JournalEntry document (mirrors {@link createJournalEntry}).
    *
    * @param journalId - 16-char alphanumeric JournalEntry document id to delete
+   * @returns a note when only a re-read confirmed the deletion ({@link deleteWorldDocument})
    */
-  async deleteJournalEntry(journalId: string): Promise<void> {
+  async deleteJournalEntry(journalId: string): Promise<string | undefined> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(journalId)) {
       throw new Error(`Invalid journalId format: ${journalId}`);
     }
-    await this.modifyDocument('JournalEntry', 'delete', { ids: [journalId] });
+    return this.deleteWorldDocument('JournalEntry', journalId);
   }
 
   // ==========================================================================
@@ -4719,12 +4789,12 @@ export class FoundryClient {
     return created[0];
   }
 
-  async deleteRollTable(tableId: string): Promise<void> {
+  async deleteRollTable(tableId: string): Promise<string | undefined> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(tableId)) {
       throw new Error(`Invalid tableId format: ${tableId}`);
     }
-    await this.modifyDocument('RollTable', 'delete', { ids: [tableId] });
+    return this.deleteWorldDocument('RollTable', tableId);
   }
 
   // ==========================================================================
@@ -4851,12 +4921,12 @@ export class FoundryClient {
     return result[0];
   }
 
-  async deleteMacro(macroId: string): Promise<void> {
+  async deleteMacro(macroId: string): Promise<string | undefined> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(macroId)) {
       throw new Error(`Invalid macroId format: ${macroId}`);
     }
-    await this.modifyDocument('Macro', 'delete', { ids: [macroId] });
+    return this.deleteWorldDocument('Macro', macroId);
   }
 
   // ==========================================================================
@@ -4989,12 +5059,12 @@ export class FoundryClient {
     return result[0];
   }
 
-  async deletePlaylist(playlistId: string): Promise<void> {
+  async deletePlaylist(playlistId: string): Promise<string | undefined> {
     this.assertWriteable();
     if (!FOUNDRY_ID_PATTERN.test(playlistId)) {
       throw new Error(`Invalid playlistId format: ${playlistId}`);
     }
-    await this.modifyDocument('Playlist', 'delete', { ids: [playlistId] });
+    return this.deleteWorldDocument('Playlist', playlistId);
   }
 
   // ==========================================================================

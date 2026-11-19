@@ -8,7 +8,7 @@
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
-import { withToolError } from './utils.js';
+import { deletionNote, withToolError } from './utils.js';
 
 /**
  * Handles listing the world's roll tables.
@@ -121,13 +121,13 @@ export async function handleDeleteRollTable(
   }
 
   return withToolError('delete roll table', async () => {
-    await foundryClient.deleteRollTable(tableId);
+    const note = await foundryClient.deleteRollTable(tableId);
 
     return {
       content: [
         {
           type: 'text',
-          text: `🗑️ **Roll Table Deleted**\n**ID:** ${tableId}`,
+          text: `🗑️ **Roll Table Deleted**\n**ID:** ${tableId}${deletionNote(note)}`,
         },
       ],
     };
