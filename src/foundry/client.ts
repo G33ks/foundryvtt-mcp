@@ -711,6 +711,26 @@ export function gamemasterAccountWarning(
   );
 }
 
+/** A Socket.IO request whose acknowledgement did not arrive within the timeout. */
+class AckTimeoutError extends Error {}
+
+/** Action, document type and id of a `modifyDocument` request, for the log. */
+function describeAckRequest(payload: unknown): { action?: string; type?: string; id?: string } {
+  if (!isRecord(payload)) {
+    return {};
+  }
+  const operation = isRecord(payload.operation) ? payload.operation : {};
+  const first = (list: unknown) => (Array.isArray(list) ? list[0] : undefined);
+  const data = first(operation.data) ?? first(operation.updates);
+  const query = isRecord(operation.query) ? operation.query : {};
+  const id = first(operation.ids) ?? (isRecord(data) ? data._id : undefined) ?? query._id;
+  return {
+    ...(typeof payload.action === 'string' ? { action: payload.action } : {}),
+    ...(typeof payload.type === 'string' ? { type: payload.type } : {}),
+    ...(typeof id === 'string' ? { id } : {}),
+  };
+}
+
 export class FoundryClient {
   private http: AxiosInstance;
   private socket: Socket | null = null;
@@ -760,6 +780,10 @@ export class FoundryClient {
   } | null = null;
   /** Counts socket drops: a reload that saw one leaves the cache stale. */
   private socketDrops = 0;
+  /** When the server's last ping reached the socket; `null` since it connected. */
+  private lastPingAt: number | null = null;
+  /** Socket.IO requests still waiting for their acknowledgement within their timeout. */
+  private pendingAcks = 0;
   /**
    * Last observed outcome of a REST request: false once one failed to reach
    * FoundryVTT at all (laurigates/foundryvtt-mcp#217). Unused in Socket.IO mode.
@@ -1231,6 +1255,10 @@ export class FoundryClient {
     socket.on('userActivity', this.onUserActivity);
     // Collaborative-editor autosaves bypass `modifyDocument` entirely.
     socket.on('pm.autosave', this.onEditorAutosave);
+    // The server's pings, for the age logged when a request times out
+    // (test doubles have no manager).
+    this.lastPingAt = null;
+    socket.io?.on('ping', this.onServerPing);
   }
 
   private detachDataListeners(socket: Socket): void {
@@ -1238,7 +1266,13 @@ export class FoundryClient {
     socket.off('modifyDocumentBatch', this.onDocumentBatchBroadcast);
     socket.off('userActivity', this.onUserActivity);
     socket.off('pm.autosave', this.onEditorAutosave);
+    socket.io?.off('ping', this.onServerPing);
   }
+
+  /** Bound field rather than a method so the same reference reaches `off()`. */
+  private onServerPing = (): void => {
+    this.lastPingAt = Date.now();
+  };
 
   /** The handshake: FoundryVTT's first `session` event must name a user. */
   private waitForSessionUser(
@@ -1638,6 +1672,7 @@ export class FoundryClient {
     // Only the transport is back: FoundryVTT may not know the session any
     // more (a server restart forgets every session). `onSessionEvent` decides.
     this.awaitingSession = true;
+    this.lastPingAt = null;
     logger.debug('FoundryVTT socket transport reconnected — waiting for its session');
   };
 
@@ -2810,6 +2845,10 @@ export class FoundryClient {
    * Emits a Socket.IO event with an acknowledgement callback, resolving the
    * server's response and rejecting on timeout. Mirrors the ack pattern used by
    * the `world` event in {@link connectAndLoadWorld}/{@link refreshWorldData}.
+   *
+   * The timeout error carries the age of the server's last ping, the socket's
+   * state and the requests still waiting; an acknowledgement that arrives
+   * after it is logged and otherwise ignored.
    */
   private emitWithAck<T>(event: string, payload: unknown): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -2825,12 +2864,35 @@ export class FoundryClient {
         return;
       }
       const timeoutMs = this.config.timeout || 10000;
-      const timeout = setTimeout(
-        () => reject(new Error(`Timeout waiting for '${event}' response (${timeoutMs}ms)`)),
-        timeoutMs,
-      );
+      const sentAt = Date.now();
+      let timedOut = false;
+      this.pendingAcks += 1;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        const lastPing =
+          this.lastPingAt === null
+            ? 'none since connect'
+            : `${Date.now() - this.lastPingAt} ms ago`;
+        reject(
+          new AckTimeoutError(
+            `Timeout waiting for '${event}' response (${timeoutMs}ms) ` +
+              `[last ping: ${lastPing}; socket: ${socket.connected ? 'connected' : 'disconnected'}; ` +
+              `pending requests: ${this.pendingAcks}]`,
+          ),
+        );
+        this.pendingAcks -= 1;
+      }, timeoutMs);
       socket.emit(event, payload, (response: T) => {
+        if (timedOut) {
+          logger.warn(`Late acknowledgement for '${event}' ignored`, {
+            ...describeAckRequest(payload),
+            delayMs: Date.now() - sentAt,
+            timeoutMs,
+          });
+          return;
+        }
         clearTimeout(timeout);
+        this.pendingAcks -= 1;
         resolve(response);
       });
     });
