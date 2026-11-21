@@ -244,6 +244,42 @@ describe('ModuleBridge origin check', () => {
   });
 });
 
+describe('ModuleBridge command errors', () => {
+  it.each([
+    [
+      'a refusal (module 0.7.0+)',
+      { error: 'Token t1 not found', code: 'not-found', refusal: true },
+      true,
+      'Token t1 not found',
+    ],
+    ['a plain error (any module)', { error: 'Canvas is not ready' }, false, 'Canvas is not ready'],
+    [
+      'an error marked anything but true',
+      { error: 'Canvas is not ready', refusal: 'yes' },
+      false,
+      'Canvas is not ready',
+    ],
+    ['an error that is not a string', { error: { message: 'x' } }, false, 'Module error'],
+  ])('rejects %s with its message', async (_label, response, refused, message) => {
+    const port = await freePort();
+    const bridge = await startBridge(port);
+    const module = await client(port);
+    await authenticate(bridge, module);
+    await waitFor(() => bridge.isConnected());
+
+    const reply = bridge.send('get_targets');
+    const command = await module.next();
+    module.send({ id: command.id, ...response });
+    const error = await reply.then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(message);
+    expect(error instanceof RefusedError).toBe(refused);
+  });
+});
+
 describe('ModuleBridge handshake', () => {
   it('authenticates a module that answers the challenge, then relays commands', async () => {
     const port = await freePort();

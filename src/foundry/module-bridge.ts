@@ -40,6 +40,11 @@
  * not cover it; it only decides which commands the server tries to send (see
  * {@link ModuleBridge.send}). An older module omits it, and is then sent only
  * {@link LEGACY_COMMANDS}.
+ *
+ * Since module 0.7.0, an error response may also carry `refusal: true` (and a
+ * `code`): the command turned the call down by design, and {@link
+ * ModuleBridge.send} rejects with a {@link RefusedError}. `error` stays the
+ * message either way.
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -109,13 +114,15 @@ interface PendingRequest {
   timeout: NodeJS.Timeout;
 }
 
-/** A `{id, type, params}` command sent to the module, or `{id, result}` / `{id, error}` sent
- *  back, or an unsolicited `{event, payload}` push (e.g. canvas targeting). */
+/** A `{id, type, params}` command sent to the module, or `{id, result}` / `{id, error,
+ *  code?, refusal?}` sent back, or an unsolicited `{event, payload}` push (e.g. canvas
+ *  targeting). */
 interface BridgeMessage {
   id?: unknown;
   type?: unknown;
   result?: unknown;
   error?: unknown;
+  refusal?: unknown;
   event?: unknown;
   payload?: unknown;
 }
@@ -684,7 +691,8 @@ export class ModuleBridge {
     this.pending.delete(parsed.id);
     clearTimeout(pending.timeout);
     if (parsed.error !== undefined) {
-      pending.reject(new Error(typeof parsed.error === 'string' ? parsed.error : 'Module error'));
+      const message = typeof parsed.error === 'string' ? parsed.error : 'Module error';
+      pending.reject(parsed.refusal === true ? new RefusedError(message) : new Error(message));
     } else {
       pending.resolve(parsed.result);
     }
