@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 3.1.0 — 2026-11-21
+
+Minor release, no breaking change. Recommended companion module: **0.7.0** (`bridge-v0.7.0`). Modules 0.6.0 and 0.5.x still work with this server: `start_combat` then creates the combat over the socket, as before (see Known limitations).
 
 ### Added
 
