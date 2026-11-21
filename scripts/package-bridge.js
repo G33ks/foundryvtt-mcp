@@ -5,7 +5,8 @@
  *
  * Produces the two release attachments in the output directory:
  *   - module.json: the committed manifest with the exact version of the tag and
- *     the `download` URL of this tag's zip (`manifest` stays the stable URL on main);
+ *     the `download` URL of this tag's zip (`manifest` stays the stable URL on main),
+ *     in the committed file's layout;
  *   - foundryvtt-mcp-bridge.zip: module.json at the root, plus scripts/, README.md
  *     and the repository LICENSE. Nothing else from foundry-module/ is shipped.
  *
@@ -23,6 +24,7 @@
 import { appendFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { deflateRawSync } from 'node:zlib';
 
 export const MODULE_ID = 'foundryvtt-mcp-bridge';
@@ -155,15 +157,34 @@ export function createZip(entries) {
 }
 
 /**
+ * The release module.json as text: the committed file with only its
+ * `version` and `download` values replaced, so it keeps the committed layout.
+ * Throws when the result does not parse back to `manifest` (a layout the
+ * replacement cannot handle).
+ */
+export function releaseManifestText(committedText, manifest) {
+  let text = committedText;
+  for (const key of ['version', 'download']) {
+    const pattern = new RegExp(`^(\\s*"${key}"\\s*:\\s*)"[^"\\n]*"`, 'm');
+    text = text.replace(pattern, (_match, prefix) => `${prefix}${JSON.stringify(manifest[key])}`);
+  }
+  if (!isDeepStrictEqual(JSON.parse(text), manifest)) {
+    throw new Error('Could not write the release module.json in the committed layout');
+  }
+  return text;
+}
+
+/**
  * Write the release module.json and zip for `tag` into `outDir`.
  * Without a tag, packages the committed version as a final release.
  */
 export function packageBridge({ repoRoot, outDir, tag }) {
   const moduleDir = join(repoRoot, 'foundry-module');
-  const committed = JSON.parse(readFileSync(join(moduleDir, 'module.json'), 'utf8'));
+  const committedText = readFileSync(join(moduleDir, 'module.json'), 'utf8');
+  const committed = JSON.parse(committedText);
   const releaseTag = tag ?? `bridge-v${committed.version}`;
   const manifest = releaseManifest(committed, releaseTag);
-  const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+  const manifestText = releaseManifestText(committedText, manifest);
 
   const entries = [
     { name: 'module.json', data: Buffer.from(manifestText, 'utf8') },
