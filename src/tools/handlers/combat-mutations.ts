@@ -5,12 +5,16 @@
  * advancing the turn, ending the encounter, and setting a combatant's
  * initiative. All are WRITE operations — they require FOUNDRY_WRITE_ENABLED=true
  * and an active Socket.IO connection (mutations use the core `modifyDocument`
- * protocol), and the connected user needs GM/owner permission.
+ * protocol), and the connected user needs GM/owner permission. Starting a
+ * combat goes through the companion module when it serves `create_combat`.
  */
 
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { FoundryClient } from '../../foundry/client.js';
-import type { WorldCombat, WorldScene } from '../../foundry/types.js';
+import type { ModuleBridge } from '../../foundry/module-bridge.js';
+import type { WorldCombat, WorldData, WorldScene } from '../../foundry/types.js';
+import { isRecord } from '../../utils/guards.js';
+import { refusalError } from '../../utils/refusal.js';
 import { combatantName } from './combat.js';
 import {
   getCurrentCombatant,
@@ -211,16 +215,127 @@ export async function handleSetInitiative(
   });
 }
 
+/** How long start_combat waits for the cache to show a combat the module created. */
+export const CACHED_COMBAT_WAIT_MS = 2000;
+const CACHED_COMBAT_POLL_MS = 25;
+
+/**
+ * The sub-types the world's game system declares for `Combat` or
+ * `Combatant`, other than `base`: from the world payload's `model` (what the
+ * browsers build `game.documentTypes` from), else from its system manifest's
+ * `documentTypes`. Such a system may define data of its own for them, which
+ * only code loaded by the browsers fills in.
+ */
+export function declaredCombatTypes(world: WorldData | null): string[] {
+  if (!world) {
+    return [];
+  }
+  const typesOf = (documentName: string): string[] => {
+    const fromModel = isRecord(world.model) ? world.model[documentName] : undefined;
+    if (isRecord(fromModel)) {
+      return Object.keys(fromModel);
+    }
+    const manifestTypes = isRecord(world.system) ? world.system.documentTypes : undefined;
+    const fromManifest = isRecord(manifestTypes) ? manifestTypes[documentName] : undefined;
+    return isRecord(fromManifest) ? Object.keys(fromManifest) : [];
+  };
+  return [...new Set([...typesOf('Combat'), ...typesOf('Combatant')])].filter(
+    (type) => type !== 'base',
+  );
+}
+
+/**
+ * Waits, up to {@link CACHED_COMBAT_WAIT_MS}, for the cache to show a combat
+ * the module created, begun and with its combatants. The module answers once
+ * its own page has the combat; FoundryVTT broadcasts it to the connector's
+ * socket at the same time, but nothing orders the two.
+ *
+ * @returns false when the time ran out first
+ */
+async function waitForCachedCombat(
+  foundryClient: FoundryClient,
+  combatId: string,
+  combatantCount: number,
+): Promise<boolean> {
+  const deadline = Date.now() + CACHED_COMBAT_WAIT_MS;
+  for (;;) {
+    const combat = foundryClient.getWorldData()?.combats.find((c) => c._id === combatId);
+    if (combat && combat.round >= 1 && combat.combatants.length >= combatantCount) {
+      return true;
+    }
+    if (Date.now() >= deadline) {
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, CACHED_COMBAT_POLL_MS));
+  }
+}
+
+/** What the module's create_combat answered. */
+interface ModuleCombat {
+  combatId: string;
+  combatantIds: string[];
+  incomplete?: string;
+}
+
+function parseModuleCombat(outcome: unknown): ModuleCombat {
+  if (
+    !isRecord(outcome) ||
+    typeof outcome.combatId !== 'string' ||
+    !Array.isArray(outcome.combatantIds) ||
+    !outcome.combatantIds.every((id) => typeof id === 'string') ||
+    (outcome.incomplete !== undefined && typeof outcome.incomplete !== 'string')
+  ) {
+    throw new McpError(
+      ErrorCode.InternalError,
+      'Module returned an unexpected create_combat shape',
+    );
+  }
+  return {
+    combatId: outcome.combatId,
+    combatantIds: outcome.combatantIds,
+    ...(outcome.incomplete !== undefined ? { incomplete: outcome.incomplete } : {}),
+  };
+}
+
+function startedResult(
+  combatId: string,
+  scene: WorldScene,
+  combatantCount: number,
+  createdBy: string,
+  note = '',
+) {
+  return {
+    content: [
+      {
+        type: 'text',
+        text: `⚔️ **Combat Started**
+**Encounter:** ${combatId}
+**Scene:** ${scene.name} (${scene._id})
+**Combatants:** ${combatantCount}
+**Created by:** ${createdBy}${note}`,
+      },
+    ],
+  };
+}
+
 /**
  * Starts a new combat encounter, seeding combatants from tokens (FR-018, laurigates/foundryvtt-mcp#172).
  *
  * Resolves the target scene (explicit `sceneId`, else the active scene), then
  * builds combatant seeds from the requested `tokenIds` (or every token on the
- * scene when none are given) and delegates the two-step create to the client.
+ * scene when none are given).
+ *
+ * With writes enabled and a companion module that serves `create_combat`
+ * (0.7.0 or later; FoundryCore waited for one on its way), the module creates
+ * and begins the combat in the headless GM page, so the game system prepares
+ * it. Otherwise the client creates it over the socket, unless the world's
+ * game system declares combat sub-types ({@link declaredCombatTypes}): the
+ * browsers would reject that combat, so the call is refused.
  */
 export async function handleStartCombat(
   args: { tokenIds?: string[]; sceneId?: string },
   foundryClient: FoundryClient,
+  moduleBridge: ModuleBridge | null = null,
 ) {
   const { tokenIds, sceneId } = args ?? {};
 
@@ -263,18 +378,53 @@ export async function handleStartCombat(
   }
 
   return withToolError('start combat', async () => {
-    const { combatId, combatantCount } = await foundryClient.startCombat(scene._id, seeds);
+    const writeEnabled = foundryClient.isWriteEnabled();
+    if (writeEnabled && moduleBridge?.supports('create_combat')) {
+      const created = parseModuleCombat(
+        await moduleBridge.send('create_combat', {
+          sceneId: scene._id,
+          combatants: seeds.map(({ tokenId, actorId }) => ({
+            tokenId,
+            ...(actorId ? { actorId } : {}),
+          })),
+        }),
+      );
+      if (created.incomplete !== undefined) {
+        throw new Error(
+          `Combat ${created.combatId} was created on scene ${scene.name} (${scene._id}), but ${created.incomplete}. It was left in place; end_combat removes it.`,
+        );
+      }
+      const cached = await waitForCachedCombat(
+        foundryClient,
+        created.combatId,
+        created.combatantIds.length,
+      );
+      return startedResult(
+        created.combatId,
+        scene,
+        created.combatantIds.length,
+        'the companion module (the game system prepared it)',
+        cached
+          ? ''
+          : `\n\n⚠️ The connector's cache had not caught up with this combat after ${CACHED_COMBAT_WAIT_MS / 1000} s; get_combat_state may show it a moment later.`,
+      );
+    }
 
-    return {
-      content: [
-        {
-          type: 'text',
-          text: `⚔️ **Combat Started**
-**Encounter:** ${combatId}
-**Scene:** ${scene.name} (${scene._id})
-**Combatants:** ${combatantCount}`,
-        },
-      ],
-    };
+    // Writes disabled: the socket path below turns the call down as every write does.
+    const declared = writeEnabled ? declaredCombatTypes(foundryClient.getWorldData()) : [];
+    if (declared.length > 0) {
+      const reason = !moduleBridge
+        ? 'the module bridge is disabled'
+        : moduleBridge.isConnected()
+          ? moduleBridge.missingCommandMessage('create_combat')
+          : 'the companion module is not connected';
+      throw refusalError(
+        ErrorCode.InvalidRequest,
+        `This world's game system defines its own combat data (types: ${declared.join(', ')}), which only the companion module 0.7.0 or later can create, and it is not available: ${reason}. FoundryVTT's browsers would reject a combat created without it. Nothing was created.`,
+      );
+    }
+
+    const { combatId, combatantCount } = await foundryClient.startCombat(scene._id, seeds);
+    return startedResult(combatId, scene, combatantCount, 'the socket');
   });
 }

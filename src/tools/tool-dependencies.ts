@@ -167,7 +167,7 @@ const TOOL_DEPENDENCIES: ReadonlyMap<string, ToolDependency> = new Map<string, T
  * but never refuses the call because of it; the tool then falls back to the
  * socket.
  */
-const PREFERS_BRIDGE_TOOLS: ReadonlySet<string> = new Set(['apply_status_effect']);
+const PREFERS_BRIDGE_TOOLS: ReadonlySet<string> = new Set(['apply_status_effect', 'start_combat']);
 
 /** Every `foundry://` resource reads the cache, except the REST diagnostics. */
 const RESOURCE_DEPENDENCIES: ReadonlyMap<string, ToolDependency> = new Map<string, ToolDependency>([

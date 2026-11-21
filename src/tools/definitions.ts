@@ -1700,7 +1700,7 @@ export const combatMutationTools = [
   {
     name: 'start_combat',
     description:
-      'Start a new combat encounter, seeding combatants from tokens: pass explicit tokenIds, or omit them to seed every token on the scene. Defaults to the active scene when sceneId is omitted. The encounter begins at round 1, turn 0, as when the GM clicks Begin Combat in Foundry. Use when: a fight begins and no combat is running. Do not use when: a combat is already active - check get_combat_state first, since this always creates an additional encounter. ' +
+      'Start a new combat encounter, seeding combatants from tokens: pass explicit tokenIds, or omit them to seed every token on the scene. Defaults to the active scene when sceneId is omitted. The encounter begins at round 1, turn 0, as when the GM clicks Begin Combat in Foundry. With the companion module 0.7.0 or later, the combat is created in its browser session, so the game system prepares the combat and its combatants; without it, the combat is created over the socket, and the call is refused when the game system defines combat types of its own, since the browsers would reject that combat. Use when: a fight begins and no combat is running. Do not use when: a combat is already active - check get_combat_state first, since this always creates an additional encounter. ' +
       WRITE_GATE,
     inputSchema: {
       type: 'object',

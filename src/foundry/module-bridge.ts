@@ -92,6 +92,7 @@ export const LEGACY_COMMANDS: readonly string[] = [
 export const COMMAND_SINCE: Readonly<Record<string, string>> = {
   get_actor_stats: '0.6.0',
   toggle_status_effect: '0.6.0',
+  create_combat: '0.7.0',
 };
 
 /**
