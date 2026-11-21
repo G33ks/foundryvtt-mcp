@@ -15,7 +15,13 @@
  * Since 0.6.0, `auth_response` also announces `module: {version, commands}`,
  * so the server only sends commands this module serves. Servers before 2.2.0
  * ignore the field.
+ *
+ * Since 0.7.0, a command that throws a {@link CommandRefusal} is answered
+ * `{id, error, code, refusal: true}`: `error` stays the message, so servers
+ * before 3.1.0 read it as before.
  */
+
+import { CommandRefusal } from './refusal.js';
 
 const WS_OPEN = 1;
 const DEFAULT_RECONNECT_INTERVAL_MS = 5000;
@@ -35,6 +41,21 @@ const CLOSE_UNAUTHORIZED = 4401;
  * @property {string} version  this module's version
  * @property {string[]} commands  the commands it serves
  */
+
+/**
+ * The response to a command that threw: its message, marked as a refusal
+ * when it is a {@link CommandRefusal}.
+ *
+ * @param {string} id
+ * @param {unknown} error
+ */
+export function errorResponse(id, error) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (error instanceof CommandRefusal) {
+    return { id, error: message, code: error.code, refusal: true };
+  }
+  return { id, error: message };
+}
 
 export class BridgeTransport {
   /**
@@ -125,7 +146,7 @@ export class BridgeTransport {
       const result = await this.onCommand(msg.type, msg.params ?? {});
       this.send({ id: msg.id, result });
     } catch (error) {
-      this.send({ id: msg.id, error: error instanceof Error ? error.message : String(error) });
+      this.send(errorResponse(msg.id, error));
     }
   }
 
@@ -189,7 +210,7 @@ export class BridgeTransport {
     socket.close(CLOSE_UNAUTHORIZED, 'unauthorized');
   }
 
-  /** @param {{id: string, result?: unknown, error?: string}} response */
+  /** @param {{id: string, result?: unknown, error?: string, code?: string, refusal?: true}} response */
   send(response) {
     if (!this.authenticated) {
       console.warn('FoundryVTT MCP Bridge | cannot respond, bridge not connected');

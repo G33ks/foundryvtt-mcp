@@ -8,6 +8,7 @@ import {
   toggleStatusEffect,
   withDialogsClosed,
 } from '../../../foundry-module/scripts/commands/toggle-status-effect.js';
+import { CommandRefusal } from '../../../foundry-module/scripts/refusal.js';
 
 const ACTOR = 'actorAAAAAAAAAAA';
 const SCENE = 'sceneSSSSSSSSSSS';
@@ -230,14 +231,17 @@ describe('toggle_status_effect module command', () => {
     expect(hooks.size).toBe(0);
   });
 
-  it('closes a dialog the system opens, and fails at once with nothing created', async () => {
+  it('closes a dialog the system opens, and refuses at once with nothing created', async () => {
     const actor = fakeActor();
     stubWorld(actor);
     asksFor = 'level';
 
-    await expect(toggle('resting', true)).rejects.toThrow(
+    const refusal = toggle('resting', true);
+    await expect(refusal).rejects.toThrow(
       "The game system asked for input when creating status 'resting' (dialog 'Enter a value: Example status'); nothing was created. Pass the value it expects in createOptions.",
     );
+    await expect(refusal).rejects.toBeInstanceOf(CommandRefusal);
+    await expect(refusal).rejects.toMatchObject({ code: 'input-required' });
     expect(actor.effects.keys()).toEqual([]);
     expect(hooks.size).toBe(0);
   });
@@ -268,9 +272,12 @@ describe('toggle_status_effect module command', () => {
     stubWorld(actor);
     asksOnRemove = true;
 
-    await expect(toggle('resting', false)).rejects.toThrow(
+    const failure = toggle('resting', false);
+    await expect(failure).rejects.toThrow(
       "The game system asked for input when removing status 'resting' (dialog 'Confirm removal'); removed: nothing.",
     );
+    // Not a refusal: a removal may have changed something before the dialog.
+    await expect(failure).rejects.not.toBeInstanceOf(CommandRefusal);
     expect(actor.effects.keys()).toEqual([FIXED_ID]);
     expect(hooks.size).toBe(0);
   });
@@ -388,9 +395,11 @@ describe('toggle_status_effect module command', () => {
   it('lists the valid ids with their names for an unknown status', async () => {
     const actor = fakeActor();
     stubWorld(actor);
-    await expect(toggle('nope', true)).rejects.toThrow(
+    const refusal = toggle('nope', true);
+    await expect(refusal).rejects.toThrow(
       'Unknown status effect "nope". Valid ids: resting (Resting), dazed (Dazed)',
     );
+    await expect(refusal).rejects.toMatchObject({ code: 'unknown-status' });
     expect(create).not.toHaveBeenCalled();
   });
 
@@ -408,15 +417,18 @@ describe('toggle_status_effect module command', () => {
     await expect(toggle('dazed', true)).resolves.toMatchObject({ changed: true });
   });
 
-  it('refuses a target it cannot resolve, and malformed parameters', async () => {
+  it('refuses a target it cannot resolve, and fails on malformed parameters', async () => {
     stubWorld(fakeActor());
-    await expect(
-      toggleStatusEffect({
-        target: { sceneId: SCENE, tokenId: 'missingTTTTTTTTT' },
-        statusId: 'dazed',
-      }),
-    ).rejects.toThrow(`Token missingTTTTTTTTT not found on scene ${SCENE}`);
-    await expect(toggleStatusEffect({ target: {}, statusId: 'dazed' })).rejects.toThrow(/target/);
+    const refusal = toggleStatusEffect({
+      target: { sceneId: SCENE, tokenId: 'missingTTTTTTTTT' },
+      statusId: 'dazed',
+    });
+    await expect(refusal).rejects.toThrow(`Token missingTTTTTTTTT not found on scene ${SCENE}`);
+    await expect(refusal).rejects.toMatchObject({ code: 'not-found' });
+    // Malformed parameters are the server's mistake, not a refusal.
+    const failure = toggleStatusEffect({ target: {}, statusId: 'dazed' });
+    await expect(failure).rejects.toThrow(/target/);
+    await expect(failure).rejects.not.toBeInstanceOf(CommandRefusal);
     await expect(toggleStatusEffect({ target: { actorId: ACTOR } })).rejects.toThrow(/statusId/);
     await expect(
       toggleStatusEffect({ target: { actorId: ACTOR }, statusId: 'dazed', active: 'yes' }),

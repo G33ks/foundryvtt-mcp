@@ -11,7 +11,8 @@
 import net from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketServer, WebSocket as WsClient } from 'ws';
-import { BridgeTransport } from '../../../foundry-module/scripts/transport.js';
+import { CommandRefusal } from '../../../foundry-module/scripts/refusal.js';
+import { BridgeTransport, errorResponse } from '../../../foundry-module/scripts/transport.js';
 import { ModuleBridge } from '../module-bridge.js';
 
 const ORIGIN = 'http://localhost:30000';
@@ -209,6 +210,41 @@ describe('companion transport module announcement', () => {
 
     expect(sent).toBeLessThan(4096);
     expect(bridge.moduleAnnouncement().commands).toHaveLength(100);
+  });
+});
+
+describe('companion transport command errors', () => {
+  it('marks a CommandRefusal and keeps error a string, for servers before 3.1.0', async () => {
+    let received: Record<string, unknown>[] = [];
+    const url = await fakeServer(async (client) => {
+      received = client.received;
+      client.send({ type: 'auth_challenge', protocol: 1, nonce: NONCE });
+      await client.next();
+      client.send({ type: 'auth_ok', proof: 'Ps' });
+      client.send({ id: '1', type: 'get_targets', params: {} });
+      client.send({ id: '2', type: 'set_pause', params: {} });
+    });
+    const onCommand = vi.fn(async (type: string) => {
+      if (type === 'get_targets') {
+        throw new CommandRefusal('not-found', 'Token t1 not found');
+      }
+      throw new Error('Canvas is not ready');
+    });
+    transportFor(
+      url,
+      async () => ({ nonce: 'Nc', clientProof: 'Pc', serverProof: 'Ps' }),
+      onCommand,
+    );
+
+    await waitFor(() => received.length === 3);
+    expect(received.slice(1)).toEqual([
+      { id: '1', error: 'Token t1 not found', code: 'not-found', refusal: true },
+      { id: '2', error: 'Canvas is not ready' },
+    ]);
+  });
+
+  it('answers a thrown non-Error with its text', () => {
+    expect(errorResponse('7', 'plain')).toEqual({ id: '7', error: 'plain' });
   });
 });
 
