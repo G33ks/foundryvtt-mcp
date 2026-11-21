@@ -1,11 +1,17 @@
 # Changelog
 
-## Unreleased
+## 3.0.1 — 2026-11-21
+
+Bug-fix release, no breaking change. Companion module unchanged: **0.6.0** (`bridge-v0.6.0`) recommended.
 
 ### Fixed
 
 - A deletion whose answer from FoundryVTT never arrives no longer reports a failure FoundryVTT did not have. This was a known limitation of 3.0.0: FoundryVTT deleted the document, but the tool reported an error after the timeout (`FOUNDRY_TIMEOUT`, 10 s by default) and the cached world kept the document until `refresh_world_data`. After that timeout, `delete_scene`, `delete_world_actor`, `end_combat`, `delete_journal_entry`, `delete_macro`, `delete_roll_table` and `delete_playlist` now read the document back once: when it is gone, the tool succeeds with a note saying so and the cached world drops it, and for a scene, whose combats FoundryVTT deletes with it, the cached world is also marked stale until `refresh_world_data`; when it is still there, the tool reports the timeout as before, and when the read fails too, the timeout with the read's failure. The deletion is never sent twice. Why the answer goes missing is still unknown.
 - The log tells a lost answer from a late one and from a silent connection. An answer from FoundryVTT that arrives after its timeout was dropped without a trace; it is now logged as a warning with the action, the document type, the id and the delay, and still changes nothing else. A timeout error now ends with the age of FoundryVTT's last ping, whether the connection was up and how many requests were waiting, as in `[last ping: 4210 ms ago; socket: connected; pending requests: 1]`.
+
+### Known limitations
+
+- A combat created by `start_combat` may not show in the combat tracker. Some game systems define a combat's own data in code that only the browsers load; the connector creates the combat on the server without that data, and the browsers reject it. The fix needs a future version of the companion module.
 
 ## 3.0.0 — 2026-11-14
 
