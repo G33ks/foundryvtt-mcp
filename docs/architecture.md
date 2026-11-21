@@ -57,6 +57,8 @@ The companion module (`foundryvtt-mcp-bridge`) runs only in that invisible sessi
 
 From version 0.6.0 the module announces its version and the commands it serves when it connects; the connector sends it no command it did not announce. An older module is sent only the commands every 0.5 version serves, and a newer command is refused at once with a clear message. A tool that needs the module waits up to 10 seconds for one still connecting. Without the module, those tools say they are unavailable and everything else keeps working.
 
+From version 0.7.0 the module marks an expected refusal (an id that names nothing, an unknown status or type, input only a person could give) with `refusal: true` beside its error message, and the connector reports it as a refusal rather than a failure; older connectors read the message as before. The same version creates combats for `start_combat` (`create_combat`), so the game system prepares them; the connector then waits up to 2 seconds for its cache to show the new combat.
+
 ## The optional REST API module
 
 With `FOUNDRY_API_KEY` set, the connector also talks over HTTP to the Foundry Local REST API module, a separate project: see [Configuration](configuration.md#the-optional-rest-api-module).
