@@ -785,7 +785,7 @@ Parameters:
 | [`next_turn`](#next_turn) | Write | FoundryVTT connection |
 | [`end_combat`](#end_combat) | Write | FoundryVTT connection |
 | [`set_initiative`](#set_initiative) | Write | FoundryVTT connection |
-| [`start_combat`](#start_combat) | Write | FoundryVTT connection |
+| [`start_combat`](#start_combat) | Write | FoundryVTT connection; companion module when connected |
 
 ### `get_combat_state`
 
@@ -819,7 +819,7 @@ Parameters:
 
 ### `start_combat`
 
-Start a new combat encounter, seeding combatants from tokens: pass explicit tokenIds, or omit them to seed every token on the scene. Defaults to the active scene when sceneId is omitted. The encounter begins at round 1, turn 0, as when the GM clicks Begin Combat in Foundry. Use when: a fight begins and no combat is running. Do not use when: a combat is already active - check get_combat_state first, since this always creates an additional encounter. WRITE: mutates the live world. Requires FOUNDRY_WRITE_ENABLED=true (default false) and an active Socket.IO connection, and is refused otherwise; Foundry additionally enforces GM/owner permission on the document.
+Start a new combat encounter, seeding combatants from tokens: pass explicit tokenIds, or omit them to seed every token on the scene. Defaults to the active scene when sceneId is omitted. The encounter begins at round 1, turn 0, as when the GM clicks Begin Combat in Foundry. With the companion module 0.7.0 or later, the combat is created in its browser session, so the game system prepares the combat and its combatants; without it, the combat is created over the socket, and when the game system defines combat types of its own, open browsers reject it until each user reloads FoundryVTT (F5); later updates then show live. Use when: a fight begins and no combat is running. Do not use when: a combat is already active - check get_combat_state first, since this always creates an additional encounter. WRITE: mutates the live world. Requires FOUNDRY_WRITE_ENABLED=true (default false) and an active Socket.IO connection, and is refused otherwise; Foundry additionally enforces GM/owner permission on the document.
 
 Parameters:
 

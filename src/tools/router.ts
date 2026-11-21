@@ -709,7 +709,11 @@ export async function routeToolRequest(
         foundryClient,
       );
     case 'start_combat':
-      return handleStartCombat(args as { tokenIds?: string[]; sceneId?: string }, foundryClient);
+      return handleStartCombat(
+        args as { tokenIds?: string[]; sceneId?: string },
+        foundryClient,
+        moduleBridge,
+      );
 
     // Token tools (read) — pure reads over cached worldData, no write gate.
     case 'list_tokens':

@@ -79,6 +79,8 @@ describe('tool dependencies', () => {
     // Goes through the module when one announcing the command is connected, never waits for it.
     expect(needsBridge('apply_status_effect', { tokenId: 't', statusId: 's' })).toBe(false);
     expect(prefersBridge('apply_status_effect')).toBe(true);
+    expect(needsBridge('start_combat', {})).toBe(false);
+    expect(prefersBridge('start_combat')).toBe(true);
     expect(prefersBridge('create_actor_effect')).toBe(false);
     expect(needsBridge('get_users', {})).toBe(false);
   });

@@ -135,6 +135,8 @@ describe('Combat mutation handlers', () => {
       updateCombat: vi.fn(opts.updateCombat ?? (() => ({}))),
       endCombat: vi.fn(opts.endCombat ?? (() => undefined)),
       setCombatantInitiative: vi.fn(opts.setInitiative ?? (() => ({}))),
+      isWriteEnabled: vi.fn(() => true),
+      getWorldData: vi.fn(() => null),
       startCombat: vi.fn(
         opts.startCombat ??
           ((_sceneId: string, combatants: Array<unknown>) => ({
