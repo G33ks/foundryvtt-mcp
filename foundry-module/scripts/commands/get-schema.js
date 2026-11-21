@@ -15,7 +15,8 @@
  *
  * A DataModel field also reports `persisted: false` (computed, never stored:
  * writing it has no effect), and `min`, `max`, `integer` and `positive` when
- * set.
+ * set. A bound that is not a finite number (`Infinity`, `NaN`) is left out:
+ * JSON would turn it into `null`, which reads as a bound.
  *
  * A type the world does not define is a refusal (`unknown-type`).
  */
@@ -47,8 +48,8 @@ function describeField(field, depth) {
   if (field.required !== undefined) out.required = Boolean(field.required);
   if (field.nullable) out.nullable = true;
   if (field.persisted === false) out.persisted = false;
-  if (typeof field.min === 'number') out.min = field.min;
-  if (typeof field.max === 'number') out.max = field.max;
+  if (Number.isFinite(field.min)) out.min = field.min;
+  if (Number.isFinite(field.max)) out.max = field.max;
   if (field.integer === true) out.integer = true;
   if (field.positive === true) out.positive = true;
   if (field.choices) {

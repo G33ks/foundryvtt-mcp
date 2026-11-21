@@ -75,6 +75,22 @@ describe('get_document_schema module command', () => {
     });
   });
 
+  it('leaves out bounds that are not finite numbers', () => {
+    const schema = new SchemaField({
+      top: new NumberField({ initial: 0, min: -Infinity, max: Infinity }),
+      ratio: new NumberField({ initial: 1, min: Number.NaN, max: 2 }),
+    });
+    stubFoundry(() => ({ schema }));
+
+    const { fields } = getDocumentSchema({ documentType: 'Actor', type: 'hero' });
+    expect(fields).toEqual({
+      top: { type: 'Number', initial: 0 },
+      ratio: { type: 'Number', max: 2, initial: 1 },
+    });
+    // Nothing that JSON would turn into a null bound.
+    expect(JSON.stringify(fields)).not.toContain('null');
+  });
+
   it('falls back to the template defaults, with inferred types, when there is no schema', () => {
     stubFoundry(() => ({ pool: { max: 10 } }), {
       Actor: {
