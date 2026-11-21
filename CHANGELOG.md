@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `start_combat` goes through the companion module 0.7.0 or later when it is connected: the combat and its combatants are created in the module's browser session, so the game system prepares them, and the GM sees the combat in the combat tracker at once. The connector waits up to 2 s for its cache to show the new combat. If the combat is created but its combatants or its start fail, it is left in place and the error gives its id.
+- Companion module 0.7.0: `create_combat`; expected refusals (an id that names nothing, an unknown status or type, input only a person could give) are marked as such, and the connector reports them as refusals rather than failures.
+
+### Changed
+
+- Without a module that creates combats, `start_combat` is refused in a world whose game system defines combat types of its own, since the browsers would reject the combat; other worlds keep the previous behaviour.
+- With the companion module 0.7.0, these module errors become refusals: a compendium pack or document not found (`import_compendium_actor`, `create_actor_item` from a compendium), an unknown type (`get_document_schema`), an unknown status, a target that names nothing, or a status that needed input a person would give (`apply_status_effect`). The text is unchanged, without the `Failed to …:` prefix; the code becomes `-32600` instead of `-32603`, and the log records a warning instead of an error. Every other module error stays a failure.
+
+### Fixed
+
+- Companion module 0.7.0: `get_document_schema` no longer reports an infinite bound as `null`; the release `module.json` keeps the committed file's layout.
+
 ## 3.0.1 — 2026-11-21
 
 Bug-fix release, no breaking change. Companion module unchanged: **0.6.0** (`bridge-v0.6.0`) recommended.

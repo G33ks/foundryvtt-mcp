@@ -12,11 +12,12 @@ What the connector has been tried with, and what it needs. "Tried" means a real 
 
 ## The companion module
 
-| Module | With connector 2.2 and 3.0 |
-| :--- | :--- |
-| 0.6.0 | Recommended. |
-| 0.5.x | Works, without the commands added in 0.6.0: `get_actor_stats` and the `createOptions` of `apply_status_effect` are refused at once with a clear message. |
-| before 0.5.0 | Not accepted: it cannot answer the bridge's authentication, so the connection is closed and logged as an older module. |
+| Module | With connector 3.1 | With connector 2.2 and 3.0 |
+| :--- | :--- | :--- |
+| 0.7.0 | Recommended. | Works like 0.6.0: `start_combat` still creates combats over the socket, and the module's refusals read as failures. |
+| 0.6.0 | Works, without `create_combat`: `start_combat` is refused in a world whose game system defines combat types of its own. | Recommended. |
+| 0.5.x | As 0.6.0, and without the commands added in 0.6.0: `get_actor_stats` and the `createOptions` of `apply_status_effect` are refused at once with a clear message. | Works, without the commands added in 0.6.0: `get_actor_stats` and the `createOptions` of `apply_status_effect` are refused at once with a clear message. |
+| before 0.5.0 | Not accepted: it cannot answer the bridge's authentication, so the connection is closed and logged as an older module. | Not accepted, likewise. |
 
 `status` and the health check show the module's version.
 
@@ -46,6 +47,6 @@ The connector does not depend on a game system: it reads and writes FoundryVTT d
 - **Prepared values.** Values a system computes (totals, modifiers) are not in the stored data: `get_actor_stats`, through the companion module, returns the actor as the system prepared it.
 - **Summaries.** `search_actors`, `get_actor_details` and `get_combat_state` show a level, hit points and armour class only when the actor stores them at the common paths their descriptions name; with other systems they show fewer fields. `get_actor_stats` and `get_document_schema` cover any system.
 - **Status conditions.** With the companion module, `apply_status_effect` goes through the system's own status effects; some systems ask for a value when a status is created, given in `createOptions`.
-- **Combats.** Some systems define a combat's own data in code that only the browsers load. `start_combat` creates the combat on the server without that data, and the browsers then reject it: it may not show in the combat tracker. The fix needs a future version of the companion module, which can create the combat in the browser.
+- **Combats.** Some systems define a combat's own data, and its combatants', in code that only the browsers load: a combat created on the server without that data is rejected by the browsers. With the companion module 0.7.0 or later, `start_combat` creates the combat in the module's browser session, where the system prepares it. Without it, `start_combat` is refused in a world whose system defines combat types of its own, and creates the combat on the server otherwise.
 - **Compendiums and rules.** `lookup_rule` and `search_compendium_content` search the journals and compendiums the world has; a system without rules in a compendium has none to find.
 - **Generators.** `generate_npc` and `generate_loot` use built-in lists that do not depend on the world's system.
