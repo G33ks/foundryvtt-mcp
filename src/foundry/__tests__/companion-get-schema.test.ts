@@ -115,5 +115,8 @@ describe('get_document_schema module command', () => {
     expect(() => getDocumentSchema({ documentType: 'Actor', type: 'nope' })).toThrow(
       'Unknown Actor type: "nope". Valid types for this world: hero, legacy',
     );
+    expect(() => getDocumentSchema({ documentType: 'Actor', type: 'nope' })).toThrow(
+      expect.objectContaining({ name: 'CommandRefusal', code: 'unknown-type' }),
+    );
   });
 });

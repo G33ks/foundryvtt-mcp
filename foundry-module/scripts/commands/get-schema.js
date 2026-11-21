@@ -16,7 +16,11 @@
  * A DataModel field also reports `persisted: false` (computed, never stored:
  * writing it has no effect), and `min`, `max`, `integer` and `positive` when
  * set.
+ *
+ * A type the world does not define is a refusal (`unknown-type`).
  */
+
+import { CommandRefusal } from '../refusal.js';
 
 const MAX_DEPTH = 8;
 
@@ -134,7 +138,8 @@ export function getDocumentSchema({ documentType, type }) {
 
   const validTypes = game.documentTypes[documentType] ?? [];
   if (!validTypes.includes(type)) {
-    throw new Error(
+    throw new CommandRefusal(
+      'unknown-type',
       `Unknown ${documentType} type: "${type}". Valid types for this world: ${validTypes.filter((t) => t !== 'base').join(', ')}`,
     );
   }

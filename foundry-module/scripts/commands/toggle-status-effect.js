@@ -10,8 +10,9 @@
  *
  * Nobody can answer a dialog in this page: one rendered while creating or
  * removing is closed at once. When nothing was created because of it, the
- * command fails with the dialog's title, so the caller can pass the value in
- * `createOptions`.
+ * command refuses (`input-required`) with the dialog's title, so the caller
+ * can pass the value in `createOptions`. An unknown status (`unknown-status`)
+ * and a target that names nothing (`not-found`) are refusals too.
  *
  * The target is a world actor or one token's actor (see actor-target.js): on
  * an unlinked token, the synthetic actor's effects go to that token's delta.
@@ -29,6 +30,7 @@
  */
 
 import { isActorTarget, resolveActorTarget } from '../actor-target.js';
+import { CommandRefusal } from '../refusal.js';
 
 /**
  * The configured status effects as `[id, status]` pairs. `CONFIG.statusEffects`
@@ -112,11 +114,14 @@ export async function toggleStatusEffect(params) {
   const status = statuses.find(([id]) => id === statusId)?.[1];
   if (!status) {
     const valid = statuses.map(([id, s]) => `${id} (${localized(s.name)})`).join(', ');
-    throw new Error(`Unknown status effect "${statusId}". Valid ids: ${valid || '(none)'}`);
+    throw new CommandRefusal(
+      'unknown-status',
+      `Unknown status effect "${statusId}". Valid ids: ${valid || '(none)'}`,
+    );
   }
 
   const resolved = resolveActorTarget(target);
-  if ('error' in resolved) throw new Error(resolved.error);
+  if ('error' in resolved) throw new CommandRefusal('not-found', resolved.error);
   const { actor } = resolved;
 
   const single = singleStatusEffectIds(actor, statusId);
@@ -146,7 +151,8 @@ export async function toggleStatusEffect(params) {
     });
     const effectId = typeof created?.id === 'string' ? created.id : null;
     if (effectId === null && dialogs.length > 0) {
-      throw new Error(
+      throw new CommandRefusal(
+        'input-required',
         `The game system asked for input when creating status '${statusId}' (dialog '${dialogs[0]}'); nothing was created. Pass the value it expects in createOptions.`,
       );
     }
