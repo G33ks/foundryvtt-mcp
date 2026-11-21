@@ -11,6 +11,7 @@ import {
   packageBridge,
   parseTag,
   releaseManifest,
+  releaseManifestText,
   ZIP_NAME,
 } from '../package-bridge.js';
 
@@ -154,6 +155,31 @@ describe('packageBridge', () => {
     }
     expect(entries.get('scripts/main.js')).toEqual(
       readFileSync(join(repoRoot, 'foundry-module', 'scripts', 'main.js')),
+    );
+  });
+
+  it('keeps the committed layout: only the version and download lines differ', () => {
+    outDir = mkdtempSync(join(tmpdir(), 'bridge-package-'));
+    const tag = `bridge-v${committed.version}-rc.1`;
+    packageBridge({ repoRoot, outDir, tag });
+
+    const committedLines = readFileSync(
+      join(repoRoot, 'foundry-module', 'module.json'),
+      'utf8',
+    ).split('\n');
+    const attachedLines = readFileSync(join(outDir, 'module.json'), 'utf8').split('\n');
+    expect(attachedLines).toHaveLength(committedLines.length);
+    const changed = attachedLines.filter((line, i) => line !== committedLines[i]);
+    expect(changed).toEqual([
+      expect.stringMatching(/^\s+"version": "[^"]+-rc\.1",$/),
+      expect.stringMatching(/^\s+"download": "[^"]+\/bridge-v[^"]+-rc\.1\/[^"]+",$/),
+    ]);
+  });
+
+  it('refuses a layout it cannot rewrite in place', () => {
+    const manifest = { ...committed, version: '9.9.9' };
+    expect(() => releaseManifestText(JSON.stringify(committed), manifest)).toThrow(
+      /committed layout/,
     );
   });
 
