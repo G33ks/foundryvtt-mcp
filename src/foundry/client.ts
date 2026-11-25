@@ -5072,7 +5072,7 @@ export class FoundryClient {
   // ==========================================================================
 
   /**
-   * Reads a world setting by key (e.g. "cyberpunk-red-core.customSetting").
+   * Reads a world setting by key (e.g. "my-system.customSetting").
    */
   getWorldSetting(key: string): {
     key: string;
@@ -5448,7 +5448,7 @@ export class FoundryClient {
   // ==========================================================================
 
   /**
-   * Resolves a Data-relative asset path (e.g. "assets/cyberpunk/maps/v1/x.jpg")
+   * Resolves a Data-relative asset path (e.g. "assets/maps/forest.webp")
    * against the configured `dataPath`, guarding against path traversal
    * outside the Data directory. Throws if `dataPath` is not configured —
    * every caller needs it for the same reason (reading a real file).
@@ -5509,7 +5509,7 @@ export class FoundryClient {
    * grid when scenes are built by hand.
    *
    * @param name - Scene display name
-   * @param backgroundSrc - Data-relative path to the background image (e.g. "assets/cyberpunk/maps/v1/x.jpg")
+   * @param backgroundSrc - Data-relative path to the background image (e.g. "assets/maps/forest.webp")
    * @param options - grid size/type/distance/units, padding, explicit width/height, activate-on-create
    * @returns the newly created scene document
    */
